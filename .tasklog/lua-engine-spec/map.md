@@ -37,6 +37,7 @@ Settled in charting (grilling with the user):
 - [Error model, pcall and debug library scope](tickets/08-error-model-pcall-and-debug-library-scope.md): Errors are pending-state plus in-loop unwinding with no exceptions on common paths (throw only as an ergonomic fallback caught outside the loop); PUC-literal message text; full `debug` library; two source-generated loop variants for hook cost.
 - [Test harness and waiver policy](tickets/09-test-harness-and-waiver-policy.md): Pinned unmodified 5.4.9 suite, one test per file plus CLI `all.lua` run, no managed `T` (`api.lua` waived), reason-coded waiver manifest applied as overlays, reference 5.4.9 built in CI for differential testing, tiered milestones, ratchet CI via `required-files`.
 - [Native AOT, trimming and IL-compilation backend](tickets/10-native-aot-trimming-and-il-compilation-backend.md): Core is AOT/trim-safe with no dynamic code; any IL backend is a separate optional package gated on IsDynamicCodeSupported and not committed to by the spec; AOT verified by a CI Native AOT CLI run on a suite subset; Lua-to-C# AOT compilation out of scope.
+- [JIT MinOpts thresholds and detecting them in CI](tickets/11-jit-minopts-thresholds-and-detecting-them-in-ci.md): Retail JIT hard-codes five MinOpts limits (60000 IL bytes, 20000 IL instrs, 2000 blocks, 2000 locals, 8000 local refs; unchanged .NET 8–11, not configurable); detect via JitDisasmSummary or MethodLoadVerbose; AggressiveOptimization does not bypass them; an 85-opcode loop is only 20–40% of each limit; instr count/local refs trip before IL size, and a silent inlining cliff sits at 921 locals.
 
 ## Not yet specified
 
@@ -54,3 +55,4 @@ Settled in charting (grilling with the user):
 - [Bytecode compatibility](map.md): `string.dump` and loading precompiled binary chunks are not required; the engine need not read or write PUC bytecode.
 - No numeric performance gate (user decision): performance shapes design choices but is not a pass/fail target.
 - Building the engine: the implementation is a separate, later effort; this map ends at the build spec.
+- Ahead-of-time Lua-to-C# compilation: source-generating C# from Lua scripts at build time is excluded; it needs a second front-end and its own semantics-parity story, beyond a spec for the interpreter engine (decided in [Native AOT, trimming and IL-compilation backend](tickets/10-native-aot-trimming-and-il-compilation-backend.md)).
