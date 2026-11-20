@@ -166,6 +166,12 @@ internal sealed class Coroutine
     /// <summary>The source line of the instruction that killed this coroutine's top Frame, and the Frame depth it belongs to (the saved pc is stale for VM-detected errors).</summary>
     public int FaultLine, FaultDepth;
 
+    /// <summary>Set by <c>RaiseInLoop</c> when the dispatch loop must continue at <c>ResumeFrame</c>/<c>ResumeTop</c> after an error was unwound in place.</summary>
+    public bool Unwound;
+
+    /// <summary>An error found by a helper that returns a failure code instead of throwing (see <c>RaiseDeferred</c>).</summary>
+    public LuaException? PendingError;
+
     /// <summary>True when the traced loop must run: a hook is set and not currently inside the hook function.</summary>
     public bool Traced => HookMask != 0 && AllowHook;
 

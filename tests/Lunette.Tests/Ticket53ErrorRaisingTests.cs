@@ -174,6 +174,26 @@ public class Ticket53ErrorRaisingTests
     }
 
     [Fact]
+    public void Failures_unwound_in_the_loop_deliver_a_variable_number_of_results_to_the_next_call()
+    {
+        Assert.Equal("""
+            end	false	c:1: attempt to index a nil value (global 'q')
+            end	false	c:1: attempt to perform arithmetic on a nil value (global 'q')
+            end	false	c:1: attempt to call a nil value (global 'q')
+            end	false	c:1: attempt to index a nil value (global 'q')
+            2	false	c:1: attempt to call a nil value (global 'q')
+
+            """.Replace("\r\n", "\n"), Run("""
+            local function try(code) return pcall(load(code, '=c')) end
+            print('end', try("return q.x"))
+            print('end', try("return q + 1"))
+            print('end', try("return q()"))
+            print('end', try("q.x = 1"))
+            print(select('#', try("local a = q() return a")), try("local a = q() return a"))
+            """));
+    }
+
+    [Fact]
     public void Error_values_of_other_types_pass_through_unchanged()
     {
         Assert.Equal("true\ttrue\ttrue\n", Run("""

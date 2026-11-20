@@ -133,12 +133,13 @@ internal static class DebugLib
     {
         co.FaultLine = 0;
         if (co.Depth == 0) return;
-        string prefix = ChunkId(co.Frames[co.Depth - 1]!.Closure.Proto.ChunkName) + ":";
+        string chunk = co.Frames[co.Depth - 1]!.Closure.Proto.ChunkDisplay;
         string m = ex.Message;
-        if (!m.StartsWith(prefix, StringComparison.Ordinal)) return;
-        int j = prefix.Length;
+        int plen = chunk.Length + 1;
+        if (m.Length < plen || m[chunk.Length] != ':' || !m.AsSpan(0, chunk.Length).SequenceEqual(chunk)) return;
+        int j = plen;
         while (j < m.Length && char.IsAsciiDigit(m[j])) j++;
-        if (j > prefix.Length && j < m.Length && m[j] == ':' && int.TryParse(m.AsSpan(prefix.Length, j - prefix.Length), out int line))
+        if (j > plen && j < m.Length && m[j] == ':' && int.TryParse(m.AsSpan(plen, j - plen), out int line))
         {
             co.FaultLine = line;
             co.FaultDepth = co.Depth;
