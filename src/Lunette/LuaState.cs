@@ -109,7 +109,12 @@ public sealed partial class LuaState : IDisposable
         if (_trampolines.TryGetValue(fn, out LuaClosure? cl)) return cl;
         var env = new LuaTable();
         env.Set(LuaValue.FromString(Strings.FromUtf16(name)), LuaValue.FromObject(fn));
-        byte[] src = name == "pcall" ? "return pcall(...)"u8.ToArray() : "return xpcall(...)"u8.ToArray();
+        byte[] src = name switch
+        {
+            "pcall" => "return pcall(...)"u8.ToArray(),
+            "xpcall" => "return xpcall(...)"u8.ToArray(),
+            _ => "return host(...)"u8.ToArray(),
+        };
         cl = Load(src, "=(" + name + ")", LuaValue.FromTable(env));
         _trampolines[fn] = cl;
         return cl;

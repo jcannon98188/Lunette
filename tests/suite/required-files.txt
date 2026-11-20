@@ -14,3 +14,4 @@ constructs.lua
 goto.lua
 heavy.lua
 big.lua
+coroutine.lua

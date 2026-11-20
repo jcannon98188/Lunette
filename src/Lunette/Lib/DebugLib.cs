@@ -89,7 +89,8 @@ internal static class DebugLib
         for (int i = co.Depth - 1; i >= 0; i--)
         {
             Frame fr = co.Frames[i]!;
-            list.Add(new Level(i, LuaValue.FromObject(fr.Closure)));
+            // A protected call whose __close handlers are running has already unwound: its callee is gone, the handlers' caller is the pcall.
+            if (!fr.Closing) list.Add(new Level(i, LuaValue.FromObject(fr.Closure)));
             if (inHook && i == co.HookFrameIndex && !co.HookBuiltin.IsNil) list.Add(new Level(-1, co.HookBuiltin));
             if (fr.PcallKind != 0) list.Add(new Level(-1, Lookup(state, "", fr.PcallKind == 2 ? "xpcall" : "pcall")));
         }

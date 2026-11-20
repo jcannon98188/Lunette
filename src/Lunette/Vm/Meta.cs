@@ -82,6 +82,7 @@ internal static class Meta
     {
         if (!mc.HasEv || mc.Fn.Ref is LuaFunction) return;
         if (mc.Fn.Ref is LuaTable { Metatable: { } mt } && !mt.GetTagMethod(TagMethod.Call).IsNil) return;
+        if (mc.Fn.Ref is LuaUserdata { Metatable: { } umt } && !umt.GetTagMethod(TagMethod.Call).IsNil) return;
         throw LuaErrors.Error($"attempt to call a {ObjTypeName(mc.Fn)} value (metamethod '{TagMethods.Name(mc.Ev)[2..]}')");
     }
 
@@ -332,9 +333,13 @@ internal static class Meta
 
     // ---- concatenation ----
 
-    public static LuaValue Concat(LuaState state, LuaValue a, LuaValue b, Proto? p, int pc)
+    public static LuaValue Concat(LuaState state, LuaValue a, LuaValue b, Proto? p, int pc) =>
+        CallMeta(state, PrepareConcat(state, a, b, p, pc));
+
+    /// <summary>Resolves <c>a .. b</c>: a finished string, or the __concat handler for the VM loop to call as a Frame.</summary>
+    public static MetaCall PrepareConcat(LuaState state, LuaValue a, LuaValue b, Proto? p, int pc)
     {
-        if ((a.IsString || a.IsNumber) && (b.IsString || b.IsNumber)) return StringConv.Concat(state, a, b);
+        if ((a.IsString || a.IsNumber) && (b.IsString || b.IsNumber)) return MetaCall.Done(StringConv.Concat(state, a, b));
         LuaValue tm = GetTagMethod(state, a, TagMethod.Concat);
         if (tm.IsNil) tm = GetTagMethod(state, b, TagMethod.Concat);
         if (tm.IsNil)
@@ -342,7 +347,7 @@ internal static class Meta
             LuaValue bad = a.IsString || a.IsNumber ? b : a;
             throw new LuaException($"{At(p, pc)}attempt to concatenate a {ObjTypeName(bad)} value");
         }
-        return Interpreter.Call1(state, tm, a, b, default, 2);
+        return new MetaCall(tm, a, b, default, 2, TagMethod.Concat);
     }
 
     // ---- tostring ----

@@ -52,7 +52,9 @@ internal static partial class Interpreter
         if (co.Depth > 0)
         {
             Frame fr = co.Frames[co.Depth - 1]!;
-            ex.Prefix(Where(fr.Closure.Proto, fr.Pc - 1));
+            // The trampoline that lets pcall protect a host function is not a script position (the host function is the caller).
+            if (fr.Closure.Proto.ChunkName == "=(host)") ex.WantsPosition = false;
+            else ex.Prefix(Where(fr.Closure.Proto, fr.Pc - 1));
         }
         else ex.WantsPosition = false;
     }
@@ -67,19 +69,9 @@ internal static partial class Interpreter
         {
             Frame fr = co.Frames[i]!;
             if (fr.PcallKind == 0) continue;
-            if (fr.PcallKind == 2) value = RunHandler(state, co, fr.Handler, value);
-            int dst = fr.PcallBase;
-            int wanted = fr.Wanted;
-            value = CloseTbcOnError(state, co, fr.FuncIdx, value);
-            co.Close(fr.FuncIdx);
-            co.Depth = i;
-            var r = co.Stack;
-            r[dst] = LuaValue.FromBoolean(false);
-            r[dst + 1] = value;
-            if (wanted < 0) co.ResumeTop = dst + 2;
-            else for (int j = 2; j < wanted; j++) r[dst + j] = default;
-            co.ResumeFrame = co.Frames[i - 1];
-            co.RaisingBuiltin = default;
+            // A failing __close handler of this very call replaces the error; the message handler already ran for the first one.
+            if (fr.PcallKind == 2 && !fr.Closing) value = RunHandler(state, co, fr.Handler, value);
+            ContinueUnwind(state, co, i, value);
             return true;
         }
         return false;
@@ -174,6 +166,12 @@ internal static partial class Interpreter
                     && nargs - fixedArgs >= (inner.Kind == BuiltinKind.Xpcall ? 2 : 1))
                 {
                     cl = state.Trampoline(inner, inner.Kind == BuiltinKind.Pcall ? "pcall" : "xpcall");
+                    fn = LuaValue.FromObject(cl);
+                }
+                if (cl is null && fn.Ref is BuiltinFunction { Kind: BuiltinKind.Host } hostFn)
+                {
+                    // A host function may yield, so it runs under a Lua Frame (like a C function called by lua_pcallk).
+                    cl = state.Trampoline(hostFn, "host");
                     fn = LuaValue.FromObject(cl);
                 }
                 if (cl is null) return Special.None;

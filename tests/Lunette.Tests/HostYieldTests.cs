@@ -94,6 +94,11 @@ public class HostYieldTests
     {
         var state = new LuaState();
         state.Register("hostYield", (ref CallContext ctx) => ctx.Yield());
-        Assert.Equal("false\tattempt to yield across a C-call boundary\n", Run(state, "print(pcall(hostYield))"));
+        // Under a pcall in the main thread the host function now runs yieldable, so the error is the main thread's.
+        Assert.Equal("false\tattempt to yield from outside a coroutine\n", Run(state, "print(pcall(hostYield))"));
+        // table.sort calls its comparator on a nested loop: inside a coroutine that is a real C-call boundary.
+        Assert.Equal("false\tattempt to yield across a C-call boundary\n", Run(state, """
+            print(coroutine.wrap(function() return pcall(table.sort, {3, 2, 1}, hostYield) end)())
+            """));
     }
 }

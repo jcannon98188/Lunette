@@ -96,7 +96,7 @@ internal static class CoroutineLib
             // Like auxwrap: a string error gets the position of the caller of the wrapper.
             if (res[0].Ref is string) ex.WantsPosition = true;
             throw ex;
-        }))];
+        }) { Collectable = true })];
     }
 
     private static LuaValue[] Close(LuaState state, ReadOnlySpan<LuaValue> args)
