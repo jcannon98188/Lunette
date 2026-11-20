@@ -873,6 +873,7 @@ internal sealed class LuaCompiler
             case Tok.Function:
                 Advance();
                 FunctionBody(target, line, false);
+                _openIdx = -1;
                 return;
             case Tok.String:
                 Emit(Instruction.ABx(OpCode.LoadK, target, AddConst(LuaValue.FromString(_tok.Str))), line);

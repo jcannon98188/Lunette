@@ -305,7 +305,6 @@ internal static class StringLib
                     b.Append((byte)'\\');
                     b.Append(c);
                 }
-                else if (c == '\r') AppendAscii(ref b, "\\r");
                 else if (c == 0 || c < 32 || c == 127)
                 {
                     bool nextDigit = i + 1 < s.Length && char.IsAsciiDigit((char)s[i + 1]);
