@@ -42,9 +42,11 @@ internal sealed class StringCache
     {
         if (data.Length > LuaString.MaxShortLength) return LuaString.Create(data);
         if (data.Length == 0) return LuaString.Empty;
-        int set = (LuaString.ComputeHash(data) & _setMask) * _ways;
-        if (Find(set, data, out LuaString found)) return found;
-        LuaString created = LuaString.Create(data);
+        if (data.Length == 1) return LuaString.SingleByte(data[0]);
+        int hash = LuaString.ComputeHash(data);
+        int set = (hash & _setMask) * _ways;
+        if (Find(set, hash, data, out LuaString found)) return found;
+        LuaString created = LuaString.CreateHashed(data, hash);
         Insert(set, created);
         return created;
     }
@@ -53,20 +55,22 @@ internal sealed class StringCache
     public LuaString Intern(LuaString s)
     {
         if (s.Length > LuaString.MaxShortLength || s.Length == 0) return s;
-        int set = (LuaString.ComputeHash(s.Bytes) & _setMask) * _ways;
-        if (Find(set, s.Bytes, out LuaString found)) return found;
+        int hash = s.Hash;
+        int set = (hash & _setMask) * _ways;
+        if (Find(set, hash, s.Bytes, out LuaString found)) return found;
         Insert(set, s);
         return s;
     }
 
     public LuaString FromUtf16(ReadOnlySpan<char> text) => Intern(LuaString.FromUtf16(text));
 
-    private bool Find(int set, ReadOnlySpan<byte> data, out LuaString found)
+    private bool Find(int set, int hash, ReadOnlySpan<byte> data, out LuaString found)
     {
         for (int w = 0; w < _ways; w++)
         {
             LuaString s = _slots[set + w];
-            if (!s.IsDefault && s.Length == data.Length && s.Bytes.SequenceEqual(data))
+            // Cached strings always carry their hash (set at creation or by Intern(LuaString)), so it is a cheap reject.
+            if (!s.IsDefault && s.Length == data.Length && s.CachedHash == hash && s.Bytes.SequenceEqual(data))
             {
                 found = s;
                 return true;

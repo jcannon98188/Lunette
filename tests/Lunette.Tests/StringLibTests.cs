@@ -24,6 +24,30 @@ public class StringLibTests
     [InlineData("""print(string.len("a\0b"), ("x"):len(), string.len(123))""", "3\t1\t3")]
     public void Basic_functions(string src, string expected) => Assert.Equal(expected + "\n", Run(src));
 
+    [Theory]
+    [InlineData("""print(("aXbXXc"):gsub("X", "-"))""", "a-b--c\t3")]
+    [InlineData("""print(("aXbXXc"):gsub("XX", "[%0]"))""", "aXb[XX]c\t1")]
+    [InlineData("""print(("abab"):gsub("ab", "%1%1", 1))""", "ababab\t1")]
+    [InlineData("""print(("abc"):gsub("z", "-"))""", "abc\t0")]
+    [InlineData("""print(("aXbX"):gsub("X", {X = "yy"}))""", "ayybyy\t2")]
+    [InlineData("""print(("aXbX"):gsub("X", function(c) return c:lower() end))""", "axbx\t2")]
+    [InlineData("""print(("aXb"):gsub("X", function() return false end))""", "aXb\t1")]
+    [InlineData("""print(("abc"):gsub("", "-"))""", "-a-b-c-\t4")]
+    public void Gsub_plain_patterns(string src, string expected) => Assert.Equal(expected + "\n", Run(src));
+
+    [Fact]
+    public void Single_byte_strings_are_equal_whatever_their_origin() =>
+        Assert.Equal("true\ttrue\ttrue\n", Run("""
+            local t = {}
+            t[("abc"):sub(2, 2)] = 1
+            print(t.b == 1, string.char(98) == ("a" .. "b"):sub(2), ("xbx"):match("b") == "b")
+            """));
+
+    [Fact]
+    public void Format_integer_without_modifiers_covers_extremes() =>
+        Assert.Equal("-9223372036854775808 9223372036854775807 0 -1\n",
+            Run("""print(string.format("%d %i %d %d", math.mininteger, math.maxinteger, 0, -1))"""));
+
     [Fact]
     public void Case_conversion_is_ascii_only() =>
         Assert.Equal("éA\n", Run("""print(("\xC3\xA9a"):upper())"""));

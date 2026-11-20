@@ -272,6 +272,14 @@ internal static class StringLib
                         if (spec.Left) for (int k = 0; k < pad; k++) b.Append((byte)' ');
                         break;
                     }
+                    case 'd' or 'i' when !hasMods:
+                    {
+                        long v = CheckInteger("format", args, arg);
+                        int at = b.Length;
+                        v.TryFormat(b.Reserve(20), out int written, default, CultureInfo.InvariantCulture);
+                        b.Truncate(at + written);
+                        break;
+                    }
                     case 'd':
                     case 'i':
                     case 'u':
@@ -438,12 +446,14 @@ internal static class StringLib
                 int n = CaptureCount(ms, !find);
                 if (find)
                 {
+                    if (ms.Level == 0) return Rets.Two(LuaValue.FromInteger(s1 + 1), LuaValue.FromInteger(e));
                     var res = new LuaValue[2 + ms.Level];
                     res[0] = LuaValue.FromInteger(s1 + 1);
                     res[1] = LuaValue.FromInteger(e);
                     for (int i = 0; i < ms.Level; i++) res[2 + i] = GetCapture(state, ms, i, s1, e);
                     return res;
                 }
+                if (n == 1) return Rets.One(GetCapture(state, ms, 0, s1, e));
                 var caps = new LuaValue[n];
                 for (int i = 0; i < n; i++) caps[i] = GetCapture(state, ms, i, s1, e);
                 return caps;
@@ -481,6 +491,7 @@ internal static class StringLib
                 {
                     gm.Pos = gm.LastMatch = e;
                     int n = CaptureCount(ms, true);
+                    if (n == 1) return Rets.One(GetCapture(st, ms, 0, pos, e));
                     var caps = new LuaValue[n];
                     for (int i = 0; i < n; i++) caps[i] = GetCapture(st, ms, i, pos, e);
                     return caps;
@@ -513,10 +524,21 @@ internal static class StringLib
             int pos = 0, lastMatch = -1;
             long n = 0;
             bool changed = false;
+            bool literal = !anchor && pat.Length > 0 && NoSpecials(pat);
             while (n < maxS)
             {
                 ms.Reprep();
-                int e = ms.Match(pos, pstart);
+                int e;
+                if (literal)
+                {
+                    // A pattern without magic characters: jump straight to the next occurrence instead of trying every position.
+                    int idx = src[pos..].IndexOf(pat);
+                    if (idx < 0) break;
+                    if (idx > 0) b.Append(src.Slice(pos, idx));
+                    pos += idx;
+                    e = pos + pat.Length;
+                }
+                else e = ms.Match(pos, pstart);
                 if (e != -1 && e != lastMatch)
                 {
                     n++;
@@ -574,9 +596,18 @@ internal static class StringLib
         else
         {
             int n = CaptureCount(ms, true);
-            var capsArr = new LuaValue[n];
-            for (int i = 0; i < n; i++) capsArr[i] = GetCapture(state, ms, i, s, e);
-            LuaValue[] res = Interpreter.CallValues(state, repl, capsArr);
+            LuaValue[] res;
+            if (n == 1)
+            {
+                ReadOnlySpan<LuaValue> one = [GetCapture(state, ms, 0, s, e)]; // inline array on the stack, no arguments allocation
+                res = Interpreter.CallValues(state, repl, one);
+            }
+            else
+            {
+                var capsArr = new LuaValue[n];
+                for (int i = 0; i < n; i++) capsArr[i] = GetCapture(state, ms, i, s, e);
+                res = Interpreter.CallValues(state, repl, capsArr);
+            }
             result = res.Length > 0 ? res[0] : default;
         }
         if (result.IsFalsy)
