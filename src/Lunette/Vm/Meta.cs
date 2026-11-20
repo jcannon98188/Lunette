@@ -7,6 +7,11 @@ internal struct MetaCall
 {
     public LuaValue Fn, A, B, C;
     public int N;
+    /// <summary>When set, the operation already produced <see cref="Direct"/> (e.g. string coercion) and no call is needed.</summary>
+    public bool IsDirect;
+    public LuaValue Direct;
+
+    public static MetaCall Done(LuaValue v) => new MetaCall { IsDirect = true, Direct = v };
 
     public MetaCall(LuaValue fn, LuaValue a, LuaValue b, LuaValue c, int n)
     {
@@ -57,7 +62,7 @@ internal static class Meta
         PrepareIndex(state, t, key, p, pc, out LuaValue v, out MetaCall mc) ? CallMeta(state, in mc) : v;
 
     /// <summary>Calls a prepared metamethod on a nested loop and returns its first result.</summary>
-    public static LuaValue CallMeta(LuaState state, in MetaCall mc) => Interpreter.Call1(state, mc.Fn, mc.A, mc.B, mc.C, mc.N);
+    public static LuaValue CallMeta(LuaState state, in MetaCall mc) => mc.IsDirect ? mc.Direct : Interpreter.Call1(state, mc.Fn, mc.A, mc.B, mc.C, mc.N);
 
     /// <summary>Resolves <c>t[key]</c>: returns false with the value, or true with the __index function to call.</summary>
     public static bool PrepareIndex(LuaState state, LuaValue t, LuaValue key, Proto? p, int pc, out LuaValue result, out MetaCall mc)
@@ -169,7 +174,7 @@ internal static class Meta
         // observably the same unless the other operand has its own metamethod, which still wins below).
         if (ev is >= TagMethod.Add and <= TagMethod.IDiv
             && StringConv.TryToNumber(a, out LuaValue na) && StringConv.TryToNumber(b, out LuaValue nb))
-            return Vm.Arith.Binary(OpFor(ev), na, nb, p!, pc);
+            return MetaCall.Done(Vm.Arith.Binary(OpFor(ev), na, nb, p!, pc));
         LuaValue tm = GetTagMethod(state, a, ev);
         if (tm.IsNil) tm = GetTagMethod(state, b, ev);
         if (tm.IsNil)
@@ -203,7 +208,7 @@ internal static class Meta
     public static MetaCall PrepareUnary(LuaState state, TagMethod ev, LuaValue a, Proto? p, int pc)
     {
         if (ev == TagMethod.Unm && StringConv.TryToNumber(a, out LuaValue n))
-            return Vm.Arith.Negate(n, p!, pc);
+            return MetaCall.Done(Vm.Arith.Negate(n, p!, pc));
         LuaValue tm = GetTagMethod(state, a, ev);
         if (tm.IsNil) throw new LuaException($"{At(p, pc)}attempt to perform {OperationName(ev)} on a {a.TypeName} value{VarInfo.DescribeOperand(p, pc, true)}");
         return new MetaCall(tm, a, a, default, 2);

@@ -15,6 +15,11 @@ internal static partial class Interpreter
     private static Frame? StartMeta(LuaState state, Coroutine co, Frame f, in MetaCall mc, Continuation cont, int dest, int pc, Proto proto, out LuaValue result)
     {
         result = default;
+        if (mc.IsDirect)
+        {
+            result = mc.Direct;
+            return null;
+        }
         if (mc.Fn.Ref is not LuaClosure cl)
         {
             result = Meta.CallMeta(state, in mc);
