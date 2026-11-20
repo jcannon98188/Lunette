@@ -33,6 +33,7 @@ Settled in charting (grilling with the user):
 - [String model and the opt-in .NET interop mode](tickets/04-string-model-and-the-opt-in-net-interop-mode.md): One byte-string core, single-allocation headered `byte[]` strings, interned short strings, no intermediate allocations in the string library, zero-copy span-based host API, UTF-8 boundary, ASCII "C" locale; "interop mode" is only boundary helpers, no semantic switch.
 - [Value representation and number tower](tickets/05-value-representation-and-number-tower.md): 16-byte `{object? Ref; long Bits}` value with type derived from Ref; PUC-exact number semantics; PUC-faithful array/node tables (so `#t` matches the reference); PUC-style open/closed upvalues over a growable per-coroutine `Value[]` stack.
 - [Execution architecture and coroutine model](tickets/06-execution-architecture-and-coroutine-model.md): One-pass PUC 5.4 register bytecode (own encoding, no AST); one `switch` loop with hot paths inline and cold paths in helpers; Lua-to-Lua calls are heap frames, metamethods/iterators/pcall yieldable, sort/gsub/load-reader re-entrant and non-yieldable; nested resume with PUC limits (1M stack slots, 200 re-entrancy levels); bytecode `Proto` is the seam for a later backend.
+- [Host API shape](tickets/07-host-api-shape.md): Idiomatic C# host API over one 16-byte `LuaValue`; single-threaded `LuaState`; span-based host-function fast path with opt-in yield/continuations; no-reflection core; best-effort sandbox limits; minimal PUC-compatible CLI.
 
 ## Not yet specified
 
