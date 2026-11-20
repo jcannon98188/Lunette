@@ -43,7 +43,7 @@ var state = new LuaState();
 state.DoString("print('hello from Lua ' .. _VERSION)");
 ```
 
-Capabilities are controlled through `LuaStateOptions` (a library allowlist) and the `ILuaPlatform` abstraction for file, clock and environment access. Output goes to `LuaState.Output`. Scripts can be stopped from any thread with `RequestInterrupt`, and budgets for instructions and memory abort runaway scripts.
+Capabilities are controlled through `LuaStateOptions` (a library allowlist) and the `ILuaPlatform` abstraction for file, clock and environment access. Output goes to `LuaState.Output`. Scripts can be stopped from any thread with `RequestInterrupt`, and budgets for instructions and memory abort runaway scripts. A debug adapter can hook call, return, line and count events with `LuaState.SetHook` and inspect stack levels, locals and upvalues with `TryGetInfo`, `TryGetLocal` and `TryGetUpvalue` (see `docs/host-debug-api.md`).
 
 ## Repository layout
 

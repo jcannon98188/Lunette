@@ -49,6 +49,7 @@ internal static class VarInfo
         switch (i.Op)
         {
             case OpCode.Move:
+            case OpCode.TForMove:
                 return i.B == reg ? null : ObjName(p, setreg, i.B, out name);
             case OpCode.GetGlobal:
                 name = KeyConstName(p, i.C);
@@ -116,6 +117,7 @@ internal static class VarInfo
             case OpCode.ForLoop:
                 return reg >= i.A && reg <= i.A + 3;
             case OpCode.Move:
+            case OpCode.TForMove:
             case OpCode.LoadK:
             case OpCode.LoadKX:
             case OpCode.LoadBool:

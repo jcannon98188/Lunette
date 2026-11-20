@@ -272,6 +272,38 @@ variables), and the `CallValues` argument copy (not on any benchmark path).
 
 Remaining gap: fib and fannkuch at about 2.5x are bound by `Call`/`Return` frame push/pop and the 16-byte value copies.
 
+## After ticket 48
+
+Interleaved wall-clock medians in WSL, 7 rounds for the micro loop and 5 for the macro programs, against the ticket-47 tip (9484cd9). Startup (about 100 ms) is included in both columns.
+
+| Benchmark | Before ms | After ms |
+| --- | ---: | ---: |
+| pairs/ipairs micro (100-element array and hash, 60k rounds) | 995 | 601 |
+| binary-trees | 687 | 661 |
+| fannkuch | 432 | 405 |
+| fib | 381 | 387 |
+| k-nucleotide | 350 | 361 |
+| mandelbrot | 304 | 280 |
+| n-body | 894 | 828 |
+| nsieve | 1277 | 1282 |
+| spectral-norm | 428 | 395 |
+| string-heavy | 238 | 246 |
+
+The micro loop is a -40% change. The macro programs barely iterate with `pairs`, so most of their movement is run-to-run noise on this machine (fib, k-nucleotide, nsieve and string-heavy are within it).
+
+Kept:
+- **Fused generic-for step (`TForMove`).** The compiler still emits the five instructions `Move, Move, Move, Call, TForLoop` (plus the back `Jmp`), but the first `Move` is the new opcode `TForMove`.
+  In the untraced loop, when the iterator is the `next` builtin or the `ipairs` iterator, it runs the whole step in place (`TForFused`): it writes the loop variables, copies the key into the control slot
+  and jumps to the loop body or past `TForLoop` to the `Close`. The jump back goes through the ordinary `Jmp` path, so the poll and collector safepoints are unchanged.
+  Anything unusual (a key not in the table, a non-integer `ipairs` control, a nil hit on a table with an `__index`, a non-table state, any other iterator) changes nothing and falls through to the `Move`, so the builtin bodies report the same errors.
+  `LuaTable.Step` is the non-throwing form of `Next` it uses.
+- **Unchanged by construction.** In traced mode `TForMove` is a plain `Move` and the other four instructions run, so hook instruction counts, call/return hooks and `ftransfer`/`ntransfer` see the same events.
+  The "for iterator" call-site naming (`DebugLib`, `VarInfo`) keys off the `Call` followed by `TForLoop`, which is still there; `VarInfo` treats `TForMove` like `Move`. The to-be-closed fourth value and yields inside iterators go through the same `Tbc`, `Close` and `Call` instructions as before.
+
+No new `Lunette.Unsafe` helpers (`Regs.At`/`Regs.Copy` only), so the safe twin needed nothing new.
+
+Not done: a fused step for `pairs` over tables with `__pairs`/`__index` iterators or for closures (they take the ordinary call path); the remaining cost per iteration is `LuaTable.Step`'s key lookup (hash part) and the 16-byte value copies.
+
 ## Host-to-Lua calls (ticket 49): embedder per-frame pattern
 
 Benchmark: `bench/Lunette.Benchmarks/HostCallBenchmarks.cs` (`dotnet run -c Release --project bench/Lunette.Benchmarks -- --filter "*HostCall*"`) calls a Lua function repeatedly from C#;

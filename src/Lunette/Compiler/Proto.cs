@@ -67,6 +67,7 @@ internal enum OpCode : byte
     GetField,  // R[A] = R[B][K[C]] (K[C] is a string; C <= 255)
     SetField,  // R[A][K[B]] = R[C] (K[B] is a string; B <= 255)
     SelfK,     // R[A+1] = R[B]; R[A] = R[B][K[C]] (K[C] is a string; C <= 255)
+    TForMove,  // the first Move of a generic for's iterator call (R[A] = R[B], B = the loop base). The untraced loop may run next/ipairs steps fused (the Move, Move, Call, TForLoop that follow); otherwise (and when traced) it is a Move.
 }
 
 /// <summary>One 32-bit instruction: op(8) A(8) B(8) C(8); Bx overlays B and C as 16 bits; Ax is the upper 24 bits.</summary>
@@ -118,6 +119,15 @@ internal sealed class Proto
     /// <summary>Source line of the function keyword (0 for a main chunk) and of its closing end; debug.getinfo reports them.</summary>
     public int LineDefined { get; init; }
     public int LastLineDefined { get; init; }
+
+    private string? _chunkDisplay;
+    private byte[]? _whereBytes;
+
+    /// <summary>The printable chunk name (luaO_chunkid), computed once: the prefix of every position-carrying error message.</summary>
+    public string ChunkDisplay => _chunkDisplay ??= DebugLib.ChunkId(ChunkName);
+
+    /// <summary>UTF-8 of <see cref="ChunkDisplay"/> followed by a colon, the constant head of "chunk:line:" positions built as bytes.</summary>
+    public byte[] WhereBytes => _whereBytes ??= LuaString.FromUtf16(ChunkDisplay + ":").Bytes.ToArray();
 
     private System.Collections.Concurrent.ConcurrentDictionary<int, int>? _liveAt;
 

@@ -130,6 +130,35 @@ None of the whole-script ratios exceeds 2.5x (warmup is 2.3-2.65x), so the gaps 
 
 Footprint is under the threshold everywhere (worst: table with 4 hash fields, 1.6x; closure, 1.4x).
 
+## After ticket 53 (VM and `error("str")` raising)
+
+Diagnosis: the hypothesis in gap 2 was only half right. Position lookup and `VarInfo.Describe` are cheap on small functions; the 6-8x
+VM-error cost was the **.NET exception throw/catch** (about 2.3 us each), because `error(tbl)` is pending state in the loop but a
+VM-detected error (index/call/arithmetic on a bad value) was thrown out of a helper and caught in `Run`. `error("str")` paid for
+message assembly: `ChunkId` substring + interpolation per call, decode of the message to UTF-16, concat, re-encode to UTF-8.
+
+Kept (all measured, WSL, interleaved vs base, per-section `lap` of `pcall-error.lua`, 5 runs, ms; PUC = reference):
+
+| section | before | after | PUC |
+|---|---|---|---|
+| 2. error with a string message (100k) | 131-142 | 75-83 | 38-44 |
+| 4. runtime error raised by the VM (100k) | 295-360 | 138-147 | 48-69 |
+| steady state, 300k `pcall(vm_error)` | 790-880 | 110 | n/a |
+| steady state, 300k `pcall(error"boom")` | 80-100 | 44 | n/a |
+
+- Index get/set, arithmetic and "attempt to call" errors found by `IndexSlow`/`SetSlow`/`ArithSlow`/`Call` are handed back
+  (`PrepareIndex`/`PrepareSetIndex`/`PrepareArith` error overloads, `ResolveCallable(deferError)`) and unwound by
+  `RaiseInLoop`/`RaiseDeferred` exactly as `Run`'s catch does (fault line noted, `Unwind`, handler run on intact frames). With no
+  protected frame at this level the same exception is thrown, so `Traceback`/`TraceEntries` are captured as before.
+- `Proto.ChunkDisplay` / `Proto.WhereBytes` cache the chunk id; `Interpreter.Where` and `NoteFault` no longer allocate for it;
+  `ErrorValue` builds the positioned message as bytes in one allocation (invalid UTF-8 keeps the old decode/re-encode path).
+
+Reverted: replacing interpolation with `string.Concat` in the message builders (no measurable change).
+
+Remaining gaps: the first ~40-60k errors run at tier-0 speed (section 4 is 100k iterations, so ~90 ms of its 140 ms is warm-up; steady
+state is at PUC parity). `AggressiveOptimization` on the helpers is forbidden by `JitBudgetTests`; tiering knobs belong to the
+startup ticket. Compare/concat/bitwise/length errors and tail-call "attempt to call" still throw.
+
 ## Reproducing
 
 ```
