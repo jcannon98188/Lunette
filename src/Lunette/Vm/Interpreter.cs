@@ -405,7 +405,7 @@ internal static partial class Interpreter
                     }
                     break;
                 case OpCode.Tbc:
-                    MarkToBeClosed(co, bs + i.A, proto, pc - 1, proto.Names[i.Bx]);
+                    MarkToBeClosed(state, co,bs + i.A, proto, pc - 1, proto.Names[i.Bx]);
                     break;
                 case OpCode.Vararg:
                 {

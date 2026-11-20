@@ -8,11 +8,11 @@ internal static partial class Interpreter
     private static readonly LuaValue NoError = default;
 
     /// <summary>Registers R[<paramref name="index"/>] to be closed; nil and false are ignored, anything without __close is an error.</summary>
-    private static void MarkToBeClosed(Coroutine co, int index, Proto proto, int pc, string name)
+    private static void MarkToBeClosed(LuaState state, Coroutine co, int index, Proto proto, int pc, string name)
     {
         LuaValue v = co.Stack[index];
         if (v.IsFalsy) return;
-        if (Meta.GetTagMethod(v, TagMethod.Close).IsNil)
+        if (Meta.GetTagMethod(state, v, TagMethod.Close).IsNil)
             throw new LuaException($"{Where(proto, pc)} variable '{name}' got a non-closable value");
         co.Tbc.Add(index);
     }
@@ -82,7 +82,7 @@ internal static partial class Interpreter
     private static void CallClose(LuaState state, Coroutine co, int index, LuaValue error)
     {
         LuaValue v = co.Stack[index];
-        LuaValue tm = Meta.GetTagMethod(v, TagMethod.Close);
+        LuaValue tm = Meta.GetTagMethod(state, v, TagMethod.Close);
         if (tm.IsNil) throw new LuaException("attempt to call a nil value (metamethod 'close')");
         CallValues(state, tm, [v, error]);
     }
