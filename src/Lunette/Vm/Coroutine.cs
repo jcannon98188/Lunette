@@ -182,6 +182,8 @@ internal sealed class Coroutine
     public int CallTop;
     /// <summary>Open upvalues, ascending by stack index.</summary>
     public readonly List<UpVal> OpenUpvals = new();
+    /// <summary>Stack index of the highest open upvalue, or -1 when none is open: the Return instruction tests this one field instead of reading the list.</summary>
+    public int OpenTop = -1;
     /// <summary>Stack indices of live to-be-closed variables, ascending.</summary>
     public readonly List<int> Tbc = new();
 
@@ -192,6 +194,7 @@ internal sealed class Coroutine
         InHandler = false;
         Nny = 0;
         OpenUpvals.Clear();
+        OpenTop = -1;
     }
 
     public void EnsureStack(int size, Proto? where, int pc)
@@ -243,6 +246,7 @@ internal sealed class Coroutine
         }
         var uv = new UpVal { Owner = this, Index = index };
         OpenUpvals.Insert(pos, uv);
+        OpenTop = OpenUpvals[^1].Index;
         return uv;
     }
 
@@ -258,5 +262,6 @@ internal sealed class Coroutine
             n--;
         }
         OpenUpvals.RemoveRange(n, OpenUpvals.Count - n);
+        OpenTop = n > 0 ? OpenUpvals[n - 1].Index : -1;
     }
 }

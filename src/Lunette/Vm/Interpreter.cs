@@ -491,7 +491,7 @@ internal static partial class Interpreter
                     {
                         f.Pc = pc;
                         if (--state.Ticks <= 0) state.Poll();
-                        if (co.OpenUpvals.Count > 0) co.Close(bs);
+                        if (co.OpenTop >= bs) co.Close(bs);
                         int tdst = f.FuncIdx;
                         if (nargs <= 3) for (int j = 0; j <= nargs; j++) Regs.Copy(ref Regs.At(r, tdst + j), in Regs.At(r, fa + j)); // tdst < fa: forward copy is safe
                         else Array.Copy(r, fa, r, tdst, nargs + 1);
@@ -534,7 +534,7 @@ internal static partial class Interpreter
                 {
                     int ra = bs + i.A;
                     int n = i.B != 0 ? i.B - 1 : top - ra;
-                    if (co.OpenUpvals.Count > 0) co.Close(bs);
+                    if (co.OpenTop >= bs) co.Close(bs);
                     if (co.Tbc.Count > 0 && co.Tbc[^1] >= bs)
                     {
                         // Each __close handler runs as a Frame so it can yield; this instruction runs again when it returns.
@@ -1023,7 +1023,7 @@ internal static partial class Interpreter
                     MarkToBeClosed(state, co, bs + i.A, proto, pc - 1, proto.Names[i.Bx]);
                     return null;
                 }
-                if (co.OpenUpvals.Count > 0) co.Close(bs + i.A);
+                if (co.OpenTop >= bs + i.A) co.Close(bs + i.A);
                 if (co.Tbc.Count > 0 && co.Tbc[^1] >= bs + i.A)
                 {
                     f.Pc = pc;
@@ -1173,9 +1173,7 @@ internal static partial class Interpreter
         f.Base = baseIdx;
         f.Pc = 0;
         f.FuncIdx = fa;
-        f.Wanted = wanted;
-        f.VarargBase = 0;
-        f.VarargCount = 0;
+        f.Wanted = wanted; // VarargBase and VarargCount are read only for vararg functions, which take Precall
         return f;
     }
 
