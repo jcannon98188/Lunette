@@ -87,6 +87,37 @@ jobs:
           path: .reference/lua
           retention-days: 14
 
+  # The three differential parts (hand-written corpus, seeded generated programs, official-suite chunks) run through
+  # the Reference binary and the engine CLI as separate processes. A divergence fails unless tests/differential/waivers.toml
+  # covers it with a reason code. LUNETTE_REQUIRE_REFERENCE makes a missing reference a failure rather than a skip.
+  differential:
+    needs: [build, reference]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      LUNETTE_REQUIRE_REFERENCE: "1"
+      LUNETTE_REFERENCE_LUA: ${{ github.workspace }}/.reference/lua
+      LUNETTE_DIFF_ARTIFACTS: ${{ github.workspace }}/diff-failures
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: reference-lua
+          path: .reference
+      - run: chmod +x .reference/lua && .reference/lua -v
+      - run: dotnet test -c Release --filter "FullyQualifiedName~Lunette.Tests.Differential" tests/Lunette.Tests
+      - name: Upload failing differential programs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: differential-failures
+          path: ${{ github.workspace }}/diff-failures
+          if-no-files-found: ignore
+          retention-days: 14
+
   # Allocation budgets (alloc-budgets.json) and the interpreter-loop JIT budget (jit-budgets.json); both are part of ci-gate.
   # They need a Release build and the plain JIT path (R2R and NativeAOT skip the MinOpts thresholds), so they get their own job.
   alloc-budget:
@@ -152,7 +183,7 @@ jobs:
   # Later tickets add their jobs to `needs`; nightly and benchmark jobs never block.
   ci-gate:
     if: always()
-    needs: [build, test, ratchet, reference, fast-checks, alloc-budget, jit-budget, aot]
+    needs: [build, test, ratchet, reference, differential, fast-checks, alloc-budget, jit-budget, aot]
     runs-on: ubuntu-latest
     steps:
       - name: Require every upstream job to succeed

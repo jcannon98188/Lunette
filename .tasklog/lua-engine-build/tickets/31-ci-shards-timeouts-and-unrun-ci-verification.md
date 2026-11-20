@@ -21,3 +21,5 @@ Acceptance criteria:
 - [ ] Workflow lints clean
 - [ ] ci-gate needs list equals the full job list
 - [ ] Unexercised-locally jobs listed explicitly
+
+Additional gaps from ticket 17: add a `CODEOWNERS` (or equivalent) so changes to `tests/differential/waivers.toml`, `tests/suite/waivers.toml` and `tests/suite/required-files.txt` need review; make `nightly-differential.yml` open or update a tracking issue on failure instead of only uploading failing programs; add a timing check against the ~15 minute PR-workflow budget; make `ci/build-reference.sh` robust to CRLF checkouts (it currently breaks under bash with CRLF line endings; add `.gitattributes` `eol=lf` for `*.sh`).

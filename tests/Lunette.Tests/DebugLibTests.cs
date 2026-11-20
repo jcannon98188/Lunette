@@ -179,7 +179,7 @@ public class DebugLibTests
 
     private static (int Code, string Err) RunScript(string source)
     {
-        string path = Path.GetFullPath("script-" + Guid.NewGuid().ToString("N")[..8] + ".lua");
+        string path = Path.Combine(Path.GetTempPath(), "script-" + Guid.NewGuid().ToString("N") + ".lua"); // never cwd-relative: the suite runner changes the cwd
         File.WriteAllText(path, source);
         try
         {
