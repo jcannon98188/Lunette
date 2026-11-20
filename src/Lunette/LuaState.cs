@@ -43,13 +43,7 @@ public sealed class LuaState
         BaseLib.Register(this);
         StringLib.Register(this);
         Utf8Lib.Register(this);
-        Globals["assert"] = LuaValue.FromObject(new BuiltinFunction(static (_, args) =>
-        {
-            if (args.Length == 0) throw new LuaException("bad argument #1 to 'assert' (value expected)");
-            if (args[0].IsFalsy)
-                throw new LuaException(args.Length > 1 ? args[1].ToString() : "assertion failed!");
-            return args.ToArray();
-        }));
+        ErrorLib.Register(this);
     }
 
     public TextWriter Output { get; set; } = Console.Out;

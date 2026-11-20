@@ -11,6 +11,8 @@ internal sealed class LuaCompiler
         public string Name { get; } = name;
         public int Reg { get; } = reg;
         public bool Captured { get; set; }
+        public int StartPc { get; set; }
+        public int EndPc { get; set; } = -1;
     }
 
     private sealed class LoopInfo(int baseReg)
@@ -27,6 +29,22 @@ internal sealed class LuaCompiler
         public List<LuaValue> Consts { get; } = new();
         public List<string> Names { get; } = new();
         public List<LocalVar> Locals { get; } = new();
+        /// <summary>Every local ever declared, for debug info (variable names in error messages).</summary>
+        public List<LocalVar> AllLocals { get; } = new();
+
+        public void AddLocal(string name, int reg)
+        {
+            var v = new LocalVar(name, reg) { StartPc = Code.Count };
+            Locals.Add(v);
+            AllLocals.Add(v);
+        }
+
+        public void DropLocals(int keep)
+        {
+            for (int i = keep; i < Locals.Count; i++) Locals[i].EndPc = Code.Count;
+            Locals.RemoveRange(keep, Locals.Count - keep);
+        }
+
         public List<(string Name, UpvalDesc Desc)> Upvals { get; } = new();
         public List<Proto> Protos { get; } = new();
         public List<LoopInfo> Loops { get; } = new();
@@ -70,7 +88,18 @@ internal sealed class LuaCompiler
     private Proto Finish(FuncState fs)
     {
         var upvals = new UpvalDesc[fs.Upvals.Count];
-        for (int i = 0; i < upvals.Length; i++) upvals[i] = fs.Upvals[i].Desc;
+        var upNames = new string[upvals.Length];
+        for (int i = 0; i < upvals.Length; i++)
+        {
+            upvals[i] = fs.Upvals[i].Desc;
+            upNames[i] = fs.Upvals[i].Name;
+        }
+        var locVars = new LocVar[fs.AllLocals.Count];
+        for (int i = 0; i < locVars.Length; i++)
+        {
+            var v = fs.AllLocals[i];
+            locVars[i] = new LocVar(v.Name, v.Reg, v.StartPc, v.EndPc < 0 ? fs.Code.Count : v.EndPc);
+        }
         return new Proto
         {
         Code = fs.Code.ToArray(),
@@ -82,6 +111,8 @@ internal sealed class LuaCompiler
         NumParams = fs.NumParams,
         IsVararg = fs.IsVararg,
         Upvalues = upvals,
+        UpvalNames = upNames,
+        LocVars = locVars,
         Protos = fs.Protos.ToArray(),
         };
     }
@@ -238,7 +269,7 @@ internal sealed class LuaCompiler
     {
         bool captured = false;
         for (int i = nlocals; i < _fs.Locals.Count; i++) captured |= _fs.Locals[i].Captured;
-        _fs.Locals.RemoveRange(nlocals, _fs.Locals.Count - nlocals);
+        _fs.DropLocals(nlocals);
         if (captured) Emit(Instruction.Abc(OpCode.Close, free, 0, 0), _tok.Line);
         _fs.Free = free;
     }
@@ -335,7 +366,7 @@ internal sealed class LuaCompiler
         Advance();
         string name = ExpectName();
         int reg = Alloc();
-        _fs.Locals.Add(new LocalVar(name, reg));
+        _fs.AddLocal(name, reg);
         FunctionBody(reg, line, false);
     }
 
@@ -396,7 +427,7 @@ internal sealed class LuaCompiler
             (n, open) = ExprList();
         }
         AdjustList(names.Count, n, open, baseReg);
-        for (int i = 0; i < names.Count; i++) _fs.Locals.Add(new LocalVar(names[i], baseReg + i));
+        for (int i = 0; i < names.Count; i++) _fs.AddLocal(names[i], baseReg + i);
     }
 
     /// <summary>A suffixed expression seen as a statement: an assignable place or a call.</summary>
@@ -591,7 +622,7 @@ internal sealed class LuaCompiler
         if (captured) Emit(Instruction.Abc(OpCode.Close, free, 0, 0), line);
         Emit(Instruction.Abc(OpCode.Test, t, 0, 0), line);
         PatchJmp(EmitJmp(line), top);
-        _fs.Locals.RemoveRange(nlocals, _fs.Locals.Count - nlocals);
+        _fs.DropLocals(nlocals);
         _fs.Free = free;
         _fs.Loops.RemoveAt(_fs.Loops.Count - 1);
         foreach (int b in loop.Breaks) PatchJmp(b, Here);
@@ -626,7 +657,7 @@ internal sealed class LuaCompiler
 
         int nlocals = _fs.Locals.Count;
         int free = _fs.Free; // a + 3
-        _fs.Locals.Add(new LocalVar(name, Alloc()));
+        _fs.AddLocal(name, Alloc());
         var loop = new LoopInfo(free);
         _fs.Loops.Add(loop);
         int body = Here;
@@ -658,7 +689,7 @@ internal sealed class LuaCompiler
         int toCall = EmitJmp(line);
         int nlocals = _fs.Locals.Count;
         int free = _fs.Free; // a + 4
-        foreach (string name in names) _fs.Locals.Add(new LocalVar(name, Alloc()));
+        foreach (string name in names) _fs.AddLocal(name, Alloc());
         var loop = new LoopInfo(free);
         _fs.Loops.Add(loop);
         int body = Here;
@@ -685,7 +716,7 @@ internal sealed class LuaCompiler
         _fs = child;
         if (isMethod)
         {
-            child.Locals.Add(new LocalVar("self", Alloc()));
+            child.AddLocal("self", Alloc());
             child.NumParams++;
         }
         Expect(Tok.LParen, "(");
@@ -701,7 +732,7 @@ internal sealed class LuaCompiler
                     break;
                 }
                 string p = ExpectName();
-                child.Locals.Add(new LocalVar(p, Alloc()));
+                child.AddLocal(p, Alloc());
                 child.NumParams++;
             } while (_tok.Kind == Tok.Comma);
         }
@@ -873,7 +904,7 @@ internal sealed class LuaCompiler
             case Tok.Function:
                 Advance();
                 FunctionBody(target, line, false);
-                _openIdx = -1;
+                _openIdx = -1; // the body's last call is not an open call of this expression
                 return;
             case Tok.String:
                 Emit(Instruction.ABx(OpCode.LoadK, target, AddConst(LuaValue.FromString(_tok.Str))), line);

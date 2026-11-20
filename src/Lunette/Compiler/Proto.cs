@@ -73,6 +73,9 @@ internal readonly record struct Instruction(uint Raw)
 /// <summary>Where a closure finds one captured variable: a register of the enclosing function, or one of its upvalues.</summary>
 internal readonly record struct UpvalDesc(bool InStack, int Index);
 
+/// <summary>Debug info for one local variable: the register it lives in and the pc range [StartPc, EndPc) where it is in scope.</summary>
+internal readonly record struct LocVar(string Name, int Reg, int StartPc, int EndPc);
+
 /// <summary>The compiled bytecode form of one Lua function body.</summary>
 internal sealed class Proto
 {
@@ -85,5 +88,7 @@ internal sealed class Proto
     public required int NumParams { get; init; }
     public required bool IsVararg { get; init; }
     public required UpvalDesc[] Upvalues { get; init; }
+    public required string[] UpvalNames { get; init; }
+    public required LocVar[] LocVars { get; init; }
     public required Proto[] Protos { get; init; }
 }

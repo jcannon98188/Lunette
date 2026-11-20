@@ -11,8 +11,20 @@ public abstract class LuaFunction
 
 internal delegate LuaValue[]? BuiltinBody(LuaState state, ReadOnlySpan<LuaValue> args);
 
-internal sealed class BuiltinFunction(BuiltinBody body) : LuaFunction
+/// <summary>Builtins the interpreter recognises and runs itself, so common error paths need no exception (ADR 0003).</summary>
+internal enum BuiltinKind : byte
 {
+    None,
+    Error,
+    Assert,
+    Pcall,
+    Xpcall,
+}
+
+internal sealed class BuiltinFunction(BuiltinBody body, BuiltinKind kind = BuiltinKind.None) : LuaFunction
+{
+    public BuiltinKind Kind { get; } = kind;
+
     public LuaValue[]? Invoke(LuaState state, ReadOnlySpan<LuaValue> args) => body(state, args);
 }
 
