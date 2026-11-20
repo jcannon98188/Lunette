@@ -20,6 +20,8 @@ internal static partial class Interpreter
         NewFrame,
         /// <summary>The coroutine yielded: the loop must return to the resumer.</summary>
         Yield,
+        /// <summary>Handled, but the hook mask changed: the loop must return so Run re-enters in the other variant.</summary>
+        Reenter,
     }
 
     /// <summary>How many times a failing xpcall handler is retried on its own error before "error in error handling".</summary>
@@ -72,6 +74,7 @@ internal static partial class Interpreter
             if (wanted < 0) co.ResumeTop = dst + 2;
             else for (int j = 2; j < wanted; j++) r[dst + j] = default;
             co.ResumeFrame = co.Frames[i - 1];
+            co.RaisingBuiltin = default;
             return true;
         }
         return false;
@@ -136,6 +139,7 @@ internal static partial class Interpreter
             {
                 LuaValue msg = nargs > 0 ? st[fa + 1] : default;
                 long level = nargs > 1 ? ErrorLib.LevelArg(st[fa + 2]) : 1;
+                co.RaisingBuiltin = st[fa];
                 return Raise(state, co, stop, ErrorValue(co, msg, level, false));
             }
             case BuiltinKind.Assert:
@@ -148,6 +152,7 @@ internal static partial class Interpreter
                     else for (int j = nargs; j < wanted; j++) st[fa + j] = default;
                     return Special.Done;
                 }
+                co.RaisingBuiltin = st[fa];
                 return Raise(state, co, stop, ErrorValue(co, nargs > 1 ? st[fa + 2] : AssertMessage, 1, false));
             }
             case BuiltinKind.Pcall:
@@ -172,6 +177,18 @@ internal static partial class Interpreter
             }
             case BuiltinKind.Yield:
                 return DoYield(state, co, st.AsSpan(fa + 1, nargs), fa, wanted, false);
+            case BuiltinKind.SetHook:
+            {
+                // Runs the ordinary body, then asks the loop to switch variants if the running coroutine's hook state changed.
+                bool was = co.Traced;
+                _ = DebugLib.SetHook(state, st.AsSpan(fa + 1, nargs));
+                if (wanted < 0) co.ResumeTop = fa;
+                else for (int j = 0; j < wanted; j++) st[fa + j] = default;
+                if (co.Traced == was) return Special.Done;
+                co.Reenter = true;
+                co.PendingReturnHook = co.Traced && (co.HookMask & Coroutine.HookReturn) != 0;
+                return Special.Reenter;
+            }
             default:
                 return Special.None;
         }

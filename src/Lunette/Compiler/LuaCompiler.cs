@@ -54,6 +54,8 @@ internal sealed class LuaCompiler
     private sealed class FuncState(FuncState? parent)
     {
         public FuncState? Parent { get; } = parent;
+        public int LineDefined { get; set; }
+        public int LastLineDefined { get; set; }
         public List<Instruction> Code { get; } = new();
         public List<int> Lines { get; } = new();
         public List<LuaValue> Consts { get; } = new();
@@ -114,6 +116,7 @@ internal sealed class LuaCompiler
     {
         var c = new LuaCompiler(source, chunkName, cache ?? new StringCache());
         c._fs.IsVararg = true;
+        c._fs.LastLineDefined = 0;
         c.EnterBlock();
         c.Block();
         if (c._tok.Kind != Tok.Eof) throw c.Err("'<eof>' expected");
@@ -151,6 +154,8 @@ internal sealed class LuaCompiler
         UpvalNames = upNames,
         LocVars = locVars,
         Protos = fs.Protos.ToArray(),
+        LineDefined = fs.LineDefined,
+        LastLineDefined = fs.LastLineDefined,
         };
     }
 
@@ -878,7 +883,7 @@ internal sealed class LuaCompiler
 
     private void FunctionBody(int target, int line, bool isMethod)
     {
-        var child = new FuncState(_fs);
+        var child = new FuncState(_fs) { LineDefined = line };
         _fs = child;
         if (isMethod)
         {
@@ -906,6 +911,7 @@ internal sealed class LuaCompiler
         EnterBlock();
         Block();
         int endLine = _tok.Line;
+        child.LastLineDefined = endLine;
         Expect(Tok.End, "end");
         LeaveBlock();
         Emit(Instruction.Abc(OpCode.Return, 0, 1, 0), endLine);

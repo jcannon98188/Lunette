@@ -20,6 +20,7 @@ internal enum BuiltinKind : byte
     Pcall,
     Xpcall,
     Yield,
+    SetHook,
 }
 
 internal sealed class BuiltinFunction(BuiltinBody body, BuiltinKind kind = BuiltinKind.None) : LuaFunction
