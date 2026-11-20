@@ -67,6 +67,7 @@ A pure-managed C# (.NET 11) Lua 5.4 engine and minimal CLI, built to the lua-eng
 - [Host debug hook API: LuaState.SetHook with C# delegate and GetInfo for debug adapters](tickets/51-host-debug-hook-api-luastate-sethook-with-c-delegate-and-get.md): Host debug hook API (1b8db4c)
 - [Perf: VM runtime and string error raising 2.5-8x PUC (message building)](tickets/53-perf-vm-runtime-and-string-error-raising-2-5-8x-puc-message.md): Error raising without .NET throws (202df0d)
 - [Perf: warm-up and GC pause tail (first-chunk JIT cost, gen0 p99)](tickets/54-perf-warm-up-and-gc-pause-tail-first-chunk-jit-cost-gen0-p99.md): Non-concurrent GC for CLI, AOT recommendation (de7fc97)
+- [Perf: metamethod function calls (__index chains, __newindex, __call) 3-5.7x PUC](tickets/52-perf-metamethod-function-calls-index-chains-newindex-call-3.md): Metamethod call fast paths (7fda119)
 
 ## Not yet specified
 
