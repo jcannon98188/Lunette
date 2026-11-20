@@ -40,7 +40,7 @@ public class DebugLibTests
     public void Getinfo_returns_nil_for_a_level_out_of_range_and_rejects_bad_options()
     {
         Assert.Equal("nil\n", Run("print(debug.getinfo(100))"));
-        Assert.Equal("false\tbad argument #2 to 'getinfo' (invalid option)\n", Run("print(pcall(debug.getinfo, 1, 'X'))"));
+        Assert.Equal("false\tbad argument #2 to 'debug.getinfo' (invalid option)\n", Run("print(pcall(debug.getinfo, 1, 'X'))"));
     }
 
     [Fact]
@@ -88,7 +88,7 @@ public class DebugLibTests
     [Fact]
     public void Getlocal_rejects_a_level_out_of_range()
     {
-        Assert.Equal("false\tbad argument #1 to 'getlocal' (level out of range)\n", Run("print(pcall(debug.getlocal, 50, 1))"));
+        Assert.Equal("false\tbad argument #1 to 'debug.getlocal' (level out of range)\n", Run("print(pcall(debug.getlocal, 50, 1))"));
     }
 
     [Fact]
