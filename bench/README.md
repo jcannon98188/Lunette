@@ -36,6 +36,18 @@ Startup (`print(1)`): Lunette about 90 ms (plain build) or 58 ms (ReadyToRun), P
 | k-nucleotide | 125 | 503 | 3.5x | | fannkuch | 125 | 812 | 6.0x |
 | mandelbrot | 104 | 812 | 7.3x | | | | | |
 
+## Comparison with Lua-in-WASM (report-only)
+
+`run-macro-wasm.sh` compares Lunette with native PUC 5.4.9, PUC 5.4.9 compiled to WebAssembly (run under Node's V8 via `node:wasi`
+and under wasmtime) and wasmoon, on the same `macro/*.lua` programs, in one session, interleaved. It never gates CI. Results and
+caveats are in `WASM.md`. Setup (WSL/Linux; everything is installed under `~/lunette-wasm-tools`, every download checksum-verified):
+
+```
+bench/wasm/setup.sh                   # node, wasi-sdk, wasmtime, wasmoon at pinned versions
+bench/wasm/build-lua-wasm.sh          # lua-5.4.9.tar.gz (same checksum as ci/build-reference.sh) -> lua.wasm
+LUA_REF=<native lua> BENCH_WORK=$HOME/lunette-work bench/run-macro-wasm.sh --runs 9 [--only fib,nsieve] [--no-wasmtime]
+```
+
 ## Feeding results back
 
 A performance-motivated change cites a before/after benchmark in its description. A benchmark about more than 3x slower than PUC
