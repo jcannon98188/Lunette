@@ -48,8 +48,6 @@ public sealed partial class LuaState : IDisposable
     internal LuaTable? Package;
     /// <summary>Whether warn() output is enabled (toggled by warn("@on") / warn("@off")).</summary>
     internal bool WarningsOn;
-    /// <summary>Host sink for warnings; null writes to standard error.</summary>
-    internal Action<string>? Warn;
 
     public LuaState() : this(DefaultInternCapacity())
     {
@@ -146,6 +144,7 @@ public sealed partial class LuaState : IDisposable
         Proto proto = LuaCompiler.Compile(source, chunkName, Strings);
         var values = new LuaValue[args.Count];
         for (int i = 0; i < values.Length; i++) values[i] = LuaValue.FromString(Strings.FromUtf16(args[i]));
+        Main.CBase = true;
         Interpreter.Execute(this, proto, values);
     }
 

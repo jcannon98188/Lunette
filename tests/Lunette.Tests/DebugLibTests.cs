@@ -196,7 +196,7 @@ public class DebugLibTests
     {
         var (code, err) = RunScript("local function f()\n  local x = nil\n  return x.y\nend\nf()\n");
         Assert.Equal(1, code);
-        Assert.Equal("lunette: script.lua:3: attempt to index a nil value (local 'x')\nstack traceback:\n\tscript.lua:3: in local 'f'\n\tscript.lua:5: in main chunk\n", err);
+        Assert.Equal("lunette: script.lua:3: attempt to index a nil value (local 'x')\nstack traceback:\n\tscript.lua:3: in local 'f'\n\tscript.lua:5: in main chunk\n\t[C]: in ?\n", err);
     }
 
     [Fact]

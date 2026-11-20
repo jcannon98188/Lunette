@@ -7,7 +7,13 @@ internal static class LuaErrors
     public static LuaException Error(string message) => new(message) { WantsPosition = true };
 
     /// <summary>"bad argument #n to 'fn' (msg)" with a one-based argument number.</summary>
-    public static LuaException ArgError(int n, string fn, string msg) => Error($"bad argument #{n} to '{fn}' ({msg})");
+    public static LuaException ArgError(int n, string fn, string msg)
+    {
+        LuaException e = Error($"bad argument #{n} to '{fn}' ({msg})");
+        e.ArgN = n;
+        e.ArgMsg = msg;
+        return e;
+    }
 
     /// <summary>"bad argument #n to 'fn' (expected expected, got ...)" for a zero-based argument index.</summary>
     public static LuaException TypeError(ReadOnlySpan<LuaValue> args, int index, string fn, string expected) =>
