@@ -130,15 +130,12 @@ public class SimGameHostTests
         try
         {
             File.WriteAllText(Path.Combine(dir, "evil.lua"), "return 'from disk'");
-            string cwd = Directory.GetCurrentDirectory();
-            Directory.SetCurrentDirectory(dir);
-            try
+            Lunette.Tests.Suite.SuiteRunner.WithWorkingDirectory(dir, () =>
             {
                 using var state = new LuaState(new LuaStateOptions().Allow("print", "require", "pcall", "select"));
                 Assert.Contains("module 'evil' not found", Run(state, "print(select(2, pcall(require, 'evil')))"));
                 Assert.True(state.GetGlobal("package").IsNil);
-            }
-            finally { Directory.SetCurrentDirectory(cwd); }
+            });
         }
         finally { Directory.Delete(dir, true); }
     }

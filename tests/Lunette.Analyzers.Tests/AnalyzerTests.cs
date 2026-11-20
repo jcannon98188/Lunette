@@ -86,6 +86,41 @@ public class Ld002HotPathThrowTests
         """);
 }
 
+public class Ld006NoTryInDispatchLoopTests
+{
+    [Fact] public Task Try_catch_in_loop_method_is_reported() => Verify.Analyzer<NoTryInDispatchLoopAnalyzer>("""
+        class C { [LuaInterpreterLoop] static void Loop() { {|LD006:try { } catch (Exception) { }|} } }
+        """);
+
+    [Fact] public Task Try_finally_in_loop_method_is_reported() => Verify.Analyzer<NoTryInDispatchLoopAnalyzer>("""
+        class C { [LuaInterpreterLoop] static void Loop() { {|LD006:try { } finally { }|} } }
+        """);
+
+    [Fact] public Task Using_statement_in_loop_method_is_reported() => Verify.Analyzer<NoTryInDispatchLoopAnalyzer>("""
+        class C { [LuaInterpreterLoop] static void Loop(IDisposable d) { {|LD006:using (d) { }|} } }
+        """);
+
+    [Fact] public Task Lock_statement_in_loop_method_is_reported() => Verify.Analyzer<NoTryInDispatchLoopAnalyzer>("""
+        class C { [LuaInterpreterLoop] static void Loop(object o) { {|LD006:lock (o) { }|} } }
+        """);
+
+    [Fact] public Task Generic_loop_method_is_checked() => Verify.Analyzer<NoTryInDispatchLoopAnalyzer>("""
+        class C { [LuaInterpreterLoop] static void Loop<T>() { {|LD006:try { } catch (Exception) { }|} } }
+        """);
+
+    [Fact] public Task Try_in_the_caller_of_the_loop_method_is_allowed() => Verify.Analyzer<NoTryInDispatchLoopAnalyzer>("""
+        class C
+        {
+            [LuaInterpreterLoop] static void Loop() { }
+            static void Run() { try { Loop(); } catch (Exception) { } }
+        }
+        """);
+
+    [Fact] public Task Loop_method_without_try_is_clean() => Verify.Analyzer<NoTryInDispatchLoopAnalyzer>("""
+        class C { [LuaInterpreterLoop] static int Loop(int n) { for (int i = 0; i < n; i++) n--; return n; } }
+        """);
+}
+
 public class Ld003LuaStringBackingArrayTests
 {
     private const string LuaString = """

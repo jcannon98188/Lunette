@@ -14,6 +14,9 @@ internal sealed class LuaCompiler
         public int Reg { get; } = reg;
         public VarKind Kind { get; } = kind;
         public bool Captured { get; set; }
+        /// <summary>Set for a <c>&lt;const&gt;</c> local whose initializer is a literal: it has no register and every use loads <see cref="Folded"/>.</summary>
+        public bool IsFolded { get; set; }
+        public LuaValue Folded { get; set; }
         public int StartPc { get; set; }
         public int EndPc { get; set; } = -1;
     }
@@ -275,8 +278,28 @@ internal sealed class LuaCompiler
         return fs.Upvals.Count - 1;
     }
 
+    /// <summary>The literal a folded <c>&lt;const&gt;</c> local stands for, found through enclosing functions; null when the name is not one.</summary>
+    private LuaValue? FoldedValue(string name)
+    {
+        for (var fs = _fs; fs is not null; fs = fs.Parent)
+        {
+            if (FindLocal(fs, name) is not { } v) continue;
+            if (v.IsFolded) return v.Folded;
+            return default(LuaValue?);
+        }
+        return default(LuaValue?);
+    }
+
+    private void EmitFolded(LuaValue v, int target, int line)
+    {
+        if (v.IsNil) Emit(Instruction.Abc(OpCode.LoadNil, target, 0, 0), line);
+        else if (v.IsBoolean) Emit(Instruction.Abc(OpCode.LoadBool, target, v.IsFalsy ? 0 : 1, 0), line);
+        else EmitLoadK(target, AddConst(v), line);
+    }
+
     private void LoadVariable(string name, int target, int line)
     {
+        if (FoldedValue(name) is { } folded) { EmitFolded(folded, target, line); return; }
         var local = FindLocal(_fs, name);
         if (local is not null) { Emit(Instruction.Abc(OpCode.Move, target, local.Reg, 0), line); return; }
         int up = FindUpval(_fs, name);
@@ -420,7 +443,12 @@ internal sealed class LuaCompiler
     }
 
     /// <summary>First register above the first <paramref name="nactvar"/> active locals.</summary>
-    private int RegLevel(int nactvar) => nactvar == 0 ? 0 : _fs.Locals[nactvar - 1].Reg + 1;
+    private int RegLevel(int nactvar)
+    {
+        for (int i = nactvar - 1; i >= 0; i--)
+            if (!_fs.Locals[i].IsFolded) return _fs.Locals[i].Reg + 1;
+        return 0;
+    }
 
     private void GotoStatement()
     {
@@ -651,11 +679,18 @@ internal sealed class LuaCompiler
             kinds.Add(kind);
         } while (_tok.Kind == Tok.Comma);
         int baseReg = _fs.Free;
+        int startPc = Here;
         int n = 0, open = -1;
         if (_tok.Kind == Tok.Assign)
         {
             Advance();
             (n, open) = ExprList();
+        }
+        if (names.Count == 1 && n == 1 && kinds[0] == VarKind.Const && TryTakeLiteral(startPc, baseReg) is { } literal)
+        {
+            _fs.Free = baseReg;
+            _fs.Locals.Add(new LocalVar(names[0], baseReg, VarKind.Const) { IsFolded = true, Folded = literal, StartPc = Here });
+            return;
         }
         AdjustList(names.Count, n, open, baseReg);
         for (int i = 0; i < names.Count; i++)
@@ -665,6 +700,35 @@ internal sealed class LuaCompiler
             Emit(Instruction.ABx(OpCode.Tbc, baseReg + i, AddName(names[i])), line);
             _fs.Blocks[^1].InsideTbc = true;
         }
+    }
+
+    /// <summary>
+    /// When the code emitted since <paramref name="startPc"/> only loads one literal (nil, a boolean, a number, a string, or a negated number)
+    /// into <paramref name="reg"/>, removes that code and returns the literal; otherwise leaves the code alone and returns null.
+    /// </summary>
+    private LuaValue? TryTakeLiteral(int startPc, int reg)
+    {
+        var code = _fs.Code;
+        int count = code.Count - startPc;
+        if (count is < 1 or > 2 || code[startPc].A != reg) return null;
+        var first = code[startPc];
+        LuaValue value;
+        switch (first.Op)
+        {
+            case OpCode.LoadNil when first.B == 0: value = default; break;
+            case OpCode.LoadBool: value = LuaValue.FromBoolean(first.B != 0); break;
+            case OpCode.LoadK: value = _fs.Consts[first.Bx]; break;
+            default: return null;
+        }
+        if (count == 2)
+        {
+            var second = code[startPc + 1];
+            if (second.Op != OpCode.Unm || second.A != reg || second.B != reg || !value.IsNumber) return null;
+            value = value.IsInteger ? LuaValue.FromInteger(unchecked(-value.AsInteger)) : LuaValue.FromFloat(-value.AsFloat);
+        }
+        code.RemoveRange(startPc, count);
+        _fs.Lines.RemoveRange(startPc, count);
+        return value;
     }
 
     /// <summary>A suffixed expression seen as a statement: an assignable place or a call.</summary>
