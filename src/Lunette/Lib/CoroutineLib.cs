@@ -94,13 +94,8 @@ internal static class CoroutineLib
             case CoStatus.Normal:
                 throw LuaErrors.Error("cannot close a normal coroutine");
         }
-        co.Close(0);
-        co.Status = CoStatus.Dead;
-        if (co.ErrorValue is LuaValue err)
-        {
-            co.ErrorValue = null;
-            return [LuaValue.FromBoolean(false), err];
-        }
-        return [LuaValue.FromBoolean(true)];
+        return Interpreter.CloseThread(state, co) is LuaValue err
+            ? [LuaValue.FromBoolean(false), err]
+            : [LuaValue.FromBoolean(true)];
     }
 }

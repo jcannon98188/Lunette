@@ -169,6 +169,17 @@ public class CoroutineTests
             """));
 
     [Fact]
+    public void Close_runs_pending_to_be_closed_handlers() =>
+        Assert.Equal("closed\ntrue\n", Run("""
+            local co = coroutine.create(function()
+              local x <close> = setmetatable({}, {__close = function() print("closed") end})
+              coroutine.yield()
+            end)
+            coroutine.resume(co)
+            print(coroutine.close(co))
+            """));
+
+    [Fact]
     public void Upvalues_survive_across_yields() =>
         Assert.Equal("1\n2\n3\n", Run("""
             local function counter()

@@ -138,6 +138,33 @@ internal static partial class Interpreter
         }
     }
 
+    /// <summary>
+    /// Kills a suspended or dead coroutine: runs its pending __close handlers (on the coroutine, so they see its stack), closes its
+    /// upvalues and marks it dead. Returns the error that killed it or that a handler raised, or null for a clean close.
+    /// </summary>
+    internal static LuaValue? CloseThread(LuaState state, Coroutine co)
+    {
+        LuaValue err = co.ErrorValue ?? default;
+        co.ErrorValue = null;
+        if (co.Tbc.Count > 0)
+        {
+            Coroutine prev = state.Running;
+            state.Running = co;
+            try
+            {
+                err = CloseTbcOnError(state, co, 0, err);
+            }
+            finally
+            {
+                state.Running = prev;
+            }
+        }
+        co.Close(0);
+        co.Depth = 0;
+        co.Status = CoStatus.Dead;
+        return err.IsNil ? null : err;
+    }
+
     /// <summary>Stores the resume arguments as the results of the yield call that suspended <paramref name="co"/>; returns the new top.</summary>
     private static int PlaceResumeValues(Coroutine co, ReadOnlySpan<LuaValue> args)
     {

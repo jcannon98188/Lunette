@@ -45,11 +45,15 @@ public readonly struct LuaValue
 
     internal static LuaValue FromObject(object o) => new(o, 0);
 
-    // Stopgap until the byte-string ticket: a .NET string stands in for a Lua string.
-    internal static LuaValue FromString(string s) => new(s, 0);
+    /// <summary>A Lua string value: the object slot holds the headered byte[] of a <see cref="LuaString"/>.</summary>
+    internal static LuaValue FromString(LuaString s) => new(s.Backing, 0);
+
+    /// <summary>A string value from a .NET string, encoded as UTF-8 (host boundary and engine-internal names).</summary>
+    internal static LuaValue FromString(string s) => FromString(LuaString.FromUtf16(s));
     internal static LuaValue FromTable(LuaTable t) => new(t, 0);
 
-    internal bool IsString => Ref is string;
+    internal bool IsString => Ref is byte[];
+    internal LuaString AsString => new((byte[])Ref!);
     internal bool IsTable => Ref is LuaTable;
     internal bool IsFunction => Ref is LuaFunction;
     internal int AsBooleanBit => ReferenceEquals(Ref, TrueTag) ? 1 : 0;
@@ -67,7 +71,7 @@ public readonly struct LuaValue
             if (b.IsFloat) return a.AsFloat == b.AsFloat;
             return b.IsInteger && FloatEqualsInteger(a.AsFloat, b.Bits);
         }
-        return ReferenceEquals(a.Ref, b.Ref) || (a.Ref is string sa && b.Ref is string sb && sa == sb);
+        return ReferenceEquals(a.Ref, b.Ref) || (a.Ref is byte[] sa && b.Ref is byte[] sb && new LuaString(sa).Equals(new LuaString(sb)));
     }
 
     private static bool FloatEqualsInteger(double f, long i) =>
@@ -82,7 +86,7 @@ public readonly struct LuaValue
             LuaFunction => "function",
             LuaTable => "table",
             Vm.Coroutine => "thread",
-            string => "string",
+            byte[] => "string",
             _ => "userdata",
         };
 
@@ -100,6 +104,7 @@ public readonly struct LuaValue
         if (IsInteger) return Bits.ToString(CultureInfo.InvariantCulture);
         if (IsFloat) return LuaNumber.FormatFloat(AsFloat);
         if (IsBoolean) return ReferenceEquals(Ref, TrueTag) ? "true" : "false";
+        if (Ref is byte[] bytes) return new LuaString(bytes).ToString();
         return Ref.ToString() ?? "userdata";
     }
 }
