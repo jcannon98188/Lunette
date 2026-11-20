@@ -1,0 +1,12 @@
+# Reason-coded waiver manifest (ticket 09, decision 4). Empty on purpose.
+# The vendored suite in tests/lua-suite is never edited; overlays are applied to a temp copy.
+#
+# [[waiver]]
+# file   = "api.lua"        # suite file
+# reason = "host-C-API"     # host-C-API | no-bytecode | gc-accounting | os-env | bug-wontfix
+# line = 120                # optional: omit to waive the whole file
+# end_line = 124            # optional: waive a range
+# anchor = "T.testC"        # required with line: text that must occur on the first waived line
+# ticket = "..."            # required for bug-wontfix
+# expires = "2027-01-01"    # required for bug-wontfix
+# note = "..."
