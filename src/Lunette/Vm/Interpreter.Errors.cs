@@ -53,10 +53,45 @@ internal static partial class Interpreter
         {
             Frame fr = co.Frames[co.Depth - 1]!;
             // The trampoline that lets pcall protect a host function is not a script position (the host function is the caller).
-            if (fr.Closure.Proto.ChunkName == "=(host)") ex.WantsPosition = false;
-            else ex.Prefix(Where(fr.Closure.Proto, fr.Pc - 1));
+            if (fr.Closure.Proto.ChunkName == "=(host)")
+            {
+                ex.WantsPosition = false;
+                return;
+            }
+            if (ex.ArgN > 0) NameArgError(fr, ex);
+            ex.Prefix(Where(fr.Closure.Proto, fr.Pc - 1));
         }
         else ex.WantsPosition = false;
+    }
+
+    /// <summary>True when the first Frame of a pcall target would exceed the stack or depth limit.</summary>
+    private static bool TargetOverflows(LuaState state, Coroutine co, LuaClosure cl, int calleeIdx, int nargs)
+    {
+        if (co.InHandler) return false;
+        if (co.Depth >= state.DepthLimit) return true;
+        int baseIdx = cl.Proto.IsVararg ? calleeIdx + nargs + 2 : calleeIdx + 1;
+        return baseIdx + cl.Proto.MaxStack > Coroutine.StackLimit;
+    }
+
+    /// <summary>
+    /// luaL_argerror: names the faulting builtin from how the calling instruction reached it (a call-site name, or a metamethod
+    /// event), counting a method call's self out of the argument number; "calling 'f' on bad self" when self is the culprit.
+    /// </summary>
+    private static void NameArgError(Frame fr, LuaException ex)
+    {
+        (string? what, string? name) = DebugLib.CallSiteName(fr);
+        if (name is null) return;
+        int arg = ex.ArgN;
+        if (what == "method")
+        {
+            arg--;
+            if (arg == 0)
+            {
+                ex.Reword($"calling '{name}' on bad self ({ex.ArgMsg})");
+                return;
+            }
+        }
+        ex.Reword($"bad argument #{arg} to '{name}' ({ex.ArgMsg})");
     }
 
     /// <summary>
@@ -177,11 +212,13 @@ internal static partial class Interpreter
                 if (cl is null) return Special.None;
                 LuaValue handler = x ? st[fa + 2] : default;
                 int level = co.Depth > 0 ? co.Frames[co.Depth - 1]!.PcallLevel : 0;
-                if (level >= MaxProtectedDepth)
+                string? refusal = level >= MaxProtectedDepth ? "C stack overflow" : TargetOverflows(state, co, cl, fa + fixedArgs, nargs - fixedArgs) ? "stack overflow" : null;
+                if (refusal is not null)
                 {
-                    // PUC runs the protected function through a C call, so nesting is limited to LUAI_MAXCCALLS levels.
+                    // PUC runs the protected function through a C call, so nesting is limited to LUAI_MAXCCALLS levels;
+                    // a target whose very first frame does not fit is reported by this pcall, not by an outer one.
                     st[fa] = LuaValue.FromBoolean(false);
-                    st[fa + 1] = LuaValue.FromString("C stack overflow");
+                    st[fa + 1] = LuaValue.FromString(refusal);
                     if (wanted < 0) co.ResumeTop = fa + 2;
                     else for (int j = 2; j < wanted; j++) st[fa + j] = default;
                     return Special.Done;
@@ -222,6 +259,11 @@ internal static partial class Interpreter
                 if (co.Traced == was) return Special.Done;
                 co.Reenter = true;
                 co.PendingReturnHook = co.Traced && (co.HookMask & Coroutine.HookReturn) != 0;
+                if (co.PendingReturnHook)
+                {
+                    co.HookBuiltin = st[fa]; // the return event is reported against sethook itself
+                    co.HookBuiltinNested = false;
+                }
                 return Special.Reenter;
             }
             case BuiltinKind.Host:

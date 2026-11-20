@@ -32,6 +32,12 @@ public sealed class LuaException : Exception
     /// <summary>True for library errors that, like luaL_error, get the calling Lua function's position prefixed when first caught.</summary>
     internal bool WantsPosition { get; set; }
 
+    /// <summary>For a luaL_argerror-style error: the 1-based argument number (0 otherwise), so the VM can re-derive the function name from the call site.</summary>
+    internal int ArgN { get; set; }
+
+    /// <summary>The detail text of an argument error (the part in parentheses).</summary>
+    internal string? ArgMsg { get; set; }
+
     public override string Message => _message;
 
     /// <summary>The Lua stack traceback captured where an uncaught error was raised, or null.</summary>

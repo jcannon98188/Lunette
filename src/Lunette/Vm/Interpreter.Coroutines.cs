@@ -22,6 +22,7 @@ internal static partial class Interpreter
         }
         if (mc.Fn.Ref is not LuaClosure cl)
         {
+            f.Pc = pc;
             result = Meta.CallMeta(state, in mc);
             return null;
         }

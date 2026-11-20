@@ -79,12 +79,13 @@ internal static partial class Interpreter
     }
 
     /// <summary>Reports a call to, or return from, a host function made by the running Lua function.</summary>
-    private static void TraceBuiltin(LuaState state, Coroutine co, BuiltinFunction bf, int scratch, bool call)
+    private static void TraceBuiltin(LuaState state, Coroutine co, BuiltinFunction bf, int scratch, bool call, bool nested = false)
     {
         byte want = call ? Coroutine.HookCall : Coroutine.HookReturn;
         if ((co.HookMask & want) == 0 || !co.AllowHook || co.Depth == 0) return;
         Frame f = co.Frames[co.Depth - 1]!;
         co.HookBuiltin = LuaValue.FromObject(bf);
+        co.HookBuiltinNested = nested;
         FireHook(state, co, f, f.Pc, Math.Max(co.CallTop, scratch), call ? "call" : "return", -1);
     }
 

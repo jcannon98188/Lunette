@@ -20,5 +20,8 @@ public sealed class LuaUserdata
     /// <summary>The metatable consulted for indexing, operators and <c>__tostring</c>; null for none.</summary>
     public LuaTable? Metatable { get; set; }
 
+    /// <summary>The single user value (debug.getuservalue / setuservalue); nil until set.</summary>
+    internal LuaValue UserValue;
+
     public override string ToString() => $"userdata: 0x{RuntimeHelpers.GetHashCode(this):x8}";
 }

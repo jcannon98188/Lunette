@@ -183,10 +183,11 @@ internal static class LoadLib
             return null;
         }
         if (!state.WarningsOn) return null;
-        var sb = new StringBuilder("Lua warning: ");
+        var sb = new StringBuilder();
         for (int i = 0; i < args.Length; i++) sb.Append(LibArgs.CheckString(state, "warn", args, i).ToString());
-        state.Warn?.Invoke(sb.ToString());
-        if (state.Warn is null) Console.Error.WriteLine(sb.ToString());
+        // The same sink receives collector warnings; with none set, the standalone interpreter's stderr format applies.
+        if (state.Gc.Warn is { } sink) sink(sb.ToString());
+        else Console.Error.WriteLine("Lua warning: " + sb);
         return null;
     }
 

@@ -91,6 +91,10 @@ internal sealed class Coroutine
     public bool InHandler;
 
     public bool IsMain;
+    /// <summary>The builtin a running call/return hook reports was called by another host function, so it has no call-site name.</summary>
+    public bool HookBuiltinNested;
+    /// <summary>The main coroutine was entered from a C function, as lua.c's pmain does (a script run by the driver): debug levels end with a host entry.</summary>
+    public bool CBase;
     public CoStatus Status = CoStatus.Suspended;
     /// <summary>The body function, until the first resume starts it.</summary>
     public LuaValue Body;

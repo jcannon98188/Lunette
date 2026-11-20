@@ -74,7 +74,12 @@ internal static partial class Interpreter
                 f.Native = true;
                 return Run(state, co, f, stop) - fa;
             }
-            return CallBuiltin(state, co, fa, nargs, -1, null, 0) - fa;
+            if (!co.Traced) return CallBuiltin(state, co, fa, nargs, -1, null, 0) - fa;
+            var bf = (BuiltinFunction)co.Stack[fa].Ref!;
+            TraceBuiltin(state, co, bf, fa + 1 + nargs, true, true);
+            int end = CallBuiltin(state, co, fa, nargs, -1, null, 0);
+            TraceBuiltin(state, co, bf, end, false, true);
+            return end - fa;
         }
         finally
         {
@@ -479,6 +484,14 @@ internal static partial class Interpreter
                     {
                         TraceBuiltin(state, co, bf, Math.Max(top, end), false);
                         r = co.Stack;
+                    }
+                    else if (co.Traced)
+                    {
+                        // The builtin ran a nested loop in which a hook was set: carry on in the traced loop.
+                        co.Reenter = true;
+                        co.ResumeFrame = f;
+                        co.ResumeTop = top;
+                        return top;
                     }
                     break;
                 }

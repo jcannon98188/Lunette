@@ -1249,7 +1249,7 @@ internal sealed class LuaCompiler
             case Tok.LParen:
                 Advance();
                 Expr(target, 0);
-                Expect(Tok.RParen, ")");
+                ExpectMatch(Tok.RParen, ")", "(", line);
                 _openIdx = -1;
                 break;
             default:
@@ -1293,6 +1293,7 @@ internal sealed class LuaCompiler
                 break;
             case Tok.LParen:
             {
+                int parenLine = _tok.Line;
                 Advance();
                 if (_tok.Kind != Tok.RParen)
                 {
@@ -1304,7 +1305,7 @@ internal sealed class LuaCompiler
                     }
                     else b += n;
                 }
-                Expect(Tok.RParen, ")");
+                ExpectMatch(Tok.RParen, ")", "(", parenLine);
                 break;
             }
             default:
@@ -1393,7 +1394,7 @@ internal sealed class LuaCompiler
             if (_tok.Kind is Tok.Comma or Tok.Semi) Advance();
             else break;
         }
-        Expect(Tok.RBrace, "}");
+        ExpectMatch(Tok.RBrace, "}", "{", line);
         if (pending > 0) FlushList(t, openList ? 0 : pending, flushed, line);
         _fs.Code[newIdx] = Instruction.Abc(OpCode.NewTable, t, Math.Min(hashSize, 255), 0);
         _fs.Code[newIdx + 1] = Instruction.Extra(arraySize);
