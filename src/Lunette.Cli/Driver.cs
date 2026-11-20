@@ -55,7 +55,8 @@ internal static class Driver
 -- The driver is Lua code, but like lua.c's C driver it must not depend on globals the script may have cleared
 -- (all.lua's whole run leaves 'os' nil): capture everything it uses after the script has run.
 local io, os, string, table, debug, package = io, os, string, table, debug, package
-local xpcall, pcall, load, loadfile, require, error, warn, print = xpcall, pcall, load, loadfile, require, error, warn, print
+-- ('print' is deliberately looked up as a global at call time: main.lua sets print=nil and expects "error calling 'print'".)
+local xpcall, pcall, load, loadfile, require, error, warn = xpcall, pcall, load, loadfile, require, error, warn
 local tostring, type, getmetatable, ipairs = tostring, type, getmetatable, ipairs
 local stdout, stderr = io.stdout, io.stderr
 
