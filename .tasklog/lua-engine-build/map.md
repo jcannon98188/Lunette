@@ -64,6 +64,7 @@ A pure-managed C# (.NET 11) Lua 5.4 engine and minimal CLI, built to the lua-eng
 - [Bench: host-to-Lua call benchmark and CallValues ToArray cost](tickets/49-bench-host-to-lua-call-benchmark-and-callvalues-toarray-cost.md): Host-call benchmark; ToArray not worth fixing (e75cf62)
 - [Bench: coverage gaps (coroutines, closures, metatables/OOP, varargs, pcall/error, GC latency, strings, table lib, startup, footprint)](tickets/50-bench-coverage-gaps-coroutines-closures-metatables-oop-varar.md): Benchmark coverage set and gap analysis (0d9ddbc)
 - [Perf: fuse generic-for iterator sequence (Move x3 + Call + TForLoop)](tickets/48-perf-fuse-generic-for-iterator-sequence-move-x3-call-tforloo.md): Generic-for fusion for next/ipairs (8da5fcc)
+- [Host debug hook API: LuaState.SetHook with C# delegate and GetInfo for debug adapters](tickets/51-host-debug-hook-api-luastate-sethook-with-c-delegate-and-get.md): Host debug hook API (1b8db4c)
 
 ## Not yet specified
 
