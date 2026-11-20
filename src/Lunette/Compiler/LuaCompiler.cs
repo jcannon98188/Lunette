@@ -6,10 +6,13 @@ internal sealed class LuaCompiler
     private const int MaxRegisters = 250;
     private const int UnaryPriority = 12;
 
-    private sealed class LocalVar(string name, int reg)
+    private enum VarKind : byte { Regular, Const, Close }
+
+    private sealed class LocalVar(string name, int reg, VarKind kind)
     {
         public string Name { get; } = name;
         public int Reg { get; } = reg;
+        public VarKind Kind { get; } = kind;
         public bool Captured { get; set; }
         public int StartPc { get; set; }
         public int EndPc { get; set; } = -1;
@@ -19,6 +22,33 @@ internal sealed class LuaCompiler
     {
         public int BaseReg { get; } = baseReg;
         public List<int> Breaks { get; } = new();
+    }
+
+    private sealed class LabelInfo(string name, int pc, int line, int nactvar)
+    {
+        public string Name { get; } = name;
+        public int Pc { get; } = pc;
+        public int Line { get; } = line;
+        public int NActVar { get; } = nactvar;
+    }
+
+    private sealed class GotoInfo(string name, int jmpPc, int closePc, int line, int nactvar)
+    {
+        public string Name { get; } = name;
+        public int JmpPc { get; } = jmpPc;
+        public int ClosePc { get; } = closePc;
+        public int Line { get; } = line;
+        /// <summary>Active locals at the goto, lowered to the enclosing block's count as blocks close.</summary>
+        public int NActVar { get; set; } = nactvar;
+    }
+
+    private sealed class BlockInfo(int nactvar, int firstLabel, int firstGoto, bool insideTbc)
+    {
+        public int NActVar { get; } = nactvar;
+        public int FirstLabel { get; } = firstLabel;
+        public int FirstGoto { get; } = firstGoto;
+        /// <summary>True when a to-be-closed variable is in scope: a return of a call there cannot be a tail call.</summary>
+        public bool InsideTbc { get; set; } = insideTbc;
     }
 
     private sealed class FuncState(FuncState? parent)
@@ -32,9 +62,14 @@ internal sealed class LuaCompiler
         /// <summary>Every local ever declared, for debug info (variable names in error messages).</summary>
         public List<LocalVar> AllLocals { get; } = new();
 
-        public void AddLocal(string name, int reg)
+        public List<LabelInfo> Labels { get; } = new();
+        /// <summary>Forward gotos still waiting for their label.</summary>
+        public List<GotoInfo> Gotos { get; } = new();
+        public List<BlockInfo> Blocks { get; } = new();
+
+        public void AddLocal(string name, int reg, VarKind kind = VarKind.Regular)
         {
-            var v = new LocalVar(name, reg) { StartPc = Code.Count };
+            var v = new LocalVar(name, reg, kind) { StartPc = Code.Count };
             Locals.Add(v);
             AllLocals.Add(v);
         }
@@ -79,8 +114,10 @@ internal sealed class LuaCompiler
     {
         var c = new LuaCompiler(source, chunkName, cache ?? new StringCache());
         c._fs.IsVararg = true;
+        c.EnterBlock();
         c.Block();
         if (c._tok.Kind != Tok.Eof) throw c.Err("'<eof>' expected");
+        c.LeaveBlock();
         c.Emit(Instruction.Abc(OpCode.Return, 0, 1, 0), c._tok.Line);
         return c.Finish(c._fs);
     }
@@ -229,8 +266,18 @@ internal sealed class LuaCompiler
         else Emit(Instruction.ABx(OpCode.GetGlobal, target, AddName(name)), line);
     }
 
+    /// <summary>Kind of the variable <paramref name="name"/> resolves to from the current function, or Regular for a global.</summary>
+    private VarKind KindOf(string name)
+    {
+        for (var fs = _fs; fs is not null; fs = fs.Parent)
+            if (FindLocal(fs, name) is { } v) return v.Kind;
+        return VarKind.Regular;
+    }
+
     private void StoreVariable(string name, int source, int line)
     {
+        if (KindOf(name) != VarKind.Regular)
+            throw _lex.Error($"attempt to assign to const variable '{name}'", line);
         var local = FindLocal(_fs, name);
         if (local is not null) { Emit(Instruction.Abc(OpCode.Move, local.Reg, source, 0), line); return; }
         int up = FindUpval(_fs, name);
@@ -260,15 +307,91 @@ internal sealed class LuaCompiler
     {
         int nlocals = _fs.Locals.Count;
         int free = _fs.Free;
+        EnterBlock();
         Block();
+        LeaveBlock();
         LeaveScope(nlocals, free);
+    }
+
+    // ---- blocks, labels and gotos ----
+
+    private void EnterBlock()
+    {
+        bool tbc = _fs.Blocks.Count > 0 && _fs.Blocks[^1].InsideTbc;
+        _fs.Blocks.Add(new BlockInfo(_fs.Locals.Count, _fs.Labels.Count, _fs.Gotos.Count, tbc));
+    }
+
+    /// <summary>Ends the innermost block: its labels go out of scope and its pending gotos move out to the enclosing block.</summary>
+    private void LeaveBlock()
+    {
+        var bl = _fs.Blocks[^1];
+        _fs.Blocks.RemoveAt(_fs.Blocks.Count - 1);
+        _fs.Labels.RemoveRange(bl.FirstLabel, _fs.Labels.Count - bl.FirstLabel);
+        for (int i = bl.FirstGoto; i < _fs.Gotos.Count; i++)
+            if (_fs.Gotos[i].NActVar > bl.NActVar) _fs.Gotos[i].NActVar = bl.NActVar;
+        if (_fs.Blocks.Count == 0 && _fs.Gotos.Count > 0)
+        {
+            var g = _fs.Gotos[0];
+            throw _lex.Error($"no visible label '{g.Name}' for <goto> at line {g.Line}", _tok.Line);
+        }
+    }
+
+    /// <summary>First register above the first <paramref name="nactvar"/> active locals.</summary>
+    private int RegLevel(int nactvar) => nactvar == 0 ? 0 : _fs.Locals[nactvar - 1].Reg + 1;
+
+    private void GotoStatement()
+    {
+        int line = _tok.Line;
+        Advance();
+        string name = ExpectName();
+        foreach (var lb in _fs.Labels)
+        {
+            if (lb.Name != name) continue;
+            // A backward jump leaves the scope of every local declared since the label.
+            if (_fs.Locals.Count > lb.NActVar) Emit(Instruction.Abc(OpCode.Close, RegLevel(lb.NActVar), 0, 0), line);
+            PatchJmp(EmitJmp(line), lb.Pc);
+            return;
+        }
+        int closePc = Emit(Instruction.Abc(OpCode.Close, 0, 0, 0), line);
+        int jmp = EmitJmp(line);
+        _fs.Gotos.Add(new GotoInfo(name, jmp, closePc, line, _fs.Locals.Count));
+    }
+
+    private void LabelStatement()
+    {
+        int line = _tok.Line;
+        Advance();
+        string name = ExpectName();
+        Expect(Tok.DColon, "::");
+        foreach (var lb in _fs.Labels)
+            if (lb.Name == name)
+                throw _lex.Error($"label '{name}' already defined on line {lb.Line}", line);
+        // Void statements after a label at the end of a block leave the label outside the scope of the block's locals.
+        while (_tok.Kind is Tok.Semi or Tok.DColon) Statement();
+        foreach (var lb in _fs.Labels)
+            if (lb.Name == name)
+                throw _lex.Error($"label '{name}' already defined on line {lb.Line}", line);
+        var bl = _fs.Blocks[^1];
+        bool last = _tok.Kind is Tok.Eof or Tok.End or Tok.Else or Tok.Elseif;
+        var label = new LabelInfo(name, Here, line, last ? bl.NActVar : _fs.Locals.Count);
+        _fs.Labels.Add(label);
+        for (int i = bl.FirstGoto; i < _fs.Gotos.Count;)
+        {
+            var g = _fs.Gotos[i];
+            if (g.Name != name) { i++; continue; }
+            if (g.NActVar < label.NActVar)
+                throw _lex.Error($"<goto {name}> at line {g.Line} jumps into the scope of local '{_fs.Locals[g.NActVar].Name}'", g.Line);
+            PatchJmp(g.JmpPc, label.Pc);
+            _fs.Code[g.ClosePc] = Instruction.Abc(OpCode.Close, RegLevel(label.NActVar), 0, 0);
+            _fs.Gotos.RemoveAt(i);
+        }
     }
 
     /// <summary>Drops the locals declared since <paramref name="nlocals"/>, closing their upvalues if any were captured.</summary>
     private void LeaveScope(int nlocals, int free)
     {
         bool captured = false;
-        for (int i = nlocals; i < _fs.Locals.Count; i++) captured |= _fs.Locals[i].Captured;
+        for (int i = nlocals; i < _fs.Locals.Count; i++) captured |= _fs.Locals[i].Captured || _fs.Locals[i].Kind == VarKind.Close;
         _fs.DropLocals(nlocals);
         if (captured) Emit(Instruction.Abc(OpCode.Close, free, 0, 0), _tok.Line);
         _fs.Free = free;
@@ -311,6 +434,12 @@ internal sealed class LuaCompiler
             case Tok.Break:
                 BreakStatement();
                 return;
+            case Tok.Goto:
+                GotoStatement();
+                return;
+            case Tok.DColon:
+                LabelStatement();
+                return;
             case Tok.Name:
             case Tok.LParen:
                 ExprStatement();
@@ -342,7 +471,7 @@ internal sealed class LuaCompiler
         else
         {
             var (n, open) = ExprList();
-            if (n == 1 && open >= 0 && _fs.Code[open].Op == OpCode.Call)
+            if (n == 1 && open >= 0 && _fs.Code[open].Op == OpCode.Call && !_fs.Blocks[^1].InsideTbc)
             {
                 var call = _fs.Code[open];
                 _fs.Code[open] = Instruction.Abc(OpCode.TailCall, call.A, call.B, 0);
@@ -413,12 +542,31 @@ internal sealed class LuaCompiler
 
     private void LocalStatement()
     {
-        var names = new List<string> { ExpectName() };
-        while (_tok.Kind == Tok.Comma)
+        int line = _tok.Line;
+        var names = new List<string>();
+        var kinds = new List<VarKind>();
+        bool hasClose = false;
+        do
         {
-            Advance();
+            if (names.Count > 0) Advance();
             names.Add(ExpectName());
-        }
+            var kind = VarKind.Regular;
+            if (_tok.Kind == Tok.Lt)
+            {
+                Advance();
+                string attr = ExpectName();
+                Expect(Tok.Gt, ">");
+                if (attr == "const") kind = VarKind.Const;
+                else if (attr == "close")
+                {
+                    if (hasClose) throw _lex.Error("multiple to-be-closed variables in local list", line);
+                    hasClose = true;
+                    kind = VarKind.Close;
+                }
+                else throw _lex.Error($"unknown attribute '{attr}'", line);
+            }
+            kinds.Add(kind);
+        } while (_tok.Kind == Tok.Comma);
         int baseReg = _fs.Free;
         int n = 0, open = -1;
         if (_tok.Kind == Tok.Assign)
@@ -427,7 +575,13 @@ internal sealed class LuaCompiler
             (n, open) = ExprList();
         }
         AdjustList(names.Count, n, open, baseReg);
-        for (int i = 0; i < names.Count; i++) _fs.AddLocal(names[i], baseReg + i);
+        for (int i = 0; i < names.Count; i++)
+        {
+            _fs.AddLocal(names[i], baseReg + i, kinds[i]);
+            if (kinds[i] != VarKind.Close) continue;
+            Emit(Instruction.ABx(OpCode.Tbc, baseReg + i, AddName(names[i])), line);
+            _fs.Blocks[^1].InsideTbc = true;
+        }
     }
 
     /// <summary>A suffixed expression seen as a statement: an assignable place or a call.</summary>
@@ -613,15 +767,17 @@ internal sealed class LuaCompiler
         _fs.Loops.Add(loop);
         int nlocals = _fs.Locals.Count;
         int free = _fs.Free;
+        EnterBlock();
         Block();
         Expect(Tok.Until, "until");
         int t = Alloc();
         Expr(t, 0);
         bool captured = false;
-        for (int i = nlocals; i < _fs.Locals.Count; i++) captured |= _fs.Locals[i].Captured;
+        for (int i = nlocals; i < _fs.Locals.Count; i++) captured |= _fs.Locals[i].Captured || _fs.Locals[i].Kind == VarKind.Close;
         if (captured) Emit(Instruction.Abc(OpCode.Close, free, 0, 0), line);
         Emit(Instruction.Abc(OpCode.Test, t, 0, 0), line);
         PatchJmp(EmitJmp(line), top);
+        LeaveBlock();
         _fs.DropLocals(nlocals);
         _fs.Free = free;
         _fs.Loops.RemoveAt(_fs.Loops.Count - 1);
@@ -661,7 +817,9 @@ internal sealed class LuaCompiler
         var loop = new LoopInfo(free);
         _fs.Loops.Add(loop);
         int body = Here;
+        EnterBlock();
         Block();
+        LeaveBlock();
         Expect(Tok.End, "end");
         _fs.Loops.RemoveAt(_fs.Loops.Count - 1);
         LeaveScope(nlocals, free);
@@ -686,15 +844,22 @@ internal sealed class LuaCompiler
         AdjustList(4, n, open, a); // iterator, state, control, closing value
         Expect(Tok.Do, "do");
         Reserve(a + 7);
+        // The fourth value is a to-be-closed variable: closed on normal exit, break, goto, return and error.
+        EnterBlock();
+        _fs.Blocks[^1].InsideTbc = true;
+        Emit(Instruction.ABx(OpCode.Tbc, a + 3, AddName("(for state)")), line);
         int toCall = EmitJmp(line);
         int nlocals = _fs.Locals.Count;
         int free = _fs.Free; // a + 4
         foreach (string name in names) _fs.AddLocal(name, Alloc());
-        var loop = new LoopInfo(free);
+        var loop = new LoopInfo(a + 3);
         _fs.Loops.Add(loop);
         int body = Here;
+        EnterBlock();
         Block();
+        LeaveBlock();
         Expect(Tok.End, "end");
+        LeaveBlock();
         _fs.Loops.RemoveAt(_fs.Loops.Count - 1);
         LeaveScope(nlocals, free);
         PatchJmp(toCall, Here);
@@ -704,6 +869,7 @@ internal sealed class LuaCompiler
         Emit(Instruction.Abc(OpCode.Call, a + 4, 3, names.Count + 1), line);
         Emit(Instruction.Abc(OpCode.TForLoop, a, 0, 0), line);
         PatchJmp(EmitJmp(line), body);
+        Emit(Instruction.Abc(OpCode.Close, a + 3, 0, 0), line);
         foreach (int b in loop.Breaks) PatchJmp(b, Here);
         _fs.Free = a;
     }
@@ -737,9 +903,11 @@ internal sealed class LuaCompiler
             } while (_tok.Kind == Tok.Comma);
         }
         Expect(Tok.RParen, ")");
+        EnterBlock();
         Block();
         int endLine = _tok.Line;
         Expect(Tok.End, "end");
+        LeaveBlock();
         Emit(Instruction.Abc(OpCode.Return, 0, 1, 0), endLine);
         _fs = child.Parent!;
         _fs.Protos.Add(Finish(child));

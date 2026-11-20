@@ -85,6 +85,7 @@ public readonly struct LuaValue
             _ when IsBoolean => "boolean",
             LuaFunction => "function",
             LuaTable => "table",
+            Vm.Coroutine => "thread",
             byte[] => "string",
             _ => "userdata",
         };

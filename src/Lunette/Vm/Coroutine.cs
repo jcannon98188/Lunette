@@ -37,6 +37,30 @@ internal sealed class Frame
     public int PcallBase;
     /// <summary>The xpcall message handler.</summary>
     public LuaValue Handler;
+    /// <summary>Non-zero when this Frame runs a metamethod on behalf of an instruction of the Frame below: its first result finishes that instruction.</summary>
+    public Continuation Cont;
+    /// <summary>Stack index the finished instruction stores its result into.</summary>
+    public int ContDest;
+}
+
+/// <summary>How a metamethod Frame finishes the instruction that called it (the equivalent of luaV_finishOp).</summary>
+internal enum Continuation : byte
+{
+    None,
+    /// <summary>Store the first result.</summary>
+    Value,
+    /// <summary>Store the truthiness of the first result as a boolean.</summary>
+    Bool,
+    /// <summary>Drop the results.</summary>
+    Discard,
+}
+
+internal enum CoStatus : byte
+{
+    Suspended,
+    Running,
+    Normal,
+    Dead,
 }
 
 /// <summary>A growable value stack plus its Frames and open upvalues.</summary>
@@ -51,6 +75,25 @@ internal sealed class Coroutine
     /// <summary>True while an xpcall message handler runs: the stack may exceed <see cref="StackLimit"/> by <see cref="HandlerHeadroom"/>.</summary>
     public bool InHandler;
 
+    public bool IsMain;
+    public CoStatus Status = CoStatus.Suspended;
+    /// <summary>The body function, until the first resume starts it.</summary>
+    public LuaValue Body;
+    public bool Started;
+    /// <summary>Set by a yield: the dispatch loop returned so the resumer can take <see cref="YieldValues"/>.</summary>
+    public bool Yielded;
+    public LuaValue[] YieldValues = [];
+    /// <summary>Where the results of the pending yield call go once resumed, how many are wanted, and whether a pcall status (true) leads them.</summary>
+    public int YieldFa;
+    public int YieldWanted;
+    public bool YieldPcall;
+    /// <summary>Number of non-yieldable host calls in progress on this coroutine (PUC nny).</summary>
+    public int Nny;
+    /// <summary>The error that killed the coroutine, reported once by coroutine.close.</summary>
+    public LuaValue? ErrorValue;
+
+    public override string ToString() => $"thread: 0x{System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(this):x8}";
+
     public LuaValue[] Stack = new LuaValue[256];
     public Frame?[] Frames = new Frame?[16];
     public int Depth;
@@ -62,11 +105,15 @@ internal sealed class Coroutine
     public int CallTop;
     /// <summary>Open upvalues, ascending by stack index.</summary>
     public readonly List<UpVal> OpenUpvals = new();
+    /// <summary>Stack indices of live to-be-closed variables, ascending.</summary>
+    public readonly List<int> Tbc = new();
 
     public void Reset()
     {
+        Tbc.Clear();
         Depth = 0;
         InHandler = false;
+        Nny = 0;
         OpenUpvals.Clear();
     }
 
@@ -87,6 +134,7 @@ internal sealed class Coroutine
         if (Depth == Frames.Length) Array.Resize(ref Frames, Frames.Length * 2);
         Frame f = Frames[Depth++] ??= new Frame();
         f.PcallKind = 0;
+        f.Cont = Continuation.None;
         return f;
     }
 
