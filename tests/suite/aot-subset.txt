@@ -1,0 +1,15 @@
+# Native AOT subset (ticket 18, spec ticket 18): suite files run through the AOT-published CLI.
+# Core-language tier only: nothing here needs a dynamic-code, io or os waiver. One file per line.
+bitwise.lua
+vararg.lua
+tpack.lua
+pm.lua
+utf8.lua
+math.lua
+api.lua
+code.lua
+bwcoercion.lua
+constructs.lua
+goto.lua
+heavy.lua
+big.lua
