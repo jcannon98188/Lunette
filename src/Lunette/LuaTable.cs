@@ -42,7 +42,7 @@ internal static class TagMethods
 /// chained scatter with Brent's variation. Matching the sizing rule makes <c>#t</c> on tables with holes
 /// identical to the reference binary. Hash-part iteration order is not specified.
 /// </summary>
-internal sealed class LuaTable
+public sealed class LuaTable
 {
     private const int MaxABits = 31;
 
@@ -63,7 +63,7 @@ internal sealed class LuaTable
 
     public LuaTable? Metatable;
     /// <summary>Bit e set means metamethod e is known to be absent from this table (used when it is a metatable).</summary>
-    public byte Flags;
+    internal byte Flags;
 
     public LuaTable()
     {
@@ -77,7 +77,7 @@ internal sealed class LuaTable
     // ---- metamethod cache ----
 
     /// <summary>Looks the metamethod up in this table (as a metatable), caching absence of the common events.</summary>
-    public LuaValue GetTagMethod(TagMethod e)
+    internal LuaValue GetTagMethod(TagMethod e)
     {
         if ((int)e < TagMethods.FastCount)
         {
@@ -90,7 +90,7 @@ internal sealed class LuaTable
         return Get(TagMethods.Names[(int)e]);
     }
 
-    public bool AbsentTagMethod(TagMethod e) => GetTagMethod(e).IsNil;
+    internal bool AbsentTagMethod(TagMethod e) => GetTagMethod(e).IsNil;
 
     // ---- hashing ----
 
@@ -370,7 +370,7 @@ internal sealed class LuaTable
     }
 
     /// <summary>Resizes the array part to <paramref name="newASize"/> slots and the hash part to hold <paramref name="nhSize"/> entries.</summary>
-    public void Resize(int newASize, int nhSize)
+    internal void Resize(int newASize, int nhSize)
     {
         _limit = _arr.Length;
         LuaValue[] oldArr = _arr;
@@ -413,7 +413,7 @@ internal sealed class LuaTable
     }
 
     /// <summary>Grows the array part to at least <paramref name="n"/> slots, keeping the hash part (PUC's luaH_resizearray).</summary>
-    public void EnsureArray(int n)
+    internal void EnsureArray(int n)
     {
         if (n > _arr.Length) Resize(n, _nodes.Length);
     }

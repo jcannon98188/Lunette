@@ -323,6 +323,12 @@ internal static partial class Interpreter
                     if (!r[bs + i.A].IsFalsy != (i.C != 0)) pc++;
                     break;
                 case OpCode.Jmp:
+                    // Backward jumps are a poll point for the sandbox limits (budget, memory, interrupt).
+                    if (i.Ax < pc && --state.Ticks <= 0)
+                    {
+                        f.Pc = pc;
+                        state.Poll();
+                    }
                     pc = i.Ax;
                     break;
                 case OpCode.Call:
@@ -338,6 +344,8 @@ internal static partial class Interpreter
                     }
                     if (r[fa].Ref is LuaClosure callee)
                     {
+                        if (co.Depth >= state.DepthLimit) throw LuaErrors.Error("stack overflow");
+                        if (--state.Ticks <= 0) state.Poll();
                         f = Precall(co, callee, fa, nargs, wanted, null, proto, pc - 1);
                         goto newframe;
                     }
@@ -375,6 +383,8 @@ internal static partial class Interpreter
                     }
                     if (r[fa].Ref is LuaClosure callee)
                     {
+                        f.Pc = pc;
+                        if (--state.Ticks <= 0) state.Poll();
                         if (co.OpenUpvals.Count > 0) co.Close(bs);
                         Array.Copy(r, fa, r, f.FuncIdx, nargs + 1);
                         f = Precall(co, callee, f.FuncIdx, nargs, f.Wanted, f, proto, pc - 1);
