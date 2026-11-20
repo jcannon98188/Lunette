@@ -36,6 +36,7 @@ Settled in charting (grilling with the user):
 - [Host API shape](tickets/07-host-api-shape.md): Idiomatic C# host API over one 16-byte `LuaValue`; single-threaded `LuaState`; span-based host-function fast path with opt-in yield/continuations; no-reflection core; best-effort sandbox limits; minimal PUC-compatible CLI.
 - [Error model, pcall and debug library scope](tickets/08-error-model-pcall-and-debug-library-scope.md): Errors are pending-state plus in-loop unwinding with no exceptions on common paths (throw only as an ergonomic fallback caught outside the loop); PUC-literal message text; full `debug` library; two source-generated loop variants for hook cost.
 - [Test harness and waiver policy](tickets/09-test-harness-and-waiver-policy.md): Pinned unmodified 5.4.9 suite, one test per file plus CLI `all.lua` run, no managed `T` (`api.lua` waived), reason-coded waiver manifest applied as overlays, reference 5.4.9 built in CI for differential testing, tiered milestones, ratchet CI via `required-files`.
+- [Native AOT, trimming and IL-compilation backend](tickets/10-native-aot-trimming-and-il-compilation-backend.md): Core is AOT/trim-safe with no dynamic code; any IL backend is a separate optional package gated on IsDynamicCodeSupported and not committed to by the spec; AOT verified by a CI Native AOT CLI run on a suite subset; Lua-to-C# AOT compilation out of scope.
 
 ## Not yet specified
 
