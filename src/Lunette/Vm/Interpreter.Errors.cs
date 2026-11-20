@@ -156,6 +156,30 @@ internal static partial class Interpreter
         }
     }
 
+    /// <summary>The error a failing <c>ResolveCallable</c> left in <c>co.PendingError</c>: unwinds to the Frame to resume (the loop then takes <c>co.ResumeTop</c> itself).</summary>
+    private static Frame RaiseDeferred(LuaState state, Coroutine co, int stop)
+    {
+        LuaException ex = co.PendingError!;
+        co.PendingError = null;
+        Frame f = RaiseInLoop(state, co, stop, ex);
+        co.Unwound = false;
+        return f;
+    }
+
+    /// <summary>
+    /// A VM-detected error handed back by a slow-path helper: does what <see cref="Run"/> does with a thrown one (note the fault line, unwind to the
+    /// nearest protected Frame) but without a .NET exception. Returns the Frame to resume (<c>co.Unwound</c> set, so the loop also takes
+    /// <c>co.ResumeTop</c>), or throws <paramref name="ex"/> when no protected Frame at this level can take it.
+    /// </summary>
+    private static Frame RaiseInLoop(LuaState state, Coroutine co, int stop, LuaException ex)
+    {
+        DebugLib.NoteFault(co, ex);
+        if (!Unwind(state, co, stop, ex.Value)) throw ex;
+        co.FaultLine = 0;
+        co.Unwound = true;
+        return co.ResumeFrame!;
+    }
+
     /// <summary>Raises <paramref name="value"/>: unwinds in the loop when a protected Frame exists at this level, else throws to the level below.</summary>
     private static Special Raise(LuaState state, Coroutine co, int stop, LuaValue value)
     {
@@ -331,35 +355,55 @@ internal static partial class Interpreter
     /// </summary>
     internal static LuaValue ErrorValue(Coroutine co, LuaValue msg, long level, bool fromNative)
     {
-        if (msg.Ref is byte[] raw && level > 0)
+        if (msg.Ref is byte[] raw && level > 0 && FrameAtLevel(co, level, fromNative) is { } fr)
         {
-            string where = WhereLevel(co, level, fromNative);
-            if (where.Length > 0) return LuaValue.FromString(where + " " + new LuaString(raw).ToString());
+            Proto p = fr.Closure.Proto;
+            int pc = fr.Pc - 1;
+            // Valid UTF-8 (the usual case) is copied as bytes behind a cached "chunk:" head; anything else keeps the old
+            // decode-and-re-encode text, which replaces invalid sequences.
+            if (System.Text.Unicode.Utf8.IsValid(new LuaString(raw).Bytes))
+                return LuaValue.FromString(Positioned(p.WhereBytes, p.Lines[pc], new LuaString(raw).Bytes));
+            return LuaValue.FromString(Where(p, pc) + " " + new LuaString(raw).ToString());
         }
         return msg;
     }
 
-    /// <summary>Position "chunk:line:" of the function at call level <paramref name="level"/>, or "" for a host function or an unknown level.</summary>
-    private static string WhereLevel(Coroutine co, long level, bool fromNative)
+    /// <summary>The string "head" + line + ": " + message, assembled in one allocation.</summary>
+    private static LuaString Positioned(byte[] head, int line, ReadOnlySpan<byte> message)
+    {
+        Span<byte> digits = stackalloc byte[11];
+        line.TryFormat(digits, out int nd, default, System.Globalization.CultureInfo.InvariantCulture);
+        LuaString s = LuaString.Allocate(head.Length + nd + 2 + message.Length);
+        Span<byte> d = s.WritableBytes;
+        head.CopyTo(d);
+        digits[..nd].CopyTo(d[head.Length..]);
+        d[head.Length + nd] = (byte)':';
+        d[head.Length + nd + 1] = (byte)' ';
+        message.CopyTo(d[(head.Length + nd + 2)..]);
+        return s;
+    }
+
+    /// <summary>The Lua Frame at call level <paramref name="level"/>, or null for a host function or an unknown level.</summary>
+    private static Frame? FrameAtLevel(Coroutine co, long level, bool fromNative)
     {
         long lv = 1;
         if (fromNative)
         {
-            if (level == 1) return "";
+            if (level == 1) return null;
             lv = 2;
         }
         for (int idx = co.Depth - 1; idx >= 0; idx--)
         {
             Frame fr = co.Frames[idx]!;
-            if (lv == level) return Where(fr.Closure.Proto, fr.Pc - 1);
+            if (lv == level) return fr;
             lv++;
             if (fr.PcallKind != 0)
             {
                 // The Lua function was called by pcall, a host function level of its own.
-                if (lv == level) return "";
+                if (lv == level) return null;
                 lv++;
             }
         }
-        return "";
+        return null;
     }
 }
