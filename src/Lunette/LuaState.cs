@@ -77,6 +77,27 @@ public sealed partial class LuaState : IDisposable
 
     private readonly LuaStateOptions? _construction;
 
+    private LuaValue[]? _typeNames;
+
+    /// <summary>The string <c>type(v)</c> returns for <paramref name="v"/>, interned once per state (the in-place <c>type</c> fast path).</summary>
+    internal LuaValue TypeNameValue(in LuaValue v)
+    {
+        var names = _typeNames ??= new LuaValue[8];
+        int ix = v.Ref switch
+        {
+            null => 0,
+            _ when v.IsNumber => 1,
+            _ when v.IsBoolean => 2,
+            LuaFunction => 3,
+            LuaTable => 4,
+            Vm.Coroutine => 5,
+            byte[] => 6,
+            _ => 7,
+        };
+        if (names[ix].IsNil) names[ix] = LuaValue.FromString(Strings.FromUtf16(v.TypeName));
+        return names[ix];
+    }
+
     /// <summary>Whether construction registers the global <paramref name="name"/>: always for a full state, only when allowlisted for a sandboxed one.</summary>
     internal bool Wants(string name) => _construction is null || _construction.IsAllowed(name);
 

@@ -431,7 +431,7 @@ internal static partial class Interpreter
                     if (TMode.Traced) TraceBuiltin(state, co, bf, Math.Max(top, fa + nargs + 1), true, fa + 1, nargs);
                     if (bf.Kind != BuiltinKind.None)
                     {
-                        Special sp = CallSpecial(state, co, bf.Kind, fa, nargs, wanted, stop, proto, pc - 1);
+                        Special sp = bf.Kind >= FastFirst ? (TMode.Traced ? Special.None : CallFast(state, co, bf.Kind, fa, nargs, wanted)) : CallSpecial(state, co, bf.Kind, fa, nargs, wanted, stop, proto, pc - 1);
                         if (sp == Special.NewFrame)
                         {
                             f = co.ResumeFrame!;

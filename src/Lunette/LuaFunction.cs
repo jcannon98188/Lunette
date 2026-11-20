@@ -36,6 +36,16 @@ internal enum BuiltinKind : byte
     Next,
     /// <summary>The iterator <c>ipairs</c> returns: a hit in a table's array part is delivered in place.</summary>
     IpairsAux,
+    // The kinds below are the in-place fast paths of Interpreter.CallFast; keep them last (the loop compares against the first).
+    MathAbs,
+    MathSqrt,
+    MathSin,
+    MathCos,
+    MathFloor,
+    StringLen,
+    StringByte,
+    Type,
+    Select,
 }
 
 internal sealed class BuiltinFunction(BuiltinBody body, BuiltinKind kind = BuiltinKind.None) : LuaFunction

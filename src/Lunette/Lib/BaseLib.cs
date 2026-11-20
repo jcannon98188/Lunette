@@ -14,7 +14,7 @@ internal static class BaseLib
         var next = new BuiltinFunction(Next, BuiltinKind.Next);
         state.NextFunction = next;
         var ipairsAux = new BuiltinFunction(IpairsAux, BuiltinKind.IpairsAux);
-        Add(state, "type", Type);
+        Add(state, "type", Type, BuiltinKind.Type);
         state.Define("next", LuaValue.FromObject(next));
         state.Define("pairs", LuaValue.FromObject(new BuiltinFunction((st, args) => Pairs(st, args, next), BuiltinKind.Pairs)));
         Add(state, "ipairs", (_, args) =>
@@ -51,7 +51,7 @@ internal static class BaseLib
             return Rets.One(LuaValue.FromString(Meta.ToStringValue(st, args[0])));
         });
         Add(state, "tonumber", ToNumber);
-        Add(state, "select", Select);
+        Add(state, "select", Select, BuiltinKind.Select);
     }
 
     private static LuaValue[] Select(LuaState state, ReadOnlySpan<LuaValue> args)
@@ -75,8 +75,8 @@ internal static class BaseLib
         };
     }
 
-    private static void Add(LuaState state, string name, BuiltinBody body) =>
-        state.Define(name, LuaValue.FromObject(new BuiltinFunction(body)));
+    private static void Add(LuaState state, string name, BuiltinBody body, BuiltinKind kind = BuiltinKind.None) =>
+        state.Define(name, LuaValue.FromObject(new BuiltinFunction(body, kind)));
 
     private static LuaValue[] ToNumber(LuaState state, ReadOnlySpan<LuaValue> args)
     {

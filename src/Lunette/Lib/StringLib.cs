@@ -11,16 +11,16 @@ internal static class StringLib
     {
         if (!state.Wants("string")) return;
         var lib = new LuaTable();
-        void Add(string name, BuiltinBody body) =>
-            lib.Set(LuaValue.FromString(state.Strings.FromUtf16(name)), LuaValue.FromObject(new BuiltinFunction(body)));
+        void Add(string name, BuiltinBody body, BuiltinKind kind = BuiltinKind.None) =>
+            lib.Set(LuaValue.FromString(state.Strings.FromUtf16(name)), LuaValue.FromObject(new BuiltinFunction(body, kind)));
 
-        Add("len", Len);
+        Add("len", Len, BuiltinKind.StringLen);
         Add("sub", Sub);
         Add("upper", static (st, a) => Case(st, a, "upper", upper: true));
         Add("lower", static (st, a) => Case(st, a, "lower", upper: false));
         Add("rep", Rep);
         Add("reverse", Reverse);
-        Add("byte", Byte);
+        Add("byte", Byte, BuiltinKind.StringByte);
         Add("char", Char);
         Add("format", Format);
         Add("find", static (st, a) => FindAux(st, a, find: true));

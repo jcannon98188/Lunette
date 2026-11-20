@@ -231,3 +231,43 @@ variables, so the register-key path they use is already the inline integer branc
 
 Remaining gap: field-heavy float code is now dominated by the 16-byte value copies and the per-instruction dispatch (n-body 2.1x), and the `Call`/`Return` pair (fib, spectral-norm) is untouched by
 this ticket.
+
+
+## After ticket 47
+
+Interleaved wall-clock medians of 5 runs in WSL (startup, about 96 ms, included in the Lunette columns; ratio is (ms - 96) / PUC). "Before" is the ticket-46 tip (83f7748).
+
+| Benchmark | Before ms | After ms | PUC ms | Ratio before | Ratio after |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| binary-trees | 637 | 602 | 446 | 1.21 | 1.13 |
+| fannkuch | 400 | 408 | 126 | 2.41 | 2.48 |
+| fib | 407 | 380 | 115 | 2.70 | 2.47 |
+| k-nucleotide | 344 | 337 | 121 | 2.05 | 1.99 |
+| mandelbrot | 304 | 293 | 100 | 2.08 | 1.97 |
+| n-body | 831 | 819 | 363 | 2.02 | 1.99 |
+| nsieve | 1242 | 1260 | 723 | 1.59 | 1.61 |
+| spectral-norm | 482 | 407 | 131 | 2.95 | 2.37 |
+| string-heavy | 224 | 220 | 73 | 1.75 | 1.70 |
+
+Every macro benchmark is now under 2.5x (fannkuch and fib sit right at it).
+
+Kept:
+- **Smaller RunLoop frame.** Cold cases (`GetGlobal`/`SetGlobal` misses, `BNot`, `Eq`/`Lt`/`Le` metamethod paths, `Self` slow cases, `Close`, `Tbc`, `Closure`, `Vararg`) moved to out-of-line `OtherSlow`, `NewClosure`
+  and `VarargOp`. The JIT frame went from 0x878 to 696 bytes, which shrinks the prologue zeroing paid on every native-to-Lua callback.
+- **Mixed integer/float arithmetic inline.** `ArithFast` handles float-with-int and int-with-float operands (spectral-norm's `A(i,j)` does two per call): -17% on spectral-norm. The remaining number-only
+  cases (IDiv, Mod, Pow, bitwise, shifts) go through `Arith.TryNumeric` at the `arithslow` label before the general path; errors and metamethods are untouched.
+- **Cached closure state.** `Coroutine.OpenTop` tracks the highest open upvalue index, so `Return`/`TailCall`/`Close` skip `co.Close` with one compare; `PrecallLua` no longer stores the vararg base/count for
+  non-vararg callees. fib about -7%.
+- **In-place library calls** (`Interpreter.Builtins.cs`, `BuiltinKind` entries after the special ones): `math.abs/sqrt/sin/cos/floor`, `string.len/byte`, `type` (cached interned names) and `select`
+  (`'#'` and positive counts) read arguments and write results on the stack. Any unusual shape returns `Special.None`, so the ordinary body reports the same errors. They are skipped in traced mode so
+  call/return hooks and `ftransfer`/`ntransfer` see the builtin as before. Micro: `type` 67 -> 29 ns, `abs` 32 -> 24 ns, `byte` 42 -> 33 ns; macro effect small (n-body, k-nucleotide -1 to -2%).
+
+Reverted or dropped: removing the `cl`/`proto` locals from the loop (no gain); inline IDiv/Mod/bitwise in `ArithFast` (regressed n-body and fannkuch); an out-of-line `TryNumeric` for mixed
+operands (slower than inline); an in-place `string.sub` (neutral for `sub(s, i, j)`, 20% slower for `s:sub`).
+
+No new `Lunette.Unsafe` helpers (`Regs.SetInteger`/`SetFloat` already have safe twins), so the `LuaSafeAccess` build needed nothing new.
+
+Not done: generic-for fusion (`Move`x3 + `Call` + `TForLoop`; it would change "for iterator" call-site naming and hook instruction counts), `GetI`/`SetI` constant-integer forms (the benchmarks index with
+variables), and the `CallValues` argument copy (not on any benchmark path).
+
+Remaining gap: fib and fannkuch at about 2.5x are bound by `Call`/`Return` frame push/pop and the 16-byte value copies.

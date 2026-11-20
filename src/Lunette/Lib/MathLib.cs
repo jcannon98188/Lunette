@@ -24,15 +24,15 @@ internal sealed class MathLib
         Members["maxinteger"] = LuaValue.FromInteger(long.MaxValue);
         Members["mininteger"] = LuaValue.FromInteger(long.MinValue);
 
-        Add("abs", Abs);
+        Add("abs", Abs, BuiltinKind.MathAbs);
         Add("ceil", static (_, a) => Round("ceil", a, Math.Ceiling));
-        Add("floor", static (_, a) => Round("floor", a, Math.Floor));
+        Add("floor", static (_, a) => Round("floor", a, Math.Floor), BuiltinKind.MathFloor);
         Add("fmod", Fmod);
         Add("modf", Modf);
-        Add("sqrt", static (_, a) => One(Math.Sqrt(CheckNumber("sqrt", a, 0))));
+        Add("sqrt", static (_, a) => One(Math.Sqrt(CheckNumber("sqrt", a, 0))), BuiltinKind.MathSqrt);
         Add("exp", static (_, a) => One(Math.Exp(CheckNumber("exp", a, 0))));
-        Add("sin", static (_, a) => One(Math.Sin(CheckNumber("sin", a, 0))));
-        Add("cos", static (_, a) => One(Math.Cos(CheckNumber("cos", a, 0))));
+        Add("sin", static (_, a) => One(Math.Sin(CheckNumber("sin", a, 0))), BuiltinKind.MathSin);
+        Add("cos", static (_, a) => One(Math.Cos(CheckNumber("cos", a, 0))), BuiltinKind.MathCos);
         Add("tan", static (_, a) => One(Math.Tan(CheckNumber("tan", a, 0))));
         Add("asin", static (_, a) => One(Math.Asin(CheckNumber("asin", a, 0))));
         Add("acos", static (_, a) => One(Math.Acos(CheckNumber("acos", a, 0))));
@@ -50,7 +50,7 @@ internal sealed class MathLib
         else SetSeed((ulong)DateTime.UtcNow.Ticks, (ulong)Environment.TickCount64);
     }
 
-    private void Add(string name, BuiltinBody body) => Members[name] = LuaValue.FromObject(new BuiltinFunction(body));
+    private void Add(string name, BuiltinBody body, BuiltinKind kind = BuiltinKind.None) => Members[name] = LuaValue.FromObject(new BuiltinFunction(body, kind));
 
     private static LuaValue[] One(double d) => Rets.One(LuaValue.FromFloat(d));
     private static LuaValue[] One(LuaValue v) => Rets.One(v);
