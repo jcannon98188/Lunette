@@ -5,7 +5,7 @@ using Lunette.Vm;
 namespace Lunette;
 
 /// <summary>The single-threaded embedding root: owns globals and the output sink.</summary>
-public sealed class LuaState
+public sealed partial class LuaState
 {
     internal readonly Dictionary<string, LuaValue> Globals = new();
     /// <summary>Best-effort intern cache for short strings (ADR 0005).</summary>
@@ -15,14 +15,14 @@ public sealed class LuaState
     /// <summary>The registry table (debug.getregistry).</summary>
     internal LuaTable? Registry;
     /// <summary>Metatables shared by all values of nil, boolean, number, function, thread and userdata (debug.setmetatable).</summary>
-    private LuaTable?[]? _typeMetatables;
+    private LuaTable?[]? _primitiveMetatables;
 
-    internal LuaTable? TypeMetatable(LuaValue v) => _typeMetatables?[TypeSlot(v)];
+    internal LuaTable? TypeMetatable(LuaValue v) => _primitiveMetatables?[TypeSlot(v)];
 
     internal void SetTypeMetatable(LuaValue v, LuaTable? mt)
     {
-        _typeMetatables ??= new LuaTable?[6];
-        _typeMetatables[TypeSlot(v)] = mt;
+        _primitiveMetatables ??= new LuaTable?[6];
+        _primitiveMetatables[TypeSlot(v)] = mt;
     }
 
     private static int TypeSlot(LuaValue v) => v.TypeName switch

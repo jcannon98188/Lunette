@@ -90,6 +90,8 @@ internal sealed class Coroutine
     /// <summary>Where the results of the pending yield call go once resumed, how many are wanted, and whether a pcall status (true) leads them.</summary>
     public int YieldFa;
     public int YieldWanted;
+    /// <summary>The continuation of the host function that yielded, run with the resume values; null when the values are the results.</summary>
+    public HostContinuation? YieldCont;
     public bool YieldPcall;
     /// <summary>Number of non-yieldable host calls in progress on this coroutine (PUC nny).</summary>
     public int Nny;

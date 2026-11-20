@@ -179,14 +179,14 @@ public class DebugLibTests
 
     private static (int Code, string Err) RunScript(string source)
     {
-        string path = "script-" + Guid.NewGuid().ToString("N")[..8] + ".lua";
+        string path = Path.GetFullPath("script-" + Guid.NewGuid().ToString("N")[..8] + ".lua");
         File.WriteAllText(path, source);
         try
         {
             var o = new StringWriter { NewLine = "\n" };
             var e = new StringWriter { NewLine = "\n" };
             int code = Program.Run([path], o, e);
-            return (code, e.ToString().Replace(path, "script.lua"));
+            return (code, e.ToString().Replace(DebugLib.ChunkId("@" + path), "script.lua"));
         }
         finally { File.Delete(path); }
     }

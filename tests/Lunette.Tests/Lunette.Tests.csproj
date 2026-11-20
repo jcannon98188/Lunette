@@ -9,7 +9,11 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.*" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="alloc-budgets.json;jit-budgets.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\..\src\Lunette\Lunette.csproj" />
     <ProjectReference Include="..\..\src\Lunette.Cli\Lunette.Cli.csproj" />
+    <ProjectReference Include="..\Lunette.JitProbe\Lunette.JitProbe.csproj" />
   </ItemGroup>
 </Project>

@@ -189,6 +189,8 @@ internal static partial class Interpreter
                 co.PendingReturnHook = co.Traced && (co.HookMask & Coroutine.HookReturn) != 0;
                 return Special.Reenter;
             }
+            case BuiltinKind.Host:
+                return CallHost(state, co, (BuiltinFunction)st[fa].Ref!, fa, nargs, wanted, proto, pc);
             default:
                 return Special.None;
         }
