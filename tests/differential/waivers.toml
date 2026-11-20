@@ -16,35 +16,35 @@
 [[waiver]]
 file    = "corpus/known-string-arith-message.lua"
 reason  = "bug-wontfix"
-ticket  = "unfiled: string-arith-error-message"
+ticket  = "lua-engine-build/35"
 expires = "2027-06-01"
 note    = "Arithmetic on a non-numeric string: reference reports \"attempt to add a 'string' with a 'number'\" (from the string metamethods), engine reports 'perform arithmetic on a string value'. Also affects unary minus."
 
 [[waiver]]
 file    = "corpus/known-ipairs-no-argument-message.lua"
 reason  = "bug-wontfix"
-ticket  = "unfiled: ipairs-no-argument-message"
+ticket  = "lua-engine-build/35"
 expires = "2027-06-01"
 note    = "ipairs() with no argument: reference 'value expected', engine 'table expected, got no value'."
 
 [[waiver]]
 file    = "corpus/known-break-outside-loop-message.lua"
 reason  = "bug-wontfix"
-ticket  = "unfiled: break-outside-loop-message"
+ticket  = "lua-engine-build/35"
 expires = "2027-06-01"
 note    = "Reference says 'break outside loop at line N'; engine says 'break outside a loop at line N'."
 
 [[waiver]]
 file    = "corpus/known-format-width-message.lua"
 reason  = "bug-wontfix"
-ticket  = "unfiled: format-width-message"
+ticket  = "lua-engine-build/35"
 expires = "2027-06-01"
 note    = "string.format with a width over 99: different error text."
 
 [[waiver]]
 file    = "corpus/known-concat-invalid-value-message.lua"
 reason  = "bug-wontfix"
-ticket  = "unfiled: concat-invalid-value-message"
+ticket  = "lua-engine-build/35"
 expires = "2027-06-01"
 note    = "table.concat error omits the offending type: reference \"invalid value (table) at index 2 in table for 'concat'\"."
 
@@ -58,34 +58,34 @@ note    = "math.randomseed(1.5): reference raises 'number has no integer represe
 [[waiver]]
 file    = "corpus/known-non-ascii-output.lua"
 reason  = "bug-wontfix"
-ticket  = "unfiled: cli-non-ascii-output"
+ticket  = "lua-engine-build/35"
 expires = "2027-06-01"
 note    = "The CLI writes Lua strings through a UTF-8 console writer, so bytes above 127 are mangled; the reference writes bytes verbatim."
 
 [[waiver]]
 file    = "corpus/known-nan-sign.lua"
 reason  = "bug-wontfix"
-ticket  = "unfiled: nan-sign"
+ticket  = "lua-engine-build/35"
 expires = "2027-06-01"
 note    = "fmod(inf, 1) yields -nan in the reference, nan in the engine (printf of NaN sign). Ticket 32 covers %.14g/number formatting."
 
 [[waiver]]
 file    = "corpus/known-builtin-argument-error-position.lua"
 reason  = "bug-wontfix"
-ticket  = "unfiled: builtin-error-position"
+ticket  = "lua-engine-build/35"
 expires = "2027-06-01"
 note    = "Argument errors from most string builtins called by Lua code lack the caller position prefix (file:line:) that the reference adds."
 
 [[waiver]]
 file    = "corpus/known-parser-unclosed-block-message.lua"
 reason  = "bug-wontfix"
-ticket  = "unfiled: parser-unclosed-block-message"
+ticket  = "lua-engine-build/35"
 expires = "2027-06-01"
 note    = "Unclosed function body: reference says 'end' expected (to close 'function' at line N) near X, engine says <eof> expected near X."
 
 [[waiver]]
 file    = "corpus/known-random-empty-interval.lua"
 reason  = "bug-wontfix"
-ticket  = "unfiled: random-empty-interval-argument"
+ticket  = "lua-engine-build/35"
 expires = "2027-06-01"
 note    = "math.random(2, 1): reference blames argument #1, engine blames #2."

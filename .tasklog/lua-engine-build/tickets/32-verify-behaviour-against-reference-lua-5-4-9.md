@@ -20,3 +20,5 @@ Acceptance criteria:
 - [ ] Differential corpus for math.random, # border, number formatting committed
 - [ ] Any mismatches fixed in the engine
 - [ ] Where no reference binary could be run, the ticket answer says so and cites the source-derived expectations
+
+Update after ticket 17: a reference 5.4.9 binary was built locally in WSL Ubuntu and the differential tests ran for real. Fixed-seed `math.random`, the `#t` borders tried and `%.14g` formatting already match the reference. Remaining scope for this ticket: widen the corpora (more `#t` hole patterns, `string.format` corner cases, `tostring`/`tonumber` edge cases, more `math.random` ranges and seeds), fix any new mismatches, and fill gaps listed in ticket 35.
