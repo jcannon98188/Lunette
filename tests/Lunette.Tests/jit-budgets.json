@@ -13,7 +13,7 @@
     "Lunette.Compiler.Instruction:"
   ],
   "inlineLeftovers": {
-    "Lunette.LuaValue:FromBoolean": 5,
+    "Lunette.LuaValue:FromBoolean": 11,
     "Lunette.Compiler.Instruction:get_Op": 1
   }
 }
