@@ -41,7 +41,33 @@ internal sealed class GcState
     internal int Pause { get; set; } = 200;
     internal int StepMul { get; set; } = 100;
     /// <summary>False after <c>collectgarbage("stop")</c>: the automatic safepoint work is off.</summary>
-    internal bool Running { get; set; } = true;
+    internal bool Running
+    {
+        get => _running;
+        set
+        {
+            if (_running && !value) NoteHeap();
+            _running = value;
+        }
+    }
+
+    private bool _running = true;
+    private long _stoppedHeap;
+    private long _stoppedAllocated;
+
+    /// <summary>
+    /// <c>collectgarbage("count")</c>. Running, it is the managed heap size. Stopped, Lua frees nothing, so it is the heap at the
+    /// stop (or last explicit collection) plus what this state's thread has allocated since: a per-state measure that the
+    /// process-wide .NET collector, driven by whatever else is running, cannot shrink.
+    /// </summary>
+    internal long HeapBytes =>
+        _running ? GC.GetTotalMemory(false) : _stoppedHeap + (GC.GetAllocatedBytesForCurrentThread() - _stoppedAllocated);
+
+    private void NoteHeap()
+    {
+        _stoppedHeap = GC.GetTotalMemory(false);
+        _stoppedAllocated = GC.GetAllocatedBytesForCurrentThread();
+    }
     internal bool InCollector => _inCollector;
 
     // ---- marking ----
@@ -173,6 +199,7 @@ internal sealed class GcState
                 if (Drain() == 0) break;
             }
             _allocatedAtLastCycle = GC.GetAllocatedBytesForCurrentThread();
+            NoteHeap();
             return true;
         }
         finally { _inCollector = false; }
@@ -211,6 +238,7 @@ internal sealed class GcState
             GC.Collect(1, GCCollectionMode.Forced, blocking: true);
             GC.WaitForPendingFinalizers();
             Drain();
+            NoteHeap();
             return true;
         }
         finally { _inCollector = false; }

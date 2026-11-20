@@ -24,6 +24,19 @@ public class GcTests
             """));
 
     [Fact]
+    public void Count_grows_with_allocation_while_the_collector_is_stopped_whatever_the_process_does() =>
+        Assert.Equal("true\ttrue\n", Run("""
+            collectgarbage(); collectgarbage()
+            local x = collectgarbage("count")
+            collectgarbage("stop")
+            for i = 1, 1500000 do local a = {} end        -- well over 64 MB of tables, none of which the stopped collector frees
+            local grown = collectgarbage("count")
+            collectgarbage("restart")
+            collectgarbage()
+            print(grown > x + 32 * 1024, collectgarbage("count") < grown)
+            """));
+
+    [Fact]
     public void Step_returns_true_and_stop_restart_toggle_isrunning() =>
         Assert.Equal("true\ttrue\nfalse\ttrue\n", Run("""
             print(collectgarbage("step"), collectgarbage("isrunning"))

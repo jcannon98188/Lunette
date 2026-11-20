@@ -28,7 +28,7 @@ internal static class GcLib
                 gc.Running = true;
                 return Rets.One(LuaValue.FromInteger(0));
             case "count":
-                return Rets.One(LuaValue.FromFloat(GC.GetTotalMemory(false) / 1024.0));
+                return Rets.One(LuaValue.FromFloat(gc.HeapBytes / 1024.0));
             case "step":
                 return Rets.One(LuaValue.FromBoolean(gc.StepBy(LibArgs.OptInteger("collectgarbage", args, 1, 0))));
             case "isrunning":
