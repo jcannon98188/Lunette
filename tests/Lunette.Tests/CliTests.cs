@@ -29,6 +29,15 @@ public class CliTests
     }
 
     [Fact]
+    public void The_driver_survives_a_script_that_clears_standard_library_globals()
+    {
+        // all.lua's whole run leaves the global 'os' nil; lua.c's exit does not depend on Lua globals.
+        var (code, _, e) = Run("-e", "os = nil; string = nil; table = nil; debug = nil");
+        Assert.Equal("", e);
+        Assert.Equal(0, code);
+    }
+
+    [Fact]
     public void Reports_runtime_errors_on_stderr_with_exit_code_1()
     {
         string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".lua");

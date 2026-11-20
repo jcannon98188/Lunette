@@ -52,6 +52,11 @@ internal static class Driver
     }
 
     private const string Body = """
+-- The driver is Lua code, but like lua.c's C driver it must not depend on globals the script may have cleared
+-- (all.lua's whole run leaves 'os' nil): capture everything it uses after the script has run.
+local io, os, string, table, debug, package = io, os, string, table, debug, package
+local xpcall, pcall, load, loadfile, require, error, warn, print = xpcall, pcall, load, loadfile, require, error, warn, print
+local tostring, type, getmetatable, ipairs = tostring, type, getmetatable, ipairs
 local stdout, stderr = io.stdout, io.stderr
 
 local function message(msg)
