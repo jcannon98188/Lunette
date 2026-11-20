@@ -49,6 +49,7 @@ Settled in charting (grilling with the user):
 - CI and how the suite and differential tests run in it.
 - Enforcement of code-discipline rules: which Roslyn analyzers and tests guard the performance rules (e.g. no intermediate string allocations, header-aware string access, allocation budgets on hot paths).
 - Lifetime and weakness of the short-string intern table under the .NET GC (depends on the GC/weak-table approach above).
+- Interpreter-loop JIT budget enforcement (from [JIT MinOpts thresholds](tickets/11-jit-minopts-thresholds-and-detecting-them-in-ci.md)): CI gate on IL instruction count / local refs / blocks / locals (about 70% of the JIT limits), a `MinOptJitted` event check, and a leftover-`call` check for the 921-locals inlining cliff; whether the loop method carries `AggressiveOptimization`. Folds into the code-discipline enforcement and CI items above.
 
 ## Out of scope
 
