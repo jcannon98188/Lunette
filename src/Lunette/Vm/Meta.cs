@@ -2,7 +2,27 @@ using Lunette.Compiler;
 
 namespace Lunette.Vm;
 
-/// <summary>Metamethod dispatch: indexing, assignment, arithmetic, comparison, length and equality.</summary>
+/// <summary>A metamethod call an instruction needs: the function and up to three arguments.</summary>
+internal struct MetaCall
+{
+    public LuaValue Fn, A, B, C;
+    public int N;
+
+    public MetaCall(LuaValue fn, LuaValue a, LuaValue b, LuaValue c, int n)
+    {
+        Fn = fn;
+        A = a;
+        B = b;
+        C = c;
+        N = n;
+    }
+}
+
+/// <summary>
+/// Metamethod dispatch: indexing, assignment, arithmetic, comparison, length and equality. Each operation has a
+/// <c>Prepare</c> form that only resolves which metamethod to call (so the VM loop can push a Frame for it and stay yieldable)
+/// and a convenience form that also calls it on a nested loop (non-yieldable).
+/// </summary>
 internal static class Meta
 {
     /// <summary>Longest __index/__newindex chain followed before assuming a loop (PUC's MAXTAGLOOP).</summary>
@@ -32,26 +52,43 @@ internal static class Meta
     // ---- indexing ----
 
     /// <summary>Full <c>t[key]</c> read: raw lookup, then the __index chain.</summary>
-    public static LuaValue Index(LuaState state, LuaValue t, LuaValue key, Proto? p, int pc)
+    public static LuaValue Index(LuaState state, LuaValue t, LuaValue key, Proto? p, int pc) =>
+        PrepareIndex(t, key, p, pc, out LuaValue v, out MetaCall mc) ? CallMeta(state, in mc) : v;
+
+    /// <summary>Calls a prepared metamethod on a nested loop and returns its first result.</summary>
+    public static LuaValue CallMeta(LuaState state, in MetaCall mc) => Interpreter.Call1(state, mc.Fn, mc.A, mc.B, mc.C, mc.N);
+
+    /// <summary>Resolves <c>t[key]</c>: returns false with the value, or true with the __index function to call.</summary>
+    public static bool PrepareIndex(LuaValue t, LuaValue key, Proto? p, int pc, out LuaValue result, out MetaCall mc)
     {
+        mc = default;
+        result = default;
         for (int loop = 0; loop < MaxTagLoop; loop++)
         {
             LuaValue tm;
             if (t.Ref is LuaTable tbl)
             {
                 LuaValue v = tbl.Get(key);
-                if (!v.IsNil) return v;
+                if (!v.IsNil)
+                {
+                    result = v;
+                    return false;
+                }
                 var mt = tbl.Metatable;
-                if (mt is null) return default;
+                if (mt is null) return false;
                 tm = mt.GetTagMethod(TagMethod.Index);
-                if (tm.IsNil) return default;
+                if (tm.IsNil) return false;
             }
             else
             {
                 tm = GetTagMethod(t, TagMethod.Index);
                 if (tm.IsNil) throw IndexError(t, p, pc, loop == 0);
             }
-            if (tm.IsFunction) return Interpreter.Call1(state, tm, t, key, default, 2);
+            if (tm.IsFunction)
+            {
+                mc = new MetaCall(tm, t, key, default, 2);
+                return true;
+            }
             t = tm;
         }
         throw new LuaException($"{At(p, pc)}'__index' chain too long; possible loop");
@@ -68,6 +105,13 @@ internal static class Meta
     /// <summary>Full <c>t[key] = value</c>: raw store when allowed, otherwise the __newindex chain.</summary>
     public static void SetIndex(LuaState state, LuaValue t, LuaValue key, LuaValue value, Proto? p, int pc)
     {
+        if (PrepareSetIndex(t, key, value, p, pc, out MetaCall mc)) CallMeta(state, in mc);
+    }
+
+    /// <summary>Does the store when no function is involved (returns false), else returns true with the __newindex call.</summary>
+    public static bool PrepareSetIndex(LuaValue t, LuaValue key, LuaValue value, Proto? p, int pc, out MetaCall mc)
+    {
+        mc = default;
         for (int loop = 0; loop < MaxTagLoop; loop++)
         {
             LuaValue tm;
@@ -77,7 +121,7 @@ internal static class Meta
                 if (mt is null || !tbl.Get(key).IsNil || (tm = mt.GetTagMethod(TagMethod.NewIndex)).IsNil)
                 {
                     RawSet(tbl, key, value, p, pc);
-                    return;
+                    return false;
                 }
             }
             else
@@ -87,8 +131,8 @@ internal static class Meta
             }
             if (tm.IsFunction)
             {
-                Interpreter.Call1(state, tm, t, key, value, 3);
-                return;
+                mc = new MetaCall(tm, t, key, value, 3);
+                return true;
             }
             t = tm;
         }
@@ -115,7 +159,10 @@ internal static class Meta
     };
 
     /// <summary>Binary arithmetic where an operand is not a number: try the metamethods, else raise the error.</summary>
-    public static LuaValue Arith(LuaState state, TagMethod ev, LuaValue a, LuaValue b, Proto? p, int pc)
+    public static LuaValue Arith(LuaState state, TagMethod ev, LuaValue a, LuaValue b, Proto? p, int pc) =>
+        CallMeta(state, PrepareArith(ev, a, b, p, pc));
+
+    public static MetaCall PrepareArith(TagMethod ev, LuaValue a, LuaValue b, Proto? p, int pc)
     {
         LuaValue tm = GetTagMethod(a, ev);
         if (tm.IsNil) tm = GetTagMethod(b, ev);
@@ -125,7 +172,7 @@ internal static class Meta
             LuaValue bad = left ? a : b;
             throw new LuaException($"{At(p, pc)}attempt to perform {OperationName(ev)} on a {bad.TypeName} value{VarInfo.DescribeOperand(p, pc, left)}");
         }
-        return Interpreter.Call1(state, tm, a, b, default, 2);
+        return new MetaCall(tm, a, b, default, 2);
     }
 
     private static string OperationName(TagMethod ev) =>
@@ -133,44 +180,70 @@ internal static class Meta
 
     public static LuaValue Unm(LuaState state, LuaValue a, Proto? p, int pc) => Unary(state, TagMethod.Unm, a, p, pc);
 
-    public static LuaValue Unary(LuaState state, TagMethod ev, LuaValue a, Proto? p, int pc)
+    public static LuaValue Unary(LuaState state, TagMethod ev, LuaValue a, Proto? p, int pc) =>
+        CallMeta(state, PrepareUnary(ev, a, p, pc));
+
+    public static MetaCall PrepareUnary(TagMethod ev, LuaValue a, Proto? p, int pc)
     {
         LuaValue tm = GetTagMethod(a, ev);
         if (tm.IsNil) throw new LuaException($"{At(p, pc)}attempt to perform {OperationName(ev)} on a {a.TypeName} value{VarInfo.DescribeOperand(p, pc, true)}");
-        return Interpreter.Call1(state, tm, a, a, default, 2);
+        return new MetaCall(tm, a, a, default, 2);
     }
 
-    public static LuaValue Len(LuaState state, LuaValue v, Proto? p, int pc)
+    public static LuaValue Len(LuaState state, LuaValue v, Proto? p, int pc) =>
+        PrepareLen(v, p, pc, out LuaValue res, out MetaCall mc) ? CallMeta(state, in mc) : res;
+
+    public static bool PrepareLen(LuaValue v, Proto? p, int pc, out LuaValue result, out MetaCall mc)
     {
+        mc = default;
         if (v.Ref is LuaTable t)
         {
             var mt = t.Metatable;
-            if (mt is null) return LuaValue.FromInteger(t.Length());
-            LuaValue tm = mt.GetTagMethod(TagMethod.Len);
-            if (tm.IsNil) return LuaValue.FromInteger(t.Length());
-            return Interpreter.Call1(state, tm, v, v, default, 2);
+            LuaValue tm = mt is null ? default : mt.GetTagMethod(TagMethod.Len);
+            if (tm.IsNil)
+            {
+                result = LuaValue.FromInteger(t.Length());
+                return false;
+            }
+            result = default;
+            mc = new MetaCall(tm, v, v, default, 2);
+            return true;
         }
-        if (v.Ref is string s) return LuaValue.FromInteger(s.Length);
+        if (v.Ref is string s)
+        {
+            result = LuaValue.FromInteger(s.Length);
+            return false;
+        }
+        result = default;
         throw new LuaException($"{At(p, pc)}attempt to get length of a {v.TypeName} value{VarInfo.DescribeOperand(p, pc, true)}");
     }
 
-    public static bool Equal(LuaState state, LuaValue a, LuaValue b)
+    public static bool Equal(LuaState state, LuaValue a, LuaValue b) =>
+        PrepareEqual(a, b, out bool eq, out MetaCall mc) ? !CallMeta(state, in mc).IsFalsy : eq;
+
+    /// <summary>Raw equality (returns false), or true with the __eq call whose truthiness is the answer.</summary>
+    public static bool PrepareEqual(LuaValue a, LuaValue b, out bool result, out MetaCall mc)
     {
-        if (LuaValue.RawEquals(a, b)) return true;
-        if (a.Ref is not LuaTable ta || b.Ref is not LuaTable tb) return false;
+        mc = default;
+        result = LuaValue.RawEquals(a, b);
+        if (result || a.Ref is not LuaTable ta || b.Ref is not LuaTable tb) return false;
         LuaValue tm = ta.Metatable is null ? default : ta.Metatable.GetTagMethod(TagMethod.Eq);
         if (tm.IsNil) tm = tb.Metatable is null ? default : tb.Metatable.GetTagMethod(TagMethod.Eq);
         if (tm.IsNil) return false;
-        return !Interpreter.Call1(state, tm, a, b, default, 2).IsFalsy;
+        mc = new MetaCall(tm, a, b, default, 2);
+        return true;
     }
 
     /// <summary>Order comparison where an operand is not a number: __lt / __le, else the comparison error.</summary>
-    public static bool Order(LuaState state, TagMethod ev, LuaValue a, LuaValue b, Proto? p, int pc)
+    public static bool Order(LuaState state, TagMethod ev, LuaValue a, LuaValue b, Proto? p, int pc) =>
+        !CallMeta(state, PrepareOrder(ev, a, b, p, pc)).IsFalsy;
+
+    public static MetaCall PrepareOrder(TagMethod ev, LuaValue a, LuaValue b, Proto? p, int pc)
     {
         LuaValue tm = GetTagMethod(a, ev);
         if (tm.IsNil) tm = GetTagMethod(b, ev);
         if (tm.IsNil) throw Compare.Error(a, b, p, pc);
-        return !Interpreter.Call1(state, tm, a, b, default, 2).IsFalsy;
+        return new MetaCall(tm, a, b, default, 2);
     }
 
     // ---- tostring ----

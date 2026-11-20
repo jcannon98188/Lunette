@@ -9,12 +9,15 @@ public sealed class LuaState
     internal readonly Dictionary<string, LuaValue> Globals = new();
     internal readonly Coroutine Main = new();
     /// <summary>The coroutine currently executing.</summary>
-    internal Coroutine Running => Main;
+    internal Coroutine Running;
     /// <summary>Depth of nested native-to-Lua calls in progress.</summary>
     internal int NativeDepth;
 
     public LuaState()
     {
+        Main.IsMain = true;
+        Main.Status = CoStatus.Running;
+        Running = Main;
         Globals["print"] = LuaValue.FromObject(new BuiltinFunction(static (state, args) =>
         {
             var o = state.Output;
@@ -28,6 +31,7 @@ public sealed class LuaState
         }));
         BaseLib.Register(this);
         ErrorLib.Register(this);
+        CoroutineLib.Register(this);
     }
 
     public TextWriter Output { get; set; } = Console.Out;

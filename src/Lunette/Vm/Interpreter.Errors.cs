@@ -18,6 +18,8 @@ internal static partial class Interpreter
         Done,
         /// <summary>A new Frame is ready in <c>co.ResumeFrame</c>.</summary>
         NewFrame,
+        /// <summary>The coroutine yielded: the loop must return to the resumer.</summary>
+        Yield,
     }
 
     /// <summary>How many times a failing xpcall handler is retried on its own error before "error in error handling".</summary>
@@ -154,6 +156,8 @@ internal static partial class Interpreter
                 int fixedArgs = x ? 2 : 1;
                 ErrorLib.CheckProtectedArgs(x, st.AsSpan(fa + 1, nargs));
                 LuaValue fn = st[fa + 1];
+                if (fn.Ref is BuiltinFunction { Kind: BuiltinKind.Yield })
+                    return DoYield(state, co, st.AsSpan(fa + 1 + fixedArgs, nargs - fixedArgs), fa, wanted, true);
                 if (fn.Ref is not LuaClosure cl) return Special.None;
                 LuaValue handler = x ? st[fa + 2] : default;
                 int ci = fa + fixedArgs;
@@ -165,6 +169,8 @@ internal static partial class Interpreter
                 co.ResumeFrame = nf;
                 return Special.NewFrame;
             }
+            case BuiltinKind.Yield:
+                return DoYield(state, co, st.AsSpan(fa + 1, nargs), fa, wanted, false);
             default:
                 return Special.None;
         }
