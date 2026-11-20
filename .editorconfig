@@ -1,0 +1,11 @@
+root = true
+
+[*.cs]
+# Analyzer diagnostics are errors, locally and in CI. The only suppression is [SuppressMessage] with a
+# Justification; ci/check-suppressions.js ratchets the count (docs: ticket lua-engine-spec/17).
+dotnet_diagnostic.RS0030.severity = error
+dotnet_diagnostic.LD001.severity = error
+dotnet_diagnostic.LD002.severity = error
+dotnet_diagnostic.LD003.severity = error
+dotnet_diagnostic.LD004.severity = error
+dotnet_diagnostic.LD005.severity = error

@@ -1,0 +1,7 @@
+N:System.Reflection.Emit;Dynamic code generation is banned in core (AOT, ADR 0004); IL backends live in satellite assemblies
+N:System.Linq;LINQ allocates; hand-write the loop
+T:System.Text.Encoding;Lua strings are bytes; use the byte-based string helpers
+T:System.Activator;Reflection-based construction is banned in core (AOT)
+M:System.Type.GetType(System.String);Reflection-based type lookup is banned in core (AOT)
+M:System.Type.GetType(System.String,System.Boolean);Reflection-based type lookup is banned in core (AOT)
+M:System.Type.GetType(System.String,System.Boolean,System.Boolean);Reflection-based type lookup is banned in core (AOT)

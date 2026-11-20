@@ -1,0 +1,7 @@
+<Project>
+  <!-- Every shipping project runs the custom analyzers (LD001-LD005). Test projects and the analyzers themselves do not. -->
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'Lunette' Or '$(MSBuildProjectName)' == 'Lunette.Cli' Or '$(MSBuildProjectName)' == 'Lunette.Interop'">
+    <ProjectReference Include="$(MSBuildThisFileDirectory)src\Lunette.Analyzers\Lunette.Analyzers.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+</Project>

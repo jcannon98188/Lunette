@@ -2,8 +2,16 @@
   <PropertyGroup>
     <AssemblyName>Lunette</AssemblyName>
     <RootNamespace>Lunette</RootNamespace>
+    <!-- The only assembly that may use unsafe, and then only in the Lunette.Unsafe helpers (LD005). -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Enables the trim/AOT analyzers (IL2xxx/IL3xxx): no reflection or dynamic code in core. -->
+    <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Lunette.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="4.14.0" PrivateAssets="all" />
+    <AdditionalFiles Include="BannedSymbols.txt" />
   </ItemGroup>
 </Project>

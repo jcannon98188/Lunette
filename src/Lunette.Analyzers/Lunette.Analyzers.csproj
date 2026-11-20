@@ -1,10 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Roslyn requires netstandard2.0 for analyzer assemblies (ADR 0004 exception). Analyzers arrive in a later ticket. -->
+  <!-- Roslyn requires netstandard2.0 for analyzer assemblies (ADR 0004 exception). -->
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
     <AssemblyName>Lunette.Analyzers</AssemblyName>
     <RootNamespace>Lunette.Analyzers</RootNamespace>
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <ImplicitUsings>disable</ImplicitUsings>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <!-- Analyzer descriptors are not shipped as a package; release tracking adds nothing here. -->
+    <NoWarn>$(NoWarn);RS2008</NoWarn>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" PrivateAssets="all" />
+  </ItemGroup>
 </Project>
