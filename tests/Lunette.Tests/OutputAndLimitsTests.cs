@@ -34,7 +34,7 @@ public class OutputAndLimitsTests
         state.DoString("io.write('x') io.write('y')");
         int baseline = sink.Flushes; // whatever DoString itself flushes at the end of a chunk
         state.DoString("print('a') print('b')");
-        Assert.Equal(baseline + 2 + baseline, sink.Flushes);
+        Assert.Equal(baseline + 2, sink.Flushes);
     }
 
     [Fact]

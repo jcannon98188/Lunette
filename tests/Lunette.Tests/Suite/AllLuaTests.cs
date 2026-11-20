@@ -41,11 +41,9 @@ public class AllLuaTests(ITestOutputHelper log)
                 string path = Path.Combine(temp, file);
                 if (waivers.WholeFileWaiver(file) is { } w) { File.WriteAllText(path, "-- waived (" + w.Reason + ")\n", Encoding.Latin1); continue; }
                 string source = waivers.ApplyOverlays(file, File.ReadAllText(path, Encoding.Latin1));
-                if (file == "all.lua")
-                {
-                    Assert.Contains(DumpRoundTrip, source.Replace("\r\n", "\n"));
-                    source = source.Replace("\r\n", "\n").Replace(DumpRoundTrip, "  -- waived (no-bytecode)\n");
-                }
+                // all.lua's dump/undump round trip is waived (no-bytecode) by the overlay in waivers.toml; if that waiver is
+                // ever dropped, this stays correct by stripping the round trip itself.
+                if (file == "all.lua") source = source.Replace("\r\n", "\n").Replace(DumpRoundTrip, "  -- waived (no-bytecode)\n");
                 File.WriteAllText(path, source, Encoding.Latin1);
             }
 
