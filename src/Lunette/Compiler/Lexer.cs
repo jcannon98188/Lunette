@@ -6,10 +6,11 @@ internal enum Tok
 {
     Eof, Name, Integer, Float,
     Local, Nil, True, False,
-    If, Then, Else, Elseif, End, While, Do, Repeat, Until, For, Function, Return, Break, And, Or, Not,
+    If, Then, Else, Elseif, End, While, Do, Repeat, Until, For, Function, Return, Break, And, Or, Not, In,
     Eq, Ne, Lt, Le, Gt, Ge, Ellipsis,
     Plus, Minus, Star, Slash, DSlash, Percent, Caret,
     LParen, RParen, Comma, Assign, Semi,
+    String, Hash, LBrace, RBrace, LBracket, RBracket, Dot, Colon,
 }
 
 internal struct Token
@@ -49,7 +50,7 @@ internal sealed class Lexer(string src, string chunkName)
                 "if" => Tok.If, "then" => Tok.Then, "else" => Tok.Else, "elseif" => Tok.Elseif, "end" => Tok.End,
                 "while" => Tok.While, "do" => Tok.Do, "repeat" => Tok.Repeat, "until" => Tok.Until, "for" => Tok.For,
                 "function" => Tok.Function, "return" => Tok.Return, "break" => Tok.Break,
-                "and" => Tok.And, "or" => Tok.Or, "not" => Tok.Not,
+                "in" => Tok.In, "and" => Tok.And, "or" => Tok.Or, "not" => Tok.Not,
                 _ => Tok.Name,
             };
             return t;
@@ -67,6 +68,15 @@ internal sealed class Lexer(string src, string chunkName)
                 break;
             case '%': t.Kind = Tok.Percent; break;
             case '^': t.Kind = Tok.Caret; break;
+            case '#': t.Kind = Tok.Hash; break;
+            case '{': t.Kind = Tok.LBrace; break;
+            case '}': t.Kind = Tok.RBrace; break;
+            case '[': t.Kind = Tok.LBracket; break;
+            case ']': t.Kind = Tok.RBracket; break;
+            case ':': t.Kind = Tok.Colon; break;
+            case '"':
+            case '\'':
+                return QuotedString(t, c);
             case '(': t.Kind = Tok.LParen; break;
             case ')': t.Kind = Tok.RParen; break;
             case ',': t.Kind = Tok.Comma; break;
@@ -84,11 +94,48 @@ internal sealed class Lexer(string src, string chunkName)
                 t.Kind = Tok.Gt; break;
             case '.':
                 if (_pos + 1 < src.Length && src[_pos] == '.' && src[_pos + 1] == '.') { _pos += 2; t.Kind = Tok.Ellipsis; t.Text = "..."; return t; }
-                throw Error("unexpected symbol near '.'", _line);
+                t.Kind = Tok.Dot; break;
             case ';': t.Kind = Tok.Semi; break;
             default: throw Error($"unexpected symbol near '{c}'", _line);
         }
         t.Text = c.ToString();
+        return t;
+    }
+
+    private Token QuotedString(Token t, char quote)
+    {
+        var sb = new System.Text.StringBuilder();
+        while (true)
+        {
+            if (_pos >= src.Length || src[_pos] == '\n') throw Error("unfinished string", _line);
+            char c = src[_pos++];
+            if (c == quote) break;
+            if (c != '\\') { sb.Append(c); continue; }
+            if (_pos >= src.Length) throw Error("unfinished string", _line);
+            char e = src[_pos++];
+            switch (e)
+            {
+                case 'n': sb.Append('\n'); break;
+                case 't': sb.Append('\t'); break;
+                case 'r': sb.Append('\r'); break;
+                case 'a': sb.Append('\a'); break;
+                case 'b': sb.Append('\b'); break;
+                case 'f': sb.Append('\f'); break;
+                case 'v': sb.Append('\v'); break;
+                case '\n': _line++; sb.Append('\n'); break;
+                case >= '0' and <= '9':
+                {
+                    int v = e - '0';
+                    for (int k = 0; k < 2 && _pos < src.Length && char.IsAsciiDigit(src[_pos]); k++) v = v * 10 + (src[_pos++] - '0');
+                    if (v > 255) throw Error("decimal escape too large", _line);
+                    sb.Append((char)v);
+                    break;
+                }
+                default: sb.Append(e); break;
+            }
+        }
+        t.Kind = Tok.String;
+        t.Text = sb.ToString();
         return t;
     }
 

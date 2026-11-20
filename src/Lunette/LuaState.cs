@@ -8,6 +8,10 @@ public sealed class LuaState
 {
     internal readonly Dictionary<string, LuaValue> Globals = new();
     internal readonly Coroutine Main = new();
+    /// <summary>The coroutine currently executing.</summary>
+    internal Coroutine Running => Main;
+    /// <summary>Depth of nested native-to-Lua calls in progress.</summary>
+    internal int NativeDepth;
 
     public LuaState()
     {
@@ -17,11 +21,12 @@ public sealed class LuaState
             for (int i = 0; i < args.Length; i++)
             {
                 if (i > 0) o.Write('\t');
-                o.Write(args[i].ToString());
+                o.Write(Meta.ToStringValue(state, args[i]));
             }
             o.Write(o.NewLine);
             return null;
         }));
+        BaseLib.Register(this);
         Globals["assert"] = LuaValue.FromObject(new BuiltinFunction(static (_, args) =>
         {
             if (args.Length == 0) throw new LuaException("bad argument #1 to 'assert' (value expected)");

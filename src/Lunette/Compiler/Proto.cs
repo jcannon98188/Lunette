@@ -32,6 +32,14 @@ internal enum OpCode : byte
     Closure,   // R[A] = closure(Protos[Bx])
     Close,     // close upvalues >= R[A]
     Vararg,    // R[A .. A+C-2] = ... ; C == 0: all, sets top
+    NewTable,  // R[A] = {} sized for B hash entries and, from the Extra that follows, Ax array slots
+    GetTable,  // R[A] = R[B][R[C]]
+    SetTable,  // R[A][R[B]] = R[C]
+    SetList,   // R[A][Ax+1 .. Ax+B] = R[A+1 .. A+B] (Ax from the Extra that follows); B == 0: up to top
+    Self,      // R[A+1] = R[B]; R[A] = R[B][R[C]]
+    Len,       // R[A] = #R[B]
+    TForLoop,  // generic for at R[A..A+3], loop variables from R[A+4]: if R[A+4] is not nil, R[A+2] = R[A+4] and run the next instruction (a Jmp back), else skip it
+    Extra,     // operand word of the preceding instruction (Ax)
 }
 
 /// <summary>One 32-bit instruction: op(8) A(8) B(8) C(8); Bx overlays B and C as 16 bits; Ax is the upper 24 bits.</summary>
@@ -49,6 +57,8 @@ internal readonly record struct Instruction(uint Raw)
 
     public static Instruction ABx(OpCode op, int a, int bx) =>
         new((uint)op | ((uint)a << 8) | ((uint)bx << 16));
+
+    public static Instruction Extra(int ax) => new((uint)OpCode.Extra | ((uint)ax << 8));
 
     public static Instruction JmpTo(int target) => new((uint)OpCode.Jmp | ((uint)target << 8));
 }

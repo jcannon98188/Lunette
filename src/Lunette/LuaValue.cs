@@ -45,6 +45,15 @@ public readonly struct LuaValue
 
     internal static LuaValue FromObject(object o) => new(o, 0);
 
+    // Stopgap until the byte-string ticket: a .NET string stands in for a Lua string.
+    internal static LuaValue FromString(string s) => new(s, 0);
+    internal static LuaValue FromTable(LuaTable t) => new(t, 0);
+
+    internal bool IsString => Ref is string;
+    internal bool IsTable => Ref is LuaTable;
+    internal bool IsFunction => Ref is LuaFunction;
+    internal int AsBooleanBit => ReferenceEquals(Ref, TrueTag) ? 1 : 0;
+
     /// <summary>Primitive equality: no metamethods; an integer equals a float of the same mathematical value.</summary>
     internal static bool RawEquals(LuaValue a, LuaValue b)
     {
@@ -58,7 +67,7 @@ public readonly struct LuaValue
             if (b.IsFloat) return a.AsFloat == b.AsFloat;
             return b.IsInteger && FloatEqualsInteger(a.AsFloat, b.Bits);
         }
-        return ReferenceEquals(a.Ref, b.Ref);
+        return ReferenceEquals(a.Ref, b.Ref) || (a.Ref is string sa && b.Ref is string sb && sa == sb);
     }
 
     private static bool FloatEqualsInteger(double f, long i) =>
@@ -71,6 +80,8 @@ public readonly struct LuaValue
             _ when IsNumber => "number",
             _ when IsBoolean => "boolean",
             LuaFunction => "function",
+            LuaTable => "table",
+            string => "string",
             _ => "userdata",
         };
 

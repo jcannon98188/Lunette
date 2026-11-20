@@ -273,8 +273,8 @@ internal sealed class LuaCompiler
                 BreakStatement();
                 return;
             case Tok.Name:
-                if (Peek().Kind is Tok.Assign or Tok.Comma) AssignStatement();
-                else CallStatement();
+            case Tok.LParen:
+                ExprStatement();
                 return;
             default:
                 throw Err("unexpected symbol");
@@ -328,7 +328,7 @@ internal sealed class LuaCompiler
         string name = ExpectName();
         int reg = Alloc();
         _fs.Locals.Add(new LocalVar(name, reg));
-        FunctionBody(reg, line);
+        FunctionBody(reg, line, false);
     }
 
     private void FunctionStatement()
@@ -337,9 +337,38 @@ internal sealed class LuaCompiler
         Advance();
         string name = ExpectName();
         int save = _fs.Free;
-        int tmp = Alloc();
-        FunctionBody(tmp, line);
-        StoreVariable(name, tmp, line);
+        if (_tok.Kind is Tok.Dot or Tok.Colon)
+        {
+            int obj = Alloc();
+            LoadVariable(name, obj, line);
+            string field = "";
+            bool isMethod = false;
+            while (_tok.Kind is Tok.Dot or Tok.Colon)
+            {
+                if (field.Length > 0)
+                {
+                    int kk = Alloc();
+                    Emit(Instruction.ABx(OpCode.LoadK, kk, AddConst(LuaValue.FromString(field))), line);
+                    Emit(Instruction.Abc(OpCode.GetTable, obj, obj, kk), line);
+                    _fs.Free = obj + 1;
+                }
+                isMethod = _tok.Kind == Tok.Colon;
+                Advance();
+                field = ExpectName();
+                if (isMethod) break;
+            }
+            int key = Alloc();
+            Emit(Instruction.ABx(OpCode.LoadK, key, AddConst(LuaValue.FromString(field))), line);
+            int fnReg = Alloc();
+            FunctionBody(fnReg, line, isMethod);
+            Emit(Instruction.Abc(OpCode.SetTable, obj, key, fnReg), line);
+        }
+        else
+        {
+            int tmp = Alloc();
+            FunctionBody(tmp, line, false);
+            StoreVariable(name, tmp, line);
+        }
         _fs.Free = save;
     }
 
@@ -362,31 +391,125 @@ internal sealed class LuaCompiler
         for (int i = 0; i < names.Count; i++) _fs.Locals.Add(new LocalVar(names[i], baseReg + i));
     }
 
-    private void AssignStatement()
+    /// <summary>A suffixed expression seen as a statement: an assignable place or a call.</summary>
+    private struct Place
     {
-        var names = new List<(string Name, int Line)>();
-        while (true)
-        {
-            names.Add((ExpectName(), _tok.Line));
-            if (_tok.Kind != Tok.Comma) break;
-            Advance();
-        }
-        Expect(Tok.Assign, "=");
-        int baseReg = _fs.Free;
-        var (n, open) = ExprList();
-        AdjustList(names.Count, n, open, baseReg);
-        for (int i = names.Count - 1; i >= 0; i--) StoreVariable(names[i].Name, baseReg + i, names[i].Line);
-        _fs.Free = baseReg;
+        public int Kind; // 0 variable, 1 indexed (Table[Key]), 2 call
+        public string Name;
+        public int Table;
+        public int Key;
+        public int CallIdx;
+        public int Line;
     }
 
-    private void CallStatement()
+    private static bool IsSuffixStart(Tok t) => t is Tok.Dot or Tok.LBracket or Tok.Colon or Tok.LParen or Tok.String or Tok.LBrace;
+
+    private Place ParsePlace()
+    {
+        int line = _tok.Line;
+        if (_tok.Kind == Tok.Name)
+        {
+            string name = _tok.Text;
+            Advance();
+            if (!IsSuffixStart(_tok.Kind)) return new Place { Kind = 0, Name = name, Line = line };
+            int reg = Alloc();
+            LoadVariable(name, reg, line);
+            return Suffixes(reg, true, line);
+        }
+        int r = Alloc();
+        Advance(); // (
+        Expr(r, 0);
+        Expect(Tok.RParen, ")");
+        _openIdx = -1;
+        if (!IsSuffixStart(_tok.Kind)) throw Err("syntax error");
+        return Suffixes(r, true, line);
+    }
+
+    private void ExprStatement()
     {
         int save = _fs.Free;
-        int tmp = Alloc();
-        Expr(tmp, 0);
-        if (_openIdx < 0 || _fs.Code[_openIdx].Op != OpCode.Call) throw Err("syntax error");
-        SetOpen(_openIdx, 0);
+        var places = new List<Place> { ParsePlace() };
+        if (places[0].Kind == 2)
+        {
+            if (_tok.Kind is Tok.Assign or Tok.Comma) throw Err("syntax error");
+            SetOpen(places[0].CallIdx, 0);
+            _fs.Free = save;
+            return;
+        }
+        while (_tok.Kind == Tok.Comma)
+        {
+            Advance();
+            var p = ParsePlace();
+            if (p.Kind == 2) throw Err("syntax error");
+            places.Add(p);
+        }
+        if (_tok.Kind != Tok.Assign) throw Err("syntax error");
+        Advance();
+        int baseReg = _fs.Free;
+        var (n, open) = ExprList();
+        AdjustList(places.Count, n, open, baseReg);
+        for (int i = places.Count - 1; i >= 0; i--)
+        {
+            var p = places[i];
+            if (p.Kind == 0) StoreVariable(p.Name, baseReg + i, p.Line);
+            else Emit(Instruction.Abc(OpCode.SetTable, p.Table, p.Key, baseReg + i), p.Line);
+        }
         _fs.Free = save;
+    }
+
+    /// <summary>
+    /// Applies field, index, method-call and call suffixes to the value in register <paramref name="reg"/>.
+    /// With <paramref name="place"/> the final index suffix is left unloaded so it can be assigned to.
+    /// </summary>
+    private Place Suffixes(int reg, bool place, int line)
+    {
+        while (true)
+        {
+            int l = _tok.Line;
+            switch (_tok.Kind)
+            {
+                case Tok.Dot:
+                case Tok.LBracket:
+                {
+                    int key = _fs.Free;
+                    if (_tok.Kind == Tok.Dot)
+                    {
+                        Advance();
+                        string name = ExpectName();
+                        int k = Alloc();
+                        Emit(Instruction.ABx(OpCode.LoadK, k, AddConst(LuaValue.FromString(name))), l);
+                    }
+                    else
+                    {
+                        Advance();
+                        Expr(Alloc(), 0);
+                        Expect(Tok.RBracket, "]");
+                    }
+                    if (place && !IsSuffixStart(_tok.Kind))
+                        return new Place { Kind = 1, Table = reg, Key = key, Line = l };
+                    Emit(Instruction.Abc(OpCode.GetTable, reg, reg, key), l);
+                    _fs.Free = Math.Max(key, reg + 1);
+                    _openIdx = -1;
+                    break;
+                }
+                case Tok.Colon:
+                {
+                    Advance();
+                    string name = ExpectName();
+                    CallSuffix(reg, name);
+                    if (place && !IsSuffixStart(_tok.Kind)) return new Place { Kind = 2, CallIdx = _openIdx, Line = l };
+                    break;
+                }
+                case Tok.LParen:
+                case Tok.String:
+                case Tok.LBrace:
+                    CallSuffix(reg, null);
+                    if (place && !IsSuffixStart(_tok.Kind)) return new Place { Kind = 2, CallIdx = _openIdx, Line = l };
+                    break;
+                default:
+                    return default;
+            }
+        }
     }
 
     private void IfStatement()
@@ -471,6 +594,11 @@ internal sealed class LuaCompiler
         int line = _tok.Line;
         Advance();
         string name = ExpectName();
+        if (_tok.Kind is Tok.Comma or Tok.In)
+        {
+            GenericFor(name, line);
+            return;
+        }
         if (_tok.Kind != Tok.Assign) throw Err("'=' expected");
         Advance();
         int a = Alloc();
@@ -505,12 +633,53 @@ internal sealed class LuaCompiler
         _fs.Free = a;
     }
 
+    private void GenericFor(string first, int line)
+    {
+        var names = new List<string> { first };
+        while (_tok.Kind == Tok.Comma)
+        {
+            Advance();
+            names.Add(ExpectName());
+        }
+        Expect(Tok.In, "in");
+        int a = _fs.Free;
+        var (n, open) = ExprList();
+        AdjustList(4, n, open, a); // iterator, state, control, closing value
+        Expect(Tok.Do, "do");
+        Reserve(a + 7);
+        int toCall = EmitJmp(line);
+        int nlocals = _fs.Locals.Count;
+        int free = _fs.Free; // a + 4
+        foreach (string name in names) _fs.Locals.Add(new LocalVar(name, Alloc()));
+        var loop = new LoopInfo(free);
+        _fs.Loops.Add(loop);
+        int body = Here;
+        Block();
+        Expect(Tok.End, "end");
+        _fs.Loops.RemoveAt(_fs.Loops.Count - 1);
+        LeaveScope(nlocals, free);
+        PatchJmp(toCall, Here);
+        Emit(Instruction.Abc(OpCode.Move, a + 4, a, 0), line);
+        Emit(Instruction.Abc(OpCode.Move, a + 5, a + 1, 0), line);
+        Emit(Instruction.Abc(OpCode.Move, a + 6, a + 2, 0), line);
+        Emit(Instruction.Abc(OpCode.Call, a + 4, 3, names.Count + 1), line);
+        Emit(Instruction.Abc(OpCode.TForLoop, a, 0, 0), line);
+        PatchJmp(EmitJmp(line), body);
+        foreach (int b in loop.Breaks) PatchJmp(b, Here);
+        _fs.Free = a;
+    }
+
     // ---- functions ----
 
-    private void FunctionBody(int target, int line)
+    private void FunctionBody(int target, int line, bool isMethod)
     {
         var child = new FuncState(_fs);
         _fs = child;
+        if (isMethod)
+        {
+            child.Locals.Add(new LocalVar("self", Alloc()));
+            child.NumParams++;
+        }
         Expect(Tok.LParen, "(");
         if (_tok.Kind != Tok.RParen)
         {
@@ -594,12 +763,12 @@ internal sealed class LuaCompiler
     {
         _openIdx = -1;
         int line = _tok.Line;
-        if (_tok.Kind is Tok.Minus or Tok.Not)
+        if (_tok.Kind is Tok.Minus or Tok.Not or Tok.Hash)
         {
-            bool isNot = _tok.Kind == Tok.Not;
+            var kind = _tok.Kind;
             Advance();
             Expr(target, UnaryPriority);
-            Emit(Instruction.Abc(isNot ? OpCode.Not : OpCode.Unm, target, target, 0), line);
+            Emit(Instruction.Abc(kind == Tok.Not ? OpCode.Not : kind == Tok.Hash ? OpCode.Len : OpCode.Unm, target, target, 0), line);
             _openIdx = -1;
         }
         else Simple(target);
@@ -684,7 +853,14 @@ internal sealed class LuaCompiler
                 return;
             case Tok.Function:
                 Advance();
-                FunctionBody(target, line);
+                FunctionBody(target, line, false);
+                return;
+            case Tok.String:
+                Emit(Instruction.ABx(OpCode.LoadK, target, AddConst(LuaValue.FromString(_tok.Text))), line);
+                Advance();
+                return;
+            case Tok.LBrace:
+                TableConstructor(target);
                 return;
             case Tok.Name:
                 LoadVariable(_tok.Text, target, line);
@@ -699,13 +875,13 @@ internal sealed class LuaCompiler
             default:
                 throw Err("unexpected symbol");
         }
-        while (_tok.Kind == Tok.LParen) CallSuffix(target);
+        Suffixes(target, false, line);
     }
 
-    private void CallSuffix(int target)
+    /// <summary>Compiles a call (or method call, when <paramref name="method"/> is set) whose function value is in <paramref name="target"/>.</summary>
+    private void CallSuffix(int target, string? method)
     {
         int line = _tok.Line;
-        Advance(); // (
         int save = _fs.Free;
         int fn = target;
         if (target != _fs.Free - 1)
@@ -713,18 +889,47 @@ internal sealed class LuaCompiler
             fn = Alloc();
             Emit(Instruction.Abc(OpCode.Move, fn, target, 0), line);
         }
-        int b = 1;
-        if (_tok.Kind != Tok.RParen)
+        int extra = 0;
+        if (method is not null)
         {
-            var (n, open) = ExprList();
-            if (open >= 0)
-            {
-                SetOpen(open, -1);
-                b = 0;
-            }
-            else b = n + 1;
+            Alloc(); // fn + 1 receives the receiver
+            int k = Alloc();
+            Emit(Instruction.ABx(OpCode.LoadK, k, AddConst(LuaValue.FromString(method))), line);
+            Emit(Instruction.Abc(OpCode.Self, fn, fn, k), line);
+            _fs.Free = fn + 2;
+            extra = 1;
         }
-        Expect(Tok.RParen, ")");
+        int b = 1 + extra;
+        switch (_tok.Kind)
+        {
+            case Tok.String:
+                Emit(Instruction.ABx(OpCode.LoadK, Alloc(), AddConst(LuaValue.FromString(_tok.Text))), line);
+                Advance();
+                b++;
+                break;
+            case Tok.LBrace:
+                TableConstructor(Alloc());
+                b++;
+                break;
+            case Tok.LParen:
+            {
+                Advance();
+                if (_tok.Kind != Tok.RParen)
+                {
+                    var (n, open) = ExprList();
+                    if (open >= 0)
+                    {
+                        SetOpen(open, -1);
+                        b = 0;
+                    }
+                    else b += n;
+                }
+                Expect(Tok.RParen, ")");
+                break;
+            }
+            default:
+                throw Err("function arguments expected");
+        }
         int call = Emit(Instruction.Abc(OpCode.Call, fn, b, 2), line);
         if (fn != target)
         {
@@ -737,5 +942,93 @@ internal sealed class LuaCompiler
             _fs.Free = fn + 1;
             _openIdx = call;
         }
+    }
+
+    /// <summary>Compiles a table constructor into <paramref name="target"/>; the current token is the opening brace.</summary>
+    private void TableConstructor(int target)
+    {
+        int line = _tok.Line;
+        int save = _fs.Free;
+        Advance(); // {
+        int t = target;
+        if (target != _fs.Free - 1) t = Alloc();
+        int newIdx = Emit(Instruction.Abc(OpCode.NewTable, t, 0, 0), line);
+        Emit(Instruction.Extra(0), line);
+        int arraySize = 0, hashSize = 0, pending = 0, flushed = 0;
+        bool openList = false;
+        while (_tok.Kind != Tok.RBrace)
+        {
+            if (pending == 50)
+            {
+                FlushList(t, pending, flushed, line);
+                flushed += pending;
+                pending = 0;
+                _fs.Free = t + 1;
+            }
+            int itemSave = _fs.Free;
+            if (_tok.Kind == Tok.Name && Peek().Kind == Tok.Assign)
+            {
+                int k = Alloc();
+                Emit(Instruction.ABx(OpCode.LoadK, k, AddConst(LuaValue.FromString(_tok.Text))), _tok.Line);
+                Advance();
+                Advance();
+                int v = Alloc();
+                Expr(v, 0);
+                Emit(Instruction.Abc(OpCode.SetTable, t, k, v), line);
+                _fs.Free = itemSave;
+                hashSize++;
+            }
+            else if (_tok.Kind == Tok.LBracket)
+            {
+                Advance();
+                int k = Alloc();
+                Expr(k, 0);
+                Expect(Tok.RBracket, "]");
+                Expect(Tok.Assign, "=");
+                int v = Alloc();
+                Expr(v, 0);
+                Emit(Instruction.Abc(OpCode.SetTable, t, k, v), line);
+                _fs.Free = itemSave;
+                hashSize++;
+            }
+            else
+            {
+                Expr(Alloc(), 0);
+                int open = _openIdx;
+                pending++;
+                arraySize++;
+                if (_tok.Kind is Tok.Comma or Tok.Semi)
+                {
+                    Advance();
+                    if (_tok.Kind != Tok.RBrace) continue;
+                }
+                if (_tok.Kind == Tok.RBrace && open >= 0)
+                {
+                    SetOpen(open, -1);
+                    openList = true;
+                    arraySize--;
+                }
+                break;
+            }
+            if (_tok.Kind is Tok.Comma or Tok.Semi) Advance();
+            else break;
+        }
+        Expect(Tok.RBrace, "}");
+        if (pending > 0) FlushList(t, openList ? 0 : pending, flushed, line);
+        _fs.Code[newIdx] = Instruction.Abc(OpCode.NewTable, t, Math.Min(hashSize, 255), 0);
+        _fs.Code[newIdx + 1] = Instruction.Extra(arraySize);
+        if (t != target)
+        {
+            Emit(Instruction.Abc(OpCode.Move, target, t, 0), line);
+            _fs.Free = save;
+        }
+        else _fs.Free = t + 1;
+        _openIdx = -1;
+    }
+
+    private void FlushList(int t, int count, int flushed, int line)
+    {
+        Emit(Instruction.Abc(OpCode.SetList, t, count, 0), line);
+        Emit(Instruction.Extra(flushed), line);
     }
 }

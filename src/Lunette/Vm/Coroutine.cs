@@ -42,6 +42,8 @@ internal sealed class Coroutine
     public LuaValue[] Stack = new LuaValue[256];
     public Frame?[] Frames = new Frame?[16];
     public int Depth;
+    /// <summary>First stack index free for calls made on behalf of metamethods and builtins.</summary>
+    public int CallTop;
     /// <summary>Open upvalues, ascending by stack index.</summary>
     public readonly List<UpVal> OpenUpvals = new();
 

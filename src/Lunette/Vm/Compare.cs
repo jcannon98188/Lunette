@@ -19,7 +19,7 @@ internal static class Compare
             if (b.IsFloat) return a.AsFloat < b.AsFloat;
             if (b.IsInteger) return FloatLtInt(a.AsFloat, b.AsInteger);
         }
-        throw Fail(a, b, p, pc);
+        throw Error(a, b, p, pc);
     }
 
     public static bool LessEqual(LuaValue a, LuaValue b, Proto p, int pc)
@@ -34,7 +34,7 @@ internal static class Compare
             if (b.IsFloat) return a.AsFloat <= b.AsFloat;
             if (b.IsInteger) return FloatLeInt(a.AsFloat, b.AsInteger);
         }
-        throw Fail(a, b, p, pc);
+        throw Error(a, b, p, pc);
     }
 
     // i < f  <=>  i < ceil(f)
@@ -73,12 +73,12 @@ internal static class Compare
         return true;
     }
 
-    private static LuaException Fail(LuaValue a, LuaValue b, Proto p, int pc)
+    internal static LuaException Error(LuaValue a, LuaValue b, Proto? p, int pc)
     {
         string t1 = a.TypeName, t2 = b.TypeName;
         string msg = t1 == t2
             ? $"attempt to compare two {t1} values"
             : $"attempt to compare {t1} with {t2}";
-        return new LuaException($"{Interpreter.Where(p, pc)} {msg}");
+        return new LuaException(p is null ? msg : $"{Interpreter.Where(p, pc)} {msg}");
     }
 }

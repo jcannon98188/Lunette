@@ -17,10 +17,85 @@ internal static class Interpreter
         var main = new LuaClosure(proto, []);
         co.Stack[0] = LuaValue.FromObject(main);
         Frame entry = Precall(co, main, 0, 0, 0, null, null, 0);
-        Run(state, co, entry);
+        Run(state, co, entry, 0);
     }
 
-    private static void Run(LuaState state, Coroutine co, Frame f)
+    /// <summary>Longest chain of nested native-to-Lua calls (metamethods and callbacks), like PUC's C-call limit.</summary>
+    private const int MaxNativeDepth = 200;
+
+    /// <summary>
+    /// Calls <paramref name="fn"/> with the first <paramref name="nargs"/> of a, b, c and returns its first result.
+    /// Used for metamethods: runs a nested interpreter loop above the current frame's registers.
+    /// </summary>
+    public static LuaValue Call1(LuaState state, LuaValue fn, LuaValue a, LuaValue b, LuaValue c, int nargs)
+    {
+        var co = state.Running;
+        int fa = co.CallTop;
+        co.EnsureStack(fa + 5, null, 0);
+        var st = co.Stack;
+        st[fa] = fn;
+        st[fa + 1] = a;
+        st[fa + 2] = b;
+        st[fa + 3] = c;
+        int n = CallAt(state, co, fa, nargs);
+        co.CallTop = fa;
+        return n > 0 ? co.Stack[fa] : default;
+    }
+
+    /// <summary>Calls <paramref name="fn"/> with <paramref name="args"/> and returns all of its results.</summary>
+    public static LuaValue[] CallValues(LuaState state, LuaValue fn, ReadOnlySpan<LuaValue> args)
+    {
+        var co = state.Running;
+        int fa = co.CallTop;
+        co.EnsureStack(fa + args.Length + 2, null, 0);
+        var st = co.Stack;
+        st[fa] = fn;
+        args.CopyTo(new Span<LuaValue>(st, fa + 1, args.Length));
+        int n = CallAt(state, co, fa, args.Length);
+        co.CallTop = fa;
+        return new ReadOnlySpan<LuaValue>(co.Stack, fa, n).ToArray();
+    }
+
+    /// <summary>Runs the function at stack index <paramref name="fa"/> to completion; its results land at <paramref name="fa"/>.</summary>
+    private static int CallAt(LuaState state, Coroutine co, int fa, int nargs)
+    {
+        if (state.NativeDepth >= MaxNativeDepth) throw new LuaException("C stack overflow");
+        state.NativeDepth++;
+        try
+        {
+            nargs = ResolveCallable(co, fa, nargs, null, 0);
+            if (co.Stack[fa].Ref is LuaClosure cl)
+            {
+                int stop = co.Depth;
+                Frame f = Precall(co, cl, fa, nargs, -1, null, null, 0);
+                return Run(state, co, f, stop) - fa;
+            }
+            return CallBuiltin(state, co, fa, nargs, -1, null, 0) - fa;
+        }
+        finally
+        {
+            state.NativeDepth--;
+        }
+    }
+
+    /// <summary>Makes R[fa] a function by inserting __call handlers in front of it; returns the new argument count.</summary>
+    private static int ResolveCallable(Coroutine co, int fa, int nargs, Proto? p, int pc)
+    {
+        for (int guard = 0; co.Stack[fa].Ref is not (LuaClosure or BuiltinFunction); guard++)
+        {
+            LuaValue tm = Meta.GetTagMethod(co.Stack[fa], TagMethod.Call);
+            if (tm.IsNil || guard > 100)
+                throw new LuaException($"{(p is null ? "" : Where(p, pc) + " ")}attempt to call a {co.Stack[fa].TypeName} value");
+            co.EnsureStack(fa + nargs + 2, p, pc);
+            var st = co.Stack;
+            Array.Copy(st, fa, st, fa + 1, nargs + 1);
+            st[fa] = tm;
+            nargs++;
+        }
+        return nargs;
+    }
+
+    private static int Run(LuaState state, Coroutine co, Frame f, int stop)
     {
         LuaClosure cl;
         Proto proto;
@@ -38,6 +113,7 @@ internal static class Interpreter
         r = co.Stack;
         bs = f.Base;
         pc = f.Pc;
+        co.CallTop = bs + proto.MaxStack;
 
         while (true)
         {
@@ -75,23 +151,59 @@ internal static class Interpreter
                 case OpCode.IDiv:
                 case OpCode.Mod:
                 case OpCode.Pow:
-                    r[bs + i.A] = Arith.Binary(i.Op, r[bs + i.B], r[bs + i.C], proto, pc - 1);
+                {
+                    LuaValue lhs = r[bs + i.B], rhs = r[bs + i.C];
+                    if (lhs.IsNumber && rhs.IsNumber) r[bs + i.A] = Arith.Binary(i.Op, lhs, rhs, proto, pc - 1);
+                    else
+                    {
+                        LuaValue res = Meta.Arith(state, Meta.ArithEvent(i.Op), lhs, rhs, proto, pc - 1);
+                        r = co.Stack;
+                        r[bs + i.A] = res;
+                    }
                     break;
+                }
                 case OpCode.Unm:
-                    r[bs + i.A] = Arith.Negate(r[bs + i.B], proto, pc - 1);
+                {
+                    LuaValue v = r[bs + i.B];
+                    if (v.IsNumber) r[bs + i.A] = Arith.Negate(v, proto, pc - 1);
+                    else
+                    {
+                        LuaValue res = Meta.Unm(state, v, proto, pc - 1);
+                        r = co.Stack;
+                        r[bs + i.A] = res;
+                    }
                     break;
+                }
                 case OpCode.Not:
                     r[bs + i.A] = LuaValue.FromBoolean(r[bs + i.B].IsFalsy);
                     break;
                 case OpCode.Eq:
-                    r[bs + i.A] = LuaValue.FromBoolean(LuaValue.RawEquals(r[bs + i.B], r[bs + i.C]));
+                {
+                    bool eq = Meta.Equal(state, r[bs + i.B], r[bs + i.C]);
+                    r = co.Stack;
+                    r[bs + i.A] = LuaValue.FromBoolean(eq);
                     break;
+                }
                 case OpCode.Lt:
-                    r[bs + i.A] = LuaValue.FromBoolean(Compare.LessThan(r[bs + i.B], r[bs + i.C], proto, pc - 1));
+                {
+                    LuaValue lhs = r[bs + i.B], rhs = r[bs + i.C];
+                    bool lt = lhs.IsNumber && rhs.IsNumber
+                        ? Compare.LessThan(lhs, rhs, proto, pc - 1)
+                        : Meta.Order(state, TagMethod.Lt, lhs, rhs, proto, pc - 1);
+                    r = co.Stack;
+                    r[bs + i.A] = LuaValue.FromBoolean(lt);
                     break;
+                }
                 case OpCode.Le:
-                    r[bs + i.A] = LuaValue.FromBoolean(Compare.LessEqual(r[bs + i.B], r[bs + i.C], proto, pc - 1));
+                {
+                    LuaValue lhs = r[bs + i.B], rhs = r[bs + i.C];
+                    bool le = lhs.IsNumber && rhs.IsNumber
+                        ? Compare.LessEqual(lhs, rhs, proto, pc - 1)
+                        : Meta.Order(state, TagMethod.Le, lhs, rhs, proto, pc - 1);
+                    r = co.Stack;
+                    r[bs + i.A] = LuaValue.FromBoolean(le);
                     break;
+                }
                 case OpCode.Test:
                     if (!r[bs + i.A].IsFalsy != (i.C != 0)) pc++;
                     break;
@@ -104,6 +216,11 @@ internal static class Interpreter
                     int nargs = i.B != 0 ? i.B - 1 : top - fa - 1;
                     int wanted = i.C - 1;
                     f.Pc = pc;
+                    if (r[fa].Ref is not (LuaClosure or BuiltinFunction))
+                    {
+                        nargs = ResolveCallable(co, fa, nargs, proto, pc - 1);
+                        r = co.Stack;
+                    }
                     if (r[fa].Ref is LuaClosure callee)
                     {
                         f = Precall(co, callee, fa, nargs, wanted, null, proto, pc - 1);
@@ -118,6 +235,11 @@ internal static class Interpreter
                 {
                     int fa = bs + i.A;
                     int nargs = i.B != 0 ? i.B - 1 : top - fa - 1;
+                    if (r[fa].Ref is not (LuaClosure or BuiltinFunction))
+                    {
+                        nargs = ResolveCallable(co, fa, nargs, proto, pc - 1);
+                        r = co.Stack;
+                    }
                     if (r[fa].Ref is LuaClosure callee)
                     {
                         if (co.OpenUpvals.Count > 0) co.Close(bs);
@@ -148,7 +270,7 @@ internal static class Interpreter
                         Array.Copy(r, ra, r, dst, c);
                         for (int j = c; j < wanted; j++) r[dst + j] = default;
                     }
-                    if (--co.Depth == 0) return;
+                    if (--co.Depth == stop) return top;
                     f = co.Frames[co.Depth - 1]!;
                     goto newframe;
                 }
@@ -193,6 +315,80 @@ internal static class Interpreter
                     }
                     break;
                 }
+                case OpCode.NewTable:
+                {
+                    int arraySize = code[pc++].Ax;
+                    r[bs + i.A] = LuaValue.FromTable(new LuaTable(arraySize, i.B));
+                    break;
+                }
+                case OpCode.GetTable:
+                {
+                    LuaValue obj = r[bs + i.B], key = r[bs + i.C];
+                    if (obj.Ref is LuaTable t)
+                    {
+                        LuaValue v = t.Get(key);
+                        if (!v.IsNil || t.Metatable is null)
+                        {
+                            r[bs + i.A] = v;
+                            break;
+                        }
+                    }
+                    LuaValue res = Meta.Index(state, obj, key, proto, pc - 1);
+                    r = co.Stack;
+                    r[bs + i.A] = res;
+                    break;
+                }
+                case OpCode.SetTable:
+                {
+                    LuaValue obj = r[bs + i.A];
+                    if (obj.Ref is LuaTable t && t.Metatable is null) Meta.RawSet(t, r[bs + i.B], r[bs + i.C], proto, pc - 1);
+                    else
+                    {
+                        Meta.SetIndex(state, obj, r[bs + i.B], r[bs + i.C], proto, pc - 1);
+                        r = co.Stack;
+                    }
+                    break;
+                }
+                case OpCode.SetList:
+                {
+                    int offset = code[pc++].Ax;
+                    int ra = bs + i.A;
+                    int n = i.B != 0 ? i.B : top - ra - 1;
+                    var t = (LuaTable)r[ra].Ref!;
+                    t.EnsureArray(offset + n);
+                    for (int j = 1; j <= n; j++) t.SetInt(offset + j, r[ra + j]);
+                    break;
+                }
+                case OpCode.Self:
+                {
+                    LuaValue obj = r[bs + i.B], key = r[bs + i.C];
+                    r[bs + i.A + 1] = obj;
+                    LuaValue v = default;
+                    if (obj.Ref is LuaTable t) v = t.Get(key);
+                    if (v.IsNil)
+                    {
+                        v = Meta.Index(state, obj, key, proto, pc - 1);
+                        r = co.Stack;
+                    }
+                    r[bs + i.A] = v;
+                    break;
+                }
+                case OpCode.Len:
+                {
+                    LuaValue v = r[bs + i.B];
+                    if (v.Ref is LuaTable t && t.Metatable is null) r[bs + i.A] = LuaValue.FromInteger(t.Length());
+                    else
+                    {
+                        LuaValue res = Meta.Len(state, v, proto, pc - 1);
+                        r = co.Stack;
+                        r[bs + i.A] = res;
+                    }
+                    break;
+                }
+                case OpCode.TForLoop:
+                    if (!r[bs + i.A + 4].IsNil) r[bs + i.A + 2] = r[bs + i.A + 4];
+                    else pc++;
+                    break;
                 default:
                     throw new InvalidOperationException($"bad opcode {i.Op}");
             }
@@ -236,11 +432,14 @@ internal static class Interpreter
     }
 
     /// <summary>Calls a builtin and places its results at <paramref name="fa"/>; returns the index after the last result.</summary>
-    private static int CallBuiltin(LuaState state, Coroutine co, int fa, int nargs, int wanted, Proto proto, int pc)
+    private static int CallBuiltin(LuaState state, Coroutine co, int fa, int nargs, int wanted, Proto? proto, int pc)
     {
         if (co.Stack[fa].Ref is not BuiltinFunction fn)
-            throw new LuaException($"{Where(proto, pc)} attempt to call a {co.Stack[fa].TypeName} value");
+            throw new LuaException($"{(proto is null ? "" : Where(proto, pc) + " ")}attempt to call a {co.Stack[fa].TypeName} value");
+        int savedTop = co.CallTop;
+        co.CallTop = fa + 1 + nargs;
         var res = fn.Invoke(state, new ReadOnlySpan<LuaValue>(co.Stack, fa + 1, nargs));
+        co.CallTop = savedTop;
         int n = res?.Length ?? 0;
         if (wanted < 0)
         {
