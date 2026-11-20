@@ -274,8 +274,14 @@ internal static partial class Interpreter
                     break;
                 }
                 case OpCode.GetUpval:
-                    r[bs + i.A] = cl.Upvals[i.B].Get();
+                {
+                    UpVal uv = cl.Upvals[i.B];
+                    Coroutine? owner = uv.Owner;
+                    // Open upvalue: read the owner's stack slot in place; the copy skips the write barrier when the register holds the same tag object
+                    if (owner is null) Regs.Copy(ref Regs.At(r, bs + i.A), in uv.Value);
+                    else Regs.Copy(ref Regs.At(r, bs + i.A), in owner.Stack[uv.Index]);
                     break;
+                }
                 case OpCode.SetUpval:
                     cl.Upvals[i.B].Set(r[bs + i.A]);
                     break;
@@ -507,19 +513,21 @@ internal static partial class Interpreter
                     int nargs = i.B != 0 ? i.B - 1 : top - fa - 1;
                     int wanted = i.C - 1;
                     f.Pc = pc;
-                    if (r[fa].Ref is not (LuaClosure or BuiltinFunction))
+                    object? fn = Regs.At(r, fa).Ref;
+                    if (fn is not (LuaClosure or BuiltinFunction))
                     {
                         nargs = ResolveCallable(co, fa, nargs, proto, pc - 1);
                         r = co.Stack;
+                        fn = Regs.At(r, fa).Ref;
                     }
-                    if (r[fa].Ref is LuaClosure callee)
+                    if (fn is LuaClosure callee)
                     {
                         if (co.Depth >= state.DepthLimit) throw LuaErrors.Error("stack overflow");
                         if (--state.Ticks <= 0) state.Poll();
-                        f = Precall(co, callee, fa, nargs, wanted, null, proto, pc - 1);
+                        f = PrecallLua(co, callee, fa, nargs, wanted, proto, pc - 1);
                         goto newframe;
                     }
-                    var bf = (BuiltinFunction)r[fa].Ref!;
+                    var bf = (BuiltinFunction)fn!; // ResolveCallable guarantees a closure or a builtin
                     if (TMode.Traced) TraceBuiltin(state, co, bf, Math.Max(top, fa + nargs + 1), true, fa + 1, nargs);
                     if (bf.Kind != BuiltinKind.None)
                     {
@@ -548,7 +556,7 @@ internal static partial class Interpreter
                         }
                     }
                     // A traced call keeps every result so the return hook can see them (debug.getinfo "r"); they are trimmed afterwards.
-                    int end = CallBuiltin(state, co, fa, nargs, TMode.Traced ? -1 : wanted, proto, pc - 1);
+                    int end = CallBuiltin(state, co, bf, fa, nargs, TMode.Traced ? -1 : wanted, proto, pc - 1);
                     r = co.Stack;
                     if (wanted < 0) top = end;
                     if (TMode.Traced)
@@ -584,7 +592,9 @@ internal static partial class Interpreter
                         f.Pc = pc;
                         if (--state.Ticks <= 0) state.Poll();
                         if (co.OpenUpvals.Count > 0) co.Close(bs);
-                        Array.Copy(r, fa, r, f.FuncIdx, nargs + 1);
+                        int tdst = f.FuncIdx;
+                        if (nargs <= 3) for (int j = 0; j <= nargs; j++) Regs.Copy(ref Regs.At(r, tdst + j), in Regs.At(r, fa + j)); // tdst < fa: forward copy is safe
+                        else Array.Copy(r, fa, r, tdst, nargs + 1);
                         f = Precall(co, callee, f.FuncIdx, nargs, f.Wanted, f, proto, pc - 1);
                         f.IsTail = true;
                         goto newframe;
@@ -663,13 +673,21 @@ internal static partial class Interpreter
                     }
                     if (wanted < 0)
                     {
-                        Array.Copy(r, ra, r, dst, n);
+                        if (n <= 3) for (int j = 0; j < n; j++) Regs.Copy(ref Regs.At(r, dst + j), in Regs.At(r, ra + j));
+                        else Array.Copy(r, ra, r, dst, n);
                         top = dst + n;
+                    }
+                    else if (wanted == 1)
+                    {
+                        // The common case: one result, a scalar copy instead of Array.Copy (dst < ra, so no overlap hazard)
+                        if (n > 0) Regs.Copy(ref Regs.At(r, dst), in Regs.At(r, ra));
+                        else Regs.At(r, dst) = default;
                     }
                     else
                     {
                         int c = Math.Min(n, wanted);
-                        Array.Copy(r, ra, r, dst, c);
+                        if (c <= 3) for (int j = 0; j < c; j++) Regs.Copy(ref Regs.At(r, dst + j), in Regs.At(r, ra + j));
+                        else Array.Copy(r, ra, r, dst, c);
                         for (int j = c; j < wanted; j++) r[dst + j] = default;
                     }
                     if (--co.Depth == stop) return top;
@@ -1047,6 +1065,31 @@ internal static partial class Interpreter
         return true;
     }
 
+    /// <summary>The Call instruction's Lua-to-Lua path: a fixed-arity callee is set up inline, anything else goes through <see cref="Precall"/>.</summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private static Frame PrecallLua(Coroutine co, LuaClosure cl, int fa, int nargs, int wanted, Proto whereProto, int wherePc)
+    {
+        Proto p = cl.Proto;
+        if (p.IsVararg) return Precall(co, cl, fa, nargs, wanted, null, whereProto, wherePc);
+        int baseIdx = fa + 1;
+        var st = co.Stack;
+        if (baseIdx + p.MaxStack > st.Length)
+        {
+            co.EnsureStack(baseIdx + p.MaxStack, whereProto, wherePc);
+            st = co.Stack;
+        }
+        for (int j = nargs; j < p.NumParams; j++) Regs.At(st, baseIdx + j) = default;
+        Frame f = co.PushFrame();
+        if (!ReferenceEquals(f.Closure, cl)) f.Closure = cl; // recursion and loops reuse the same Frame and closure: skip the write barrier
+        f.Base = baseIdx;
+        f.Pc = 0;
+        f.FuncIdx = fa;
+        f.Wanted = wanted;
+        f.VarargBase = 0;
+        f.VarargCount = 0;
+        return f;
+    }
+
     /// <summary>Sets up a Frame for a Lua call whose function sits at <paramref name="fa"/> with <paramref name="nargs"/> arguments above it.</summary>
     private static Frame Precall(Coroutine co, LuaClosure cl, int fa, int nargs, int wanted, Frame? reuse, Proto? whereProto, int wherePc)
     {
@@ -1088,6 +1131,12 @@ internal static partial class Interpreter
     {
         if (co.Stack[fa].Ref is not BuiltinFunction fn)
             throw new LuaException($"{(proto is null ? "" : Where(proto, pc) + " ")}attempt to call a {Meta.ObjTypeName(co.Stack[fa])} value");
+        return CallBuiltin(state, co, fn, fa, nargs, wanted, proto, pc);
+    }
+
+    /// <summary>As above, for a caller that already knows the builtin (the Call instruction).</summary>
+    private static int CallBuiltin(LuaState state, Coroutine co, BuiltinFunction fn, int fa, int nargs, int wanted, Proto? proto, int pc)
+    {
         int savedTop = co.CallTop;
         co.CallTop = fa + 1 + nargs;
         var res = fn.Invoke(state, new ReadOnlySpan<LuaValue>(co.Stack, fa + 1, nargs));
@@ -1101,6 +1150,12 @@ internal static partial class Interpreter
             return fa + n;
         }
         var r = co.Stack;
+        if (wanted == 1)
+        {
+            r[fa] = n > 0 ? res![0] : default;
+            Rets.Release(res);
+            return fa + 1;
+        }
         int c = Math.Min(n, wanted);
         for (int j = 0; j < c; j++) r[fa + j] = res![j];
         for (int j = c; j < wanted; j++) r[fa + j] = default;

@@ -49,8 +49,20 @@ internal static class Rets
     /// <summary>Clears <paramref name="res"/> if it is one of the shared arrays; call after copying the results out.</summary>
     public static void Release(LuaValue[]? res)
     {
-        if (res is null || res.Length > 3) return;
-        if (ReferenceEquals(res, t_one) || ReferenceEquals(res, t_two) || ReferenceEquals(res, t_three)) Array.Clear(res);
+        if (res is null) return;
+        // One thread-static read for the length that matters, no Array.Clear call for the common one-value array.
+        switch (res.Length)
+        {
+            case 1:
+                if (ReferenceEquals(res, t_one)) res[0] = default;
+                break;
+            case 2:
+                if (ReferenceEquals(res, t_two)) { res[0] = default; res[1] = default; }
+                break;
+            case 3:
+                if (ReferenceEquals(res, t_three)) Array.Clear(res);
+                break;
+        }
     }
 
     /// <summary>A private copy of <paramref name="res"/> when it is a shared array (for results that outlive the call).</summary>

@@ -167,3 +167,28 @@ The sampled stacks attribute time inside `RunLoop` unreliably for fib, n-body an
 
 **Process/shipping** (not engine code): ship the CLI ReadyToRun (startup 90 -> 58 ms, the largest single win for short scripts and the whole string-heavy gap); keep
 `CallCountingDelayMs=0` in the CLI runtimeconfig; leave TieredPGO on. Re-measure all three configurations of section 1 after each of tickets 41-44.
+
+## 6. After ticket 42 (call/return and frame setup)
+
+Interleaved against the pre-42 commit, 5 rounds, median wall ms (startup about 90 ms for Lunette, 5 ms for PUC; ratio = net of startup):
+
+| benchmark | before | after | ratio before | ratio after |
+|---|---:|---:|---:|---:|
+| fib | 481 | 409 | 3.6x | 2.9x |
+| spectral-norm | 528 | 493 | 3.4x | 3.1x |
+| binary-trees | 674 | 637 | 1.35x | 1.26x |
+| k-nucleotide | 408 | 403 | flat | flat |
+| string-heavy, n-body, fannkuch | unchanged within noise | | | |
+
+Per construct (ns, includes the 8.5 ns loop): empty Lua call 38 -> 27 (PUC 10), `id(i)` 47 -> 38, method call 67 -> 51 (PUC 16), builtin `math.abs` 40 -> 35 (PUC 16).
+
+Kept: scalar copies in `Return` (one result; up to three for multi-result) and in `TailCall` argument moves; an inlined fixed-arity Lua call path (`PrecallLua`: inline stack check,
+no `Precall` call) with an inlined `PushFrame`; skipping the `Frame.Closure` store (a write barrier) when a reused Frame already holds the callee; `GetUpval` copies through
+`Regs.Copy` (no barrier for the same tag object); `Rets.Release` checks only the shared array for the result length; `CallBuiltin` takes the already-known builtin and has a
+one-result path. No new unsafe helpers (`Regs.At` and `Regs.Copy` only), so nothing new for the safe twin.
+Tried and dropped: reordering the closure/builtin type tests in `Call` (inside noise).
+
+Remaining gap: the loop is one method with a 0x958-byte frame and the JIT keeps `cl`, `proto`, `code`, `k` and `bs` in stack slots, so every Call/Return pair still pays about 8 reloads in
+`newframe` plus 8 Frame stores. Next steps toward 2.5x: shrink the loop's frame (move cold case bodies and their struct temporaries out of line, which also cuts the 2.3 KB prologue
+zeroing paid by every native-to-Lua callback), cache open-upvalue slots, and a struct-of-arrays frame stack. The builtin protocol (span in, `LuaValue[]` out) is untouched; writing results
+straight to the stack needs a signature change across the libraries.

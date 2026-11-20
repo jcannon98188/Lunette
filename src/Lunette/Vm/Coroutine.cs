@@ -206,18 +206,32 @@ internal sealed class Coroutine
         Array.Resize(ref Stack, Math.Max(size, Math.Min(Stack.Length * 2, InHandler ? StackLimit + HandlerHeadroom : StackLimit)));
     }
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     public Frame PushFrame()
     {
-        if (Depth == Frames.Length) Array.Resize(ref Frames, Frames.Length * 2);
-        Frame f = Frames[Depth++] ??= new Frame();
+        var frames = Frames;
+        int d = Depth;
+        if ((uint)d >= (uint)frames.Length) frames = GrowFrames();
+        Frame f = frames[d] ?? NewFrame(frames, d);
+        Depth = d + 1;
         f.PcallKind = 0;
-        f.PcallLevel = Depth > 1 ? Frames[Depth - 2]!.PcallLevel : 0;
+        f.PcallLevel = d > 0 ? frames[d - 1]!.PcallLevel : 0;
         f.Cont = Continuation.None;
         f.IsTail = false;
         f.Native = false;
         f.Closing = false;
         return f;
     }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private Frame?[] GrowFrames()
+    {
+        Array.Resize(ref Frames, Frames.Length * 2);
+        return Frames;
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static Frame NewFrame(Frame?[] frames, int d) => frames[d] = new Frame();
 
     public UpVal FindUpval(int index)
     {
