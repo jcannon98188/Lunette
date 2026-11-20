@@ -33,8 +33,8 @@ internal static class DebugLib
         Add(t, "getmetatable", GetMetatable);
         Add(t, "setmetatable", SetMetatable);
         Add(t, "getregistry", static (st, _) => [LuaValue.FromTable(st.Registry ??= new LuaTable())]);
-        Add(t, "getuservalue", static (_, _) => [default]);
-        Add(t, "setuservalue", static (_, args) => throw LuaErrors.TypeError(args, 0, "setuservalue", "userdata"));
+        Add(t, "getuservalue", GetUserValue);
+        Add(t, "setuservalue", SetUserValue);
         Add(t, "debug", DebugPrompt);
         Add(t, "setcstacklimit", static (_, args) =>
         {
@@ -91,10 +91,12 @@ internal static class DebugLib
         {
             if (raiseInline && i == co.RaisingDepth - 1) list.Add(new Level(-1, co.RaisingBuiltin));
             Frame fr = co.Frames[i]!;
-            list.Add(new Level(i, LuaValue.FromObject(fr.Closure)));
+            // A protected call whose __close handlers are running has already unwound: its callee is gone, the handlers' caller is the pcall.
+            if (!fr.Closing) list.Add(new Level(i, LuaValue.FromObject(fr.Closure)));
             if (inHook && i == co.HookFrameIndex && !co.HookBuiltin.IsNil) list.Add(new Level(-1, co.HookBuiltin));
             if (fr.PcallKind != 0) list.Add(new Level(-1, Lookup(state, "", fr.PcallKind == 2 ? "xpcall" : "pcall")));
         }
+        if (co.CBase) list.Add(new Level(-1, default));
         return list;
     }
 
@@ -129,6 +131,7 @@ internal static class DebugLib
     private static (string? What, string? Name) NameOf(Coroutine co, List<Level> lv, int i)
     {
         Level l = lv[i];
+        if (l.Frame < 0 && co.HookBuiltinNested && !co.AllowHook && ReferenceEquals(l.Fn.Ref, co.HookBuiltin.Ref)) return (null, null);
         Frame? caller = i + 1 < lv.Count && lv[i + 1].Frame >= 0 ? co.Frames[lv[i + 1].Frame] : null;
         if (l.Frame >= 0)
         {
@@ -173,6 +176,19 @@ internal static class DebugLib
             _ => null,
         };
         return ev is { } e ? ("metamethod", TagMethods.Name(e)[2..]) : (null, null);
+    }
+
+    /// <summary>How the function being called by the instruction at the saved pc of <paramref name="caller"/> is named (a call, or a metamethod-raising instruction).</summary>
+    internal static (string? What, string? Name) CallSiteName(Frame caller)
+    {
+        Proto p = caller.Closure.Proto;
+        int pc = caller.Pc - 1;
+        if (pc < 0 || pc >= p.Code.Length) return (null, null);
+        Instruction ins = p.Code[pc];
+        if (ins.Op is not (OpCode.Call or OpCode.TailCall)) return MetaName(caller);
+        if (ins.Op == OpCode.Call && pc + 1 < p.Code.Length && p.Code[pc + 1].Op == OpCode.TForLoop) return ("for iterator", "for iterator");
+        string? kind = VarInfo.ObjName(p, pc, ins.A, out string name);
+        return kind is null ? (null, null) : (kind, name);
     }
 
     // ---- getinfo ----
@@ -290,6 +306,24 @@ internal static class DebugLib
     internal static string CaptureTraceback(LuaState state, Coroutine co) =>
         Format(state, co, Levels(state, co, default, false), null, 0);
 
+    /// <summary>The structured form of <see cref="CaptureTraceback"/>: every level, innermost first, without the skipping of deep stacks.</summary>
+    internal static LuaStackFrame[] CaptureFrames(LuaState state, Coroutine co)
+    {
+        List<Level> lv = Levels(state, co, default, false);
+        var frames = new LuaStackFrame[lv.Count];
+        for (int i = 0; i < frames.Length; i++)
+        {
+            Level l = lv[i];
+            Proto? p = (l.Fn.Ref as LuaClosure)?.Proto;
+            string? global = l.Fn.IsNil ? null : GlobalFuncName(state, l.Fn);
+            (_, string? name) = NameOf(co, lv, i);
+            frames[i] = p is null
+                ? new LuaStackFrame(global ?? name, "[C]", 0, true)
+                : new LuaStackFrame(global ?? name, ChunkId(p.ChunkName), CurrentLine(co, co.Frames[l.Frame]!, l.Frame), false);
+        }
+        return frames;
+    }
+
     private static string Format(LuaState state, Coroutine co, List<Level> lv, string? msg, int level)
     {
         var sb = new StringBuilder();
@@ -328,7 +362,7 @@ internal static class DebugLib
     }
 
     /// <summary>"print" or "string.rep" when <paramref name="fn"/> is a global or a library function (lauxlib pushglobalfuncname).</summary>
-    private static string? GlobalFuncName(LuaState state, LuaValue fn)
+    internal static string? GlobalFuncName(LuaState state, LuaValue fn)
     {
         LuaValue gkey = default;
         while (state.Globals.Next(gkey, out LuaValue gk, out LuaValue gv))
@@ -485,6 +519,24 @@ internal static class DebugLib
     // ---- hooks ----
 
     /// <summary>debug.sethook([thread,] hook, mask [, count]). The interpreter calls this directly (BuiltinKind.SetHook) so it can switch loops.</summary>
+    /// <summary>debug.getuservalue(u, n): a host userdata has exactly one user value (lua_newuserdata), so only n == 1 exists.</summary>
+    private static LuaValue[] GetUserValue(LuaState state, ReadOnlySpan<LuaValue> args)
+    {
+        long n = LibArgs.OptInteger("getuservalue", args, 1, 1);
+        if (args.Length == 0 || args[0].Ref is not LuaUserdata u) return [default];
+        return n == 1 ? [u.UserValue, LuaValue.FromBoolean(true)] : [default];
+    }
+
+    private static LuaValue[] SetUserValue(LuaState state, ReadOnlySpan<LuaValue> args)
+    {
+        if (args.Length == 0 || args[0].Ref is not LuaUserdata u) throw LuaErrors.TypeError(args, 0, "setuservalue", "userdata");
+        LibArgs.CheckAny("setuservalue", args, 1);
+        long n = LibArgs.OptInteger("setuservalue", args, 2, 1);
+        if (n != 1) return [default];
+        u.UserValue = args[1];
+        return [args[0]];
+    }
+
     internal static LuaValue[]? SetHook(LuaState state, ReadOnlySpan<LuaValue> args)
     {
         int a = 0;

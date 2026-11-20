@@ -29,7 +29,7 @@ internal static class StringLib
         Add("pack", StringPack.Pack);
         Add("unpack", StringPack.Unpack);
         Add("packsize", StringPack.PackSize);
-        Add("dump", static (_, _) => throw new LuaException("unable to dump given function"));
+        Add("dump", static (_, _) => throw LuaErrors.Error("unable to dump given function"));
 
         state.SetGlobal("string", LuaValue.FromTable(lib));
         var meta = new LuaTable();
@@ -37,7 +37,7 @@ internal static class StringLib
         state.StringMetatable = meta;
     }
 
-    private static LuaValue[] One(LuaValue v) => [v];
+    private static LuaValue[] One(LuaValue v) => Rets.One(v);
 
     private static LuaValue Str(LuaState state, ReadOnlySpan<byte> bytes) => LuaValue.FromString(state.Strings.Intern(bytes));
 
@@ -88,7 +88,7 @@ internal static class StringLib
         if (n <= 0) return One(LuaValue.FromString(LuaString.Empty));
         long total = (long)s.Length * n + (long)sep.Length * (n - 1);
         if (total > int.MaxValue - 64 || ((long)s.Length + sep.Length) > 0 && n > (int.MaxValue - 64) / ((long)s.Length + sep.Length) + 1)
-            throw new LuaException("resulting string too large");
+            throw LuaErrors.Error("resulting string too large");
         LuaString r = LuaString.Allocate((int)total);
         Span<byte> d = r.WritableBytes;
         int pos = 0;
@@ -122,7 +122,8 @@ internal static class StringLib
         long start = PosRelatI(pi, l);
         long end = GetEndPos(OptInteger("byte", args, 2, pi), l);
         if (start > end) return [];
-        if (end - start >= int.MaxValue) throw new LuaException("string slice too long");
+        if (start == end) return One(LuaValue.FromInteger(s[(int)start - 1]));
+        if (end - start >= int.MaxValue) throw LuaErrors.Error("string slice too long");
         var res = new LuaValue[end - start + 1];
         for (long i = start; i <= end; i++) res[i - start] = LuaValue.FromInteger(s[(int)i - 1]);
         return res;
@@ -148,11 +149,18 @@ internal static class StringLib
         for (int i = 0; i < s.Length; i++) b.Append((byte)s[i]);
     }
 
+    private static LuaException InvalidSpecification(ReadOnlySpan<byte> f, int specStart, int specEnd)
+    {
+        var chars = new char[specEnd - specStart];
+        for (int i = 0; i < chars.Length; i++) chars[i] = (char)f[specStart + i];
+        return LuaErrors.Error($"invalid conversion specification: '%{new string(chars)}'");
+    }
+
     private static LuaException InvalidConversion(ReadOnlySpan<byte> f, int specStart, int specEnd)
     {
         var chars = new char[specEnd - specStart];
         for (int i = 0; i < chars.Length; i++) chars[i] = (char)f[specStart + i];
-        return new LuaException($"invalid conversion '%{new string(chars)}' to 'format'");
+        return LuaErrors.Error($"invalid conversion '%{new string(chars)}' to 'format'");
     }
 
     /// <summary>The conversion-spec check of lstrlib's checkformat: allowed flags, then up to two width digits, then an optional two-digit precision.</summary>
@@ -198,9 +206,11 @@ internal static class StringLib
                     continue;
                 }
                 int specStart = i;
+                // The reference checks that an argument exists before it parses the conversion.
+                if (++arg >= args.Length) throw ArgError("format", arg + 1, "no value");
                 int span = 0;
                 while (specStart + span < f.Length && f[specStart + span] is (byte)'-' or (byte)'+' or (byte)' ' or (byte)'#' or (byte)'.' or (>= (byte)'0' and <= (byte)'9')) span++;
-                if (span + 1 >= 22) throw new LuaException("invalid format string to 'format' (too long)");
+                if (span + 1 >= 22) throw LuaErrors.Error("invalid format string to 'format' (too long)");
                 var spec = new FormatSpec { Prec = -1 };
                 while (i < f.Length && f[i] is (byte)'-' or (byte)'+' or (byte)' ' or (byte)'#' or (byte)'0')
                 {
@@ -215,12 +225,13 @@ internal static class StringLib
                     i++;
                 }
                 int digits = 0;
+                bool badWidth = false;
                 while (i < f.Length && char.IsAsciiDigit((char)f[i]))
                 {
                     spec.Width = spec.Width * 10 + (f[i++] - '0');
                     digits++;
                 }
-                if (digits > 2) throw InvalidConversion(f, specStart, Math.Min(i + 1, f.Length));
+                if (digits > 2) badWidth = true;
                 if (i < f.Length && f[i] == '.')
                 {
                     i++;
@@ -231,7 +242,7 @@ internal static class StringLib
                         spec.Prec = spec.Prec * 10 + (f[i++] - '0');
                         digits++;
                     }
-                    if (digits > 2) throw InvalidConversion(f, specStart, Math.Min(i + 1, f.Length));
+                    if (digits > 2) badWidth = true;
                 }
                 if (i >= f.Length) throw InvalidConversion(f, specStart, i);
                 char conv = (char)f[i++];
@@ -246,9 +257,8 @@ internal static class StringLib
                     's' => ("-", true),
                     _ => null,
                 };
-                if (rules is { } rl && !ValidSpec(f.Slice(specStart, i - 1 - specStart), rl.flagSet, rl.allowPrec))
-                    throw InvalidConversion(f, specStart, i);
-                if (++arg >= args.Length) throw ArgError("format", arg + 1, "no value");
+                if (rules is { } rl && (badWidth || !ValidSpec(f.Slice(specStart, i - 1 - specStart), rl.flagSet, rl.allowPrec)))
+                    throw InvalidSpecification(f, specStart, i);
                 switch (conv)
                 {
                     case 'c':
@@ -287,8 +297,8 @@ internal static class StringLib
                         break;
                     }
                     case 'q':
-                        if (hasMods) throw new LuaException("specifier '%q' cannot have modifiers");
-                        AddQuoted(state, ref b, args[arg]);
+                        if (hasMods) throw LuaErrors.Error("specifier '%q' cannot have modifiers");
+                        AddQuoted(state, ref b, args[arg], arg + 1);
                         break;
                     case 's':
                     {
@@ -324,7 +334,7 @@ internal static class StringLib
         }
     }
 
-    private static void AddQuoted(LuaState state, ref ByteBuilder b, LuaValue v)
+    private static void AddQuoted(LuaState state, ref ByteBuilder b, LuaValue v, int argNumber)
     {
         if (v.Ref is byte[] raw)
         {
@@ -367,7 +377,7 @@ internal static class StringLib
         }
         else
         {
-            throw new LuaException("value has no literal form");
+            throw ArgError("format", argNumber, "value has no literal form");
         }
     }
 
@@ -377,11 +387,11 @@ internal static class StringLib
     {
         if (i >= ms.Level)
         {
-            if (i != 0) throw new LuaException($"invalid capture index %{i + 1}");
+            if (i != 0) throw LuaErrors.Error($"invalid capture index %{i + 1}");
             return Str(state, ms.Src[s..e]);
         }
         int l = ms.CapLen[i];
-        if (l == MatchState.CapUnfinished) throw new LuaException("unfinished capture");
+        if (l == MatchState.CapUnfinished) throw LuaErrors.Error("unfinished capture");
         if (l == MatchState.CapPosition) return LuaValue.FromInteger(ms.CapStart[i] + 1);
         return Str(state, ms.Src.Slice(ms.CapStart[i], l));
     }
@@ -397,13 +407,13 @@ internal static class StringLib
         LuaString p = CheckString(state, fn, args, 1);
         long ls = s.Length;
         long init = PosRelatI(OptInteger(fn, args, 2, 1), ls) - 1;
-        if (init > ls) return [default];
+        if (init > ls) return Rets.One(default);
         ReadOnlySpan<byte> src = s.Bytes, pat = p.Bytes;
         if (find && ((args.Length > 3 && !args[3].IsFalsy) || NoSpecials(pat)))
         {
             int idx = src[(int)init..].IndexOf(pat);
-            if (idx < 0) return [default];
-            return [LuaValue.FromInteger(init + idx + 1), LuaValue.FromInteger(init + idx + pat.Length)];
+            if (idx < 0) return Rets.One(default);
+            return Rets.Two(LuaValue.FromInteger(init + idx + 1), LuaValue.FromInteger(init + idx + pat.Length));
         }
         Span<int> capStart = stackalloc int[MatchState.MaxCaptures];
         Span<int> capLen = stackalloc int[MatchState.MaxCaptures];
@@ -431,7 +441,7 @@ internal static class StringLib
                 return caps;
             }
         } while (s1++ < src.Length && !anchor);
-        return [default];
+        return Rets.One(default);
     }
 
     private sealed class GMatchState(LuaString s, LuaString p, int pos)
@@ -469,7 +479,7 @@ internal static class StringLib
                 }
             }
             gm.Pos = src.Length + 1;
-            return [default];
+            return Rets.One(default);
         })));
     }
 
@@ -510,7 +520,7 @@ internal static class StringLib
                 if (anchor) break;
             }
             if (pos < src.Length) b.Append(src[pos..]);
-            return [!changed ? LuaValue.FromString(s) : LuaValue.FromString(b.ToLuaString(state.Strings)), LuaValue.FromInteger(n)];
+            return Rets.Two(!changed ? LuaValue.FromString(s) : LuaValue.FromString(b.ToLuaString(state.Strings)), LuaValue.FromInteger(n));
         }
         finally
         {
@@ -534,7 +544,7 @@ internal static class StringLib
                 }
                 i++;
                 if (i >= replBytes.Length || (replBytes[i] != '%' && !char.IsAsciiDigit((char)replBytes[i])))
-                    throw new LuaException("invalid use of '%' in replacement string");
+                    throw LuaErrors.Error("invalid use of '%' in replacement string");
                 c = replBytes[i];
                 if (c == '%') b.Append((byte)'%');
                 else if (c == '0') b.Append(ms.Src[s..e]);
@@ -566,7 +576,7 @@ internal static class StringLib
         }
         Span<byte> tmp = stackalloc byte[StringConv.NumberScratch];
         if (!StringConv.TryGetBytes(result, tmp, out ReadOnlySpan<byte> text))
-            throw new LuaException($"invalid replacement value (a {result.TypeName})");
+            throw LuaErrors.Error($"invalid replacement value (a {result.TypeName})");
         b.Append(text);
         return true;
     }

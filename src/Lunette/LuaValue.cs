@@ -31,6 +31,7 @@ public readonly partial struct LuaValue
     public static LuaValue Nil => default;
     public static LuaValue FromInteger(long v) => new(IntegerTag, v);
     public static LuaValue FromFloat(double v) => new(FloatTag, BitConverter.DoubleToInt64Bits(v));
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static LuaValue FromBoolean(bool v) => new(v ? TrueTag : FalseTag, 0);
 
     public bool IsNil => Ref is null;
@@ -55,7 +56,7 @@ public readonly partial struct LuaValue
     internal bool IsTable => Ref is LuaTable;
 
     /// <summary>An object the collector may reclaim (and a weak table may drop): not nil, a number, a boolean, a string or a builtin.</summary>
-    internal bool IsCollectable => Ref is not null and not byte[] and not BuiltinFunction && !IsNumber && !IsBoolean;
+    internal bool IsCollectable => Ref is not null and not byte[] and not BuiltinFunction { Collectable: false } && !IsNumber && !IsBoolean;
     internal bool IsFunction => Ref is LuaFunction;
     internal int AsBooleanBit => ReferenceEquals(Ref, TrueTag) ? 1 : 0;
 

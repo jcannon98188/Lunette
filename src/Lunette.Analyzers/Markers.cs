@@ -11,6 +11,7 @@ namespace Lunette.Analyzers
     {
         public const string HotPath = "LuaHotPathAttribute";
         public const string ColdThrow = "LuaColdThrowAttribute";
+        public const string InterpreterLoop = "LuaInterpreterLoopAttribute";
         public const string StringPath = "LuaStringPathAttribute";
 
         public static bool IsMarked(ISymbol? symbol, string attributeName)

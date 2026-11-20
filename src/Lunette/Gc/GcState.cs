@@ -34,6 +34,9 @@ internal sealed class GcState
     /// <summary>Receives warnings such as a failing <c>__gc</c>; the default discards them (Lua's warnings start off).</summary>
     public Action<string>? Warn { get; set; }
 
+    /// <summary>Used when no <see cref="Warn"/> sink is set (the standalone interpreter's stderr format).</summary>
+    internal Action<string>? WarnFallback { get; set; }
+
     internal string Mode { get; set; } = "incremental";
     internal int Pause { get; set; } = 200;
     internal int StepMul { get; set; } = 100;
@@ -140,7 +143,7 @@ internal sealed class GcState
 
     private void Warning(string message)
     {
-        try { Warn?.Invoke(message); }
+        try { if (Warn is { } sink) sink(message); else WarnFallback?.Invoke(message); }
         catch (Exception) { /* a faulty sink must not break the collector */ }
     }
 

@@ -28,6 +28,38 @@ public class HarnessTests : IDisposable
     }
 
     [Fact]
+    public void End_of_state_gc_finalizers_run_after_the_file_even_when_it_failed()
+    {
+        Suite(("ok.lua", "setmetatable({}, {__gc = function() print('closed ok') end})"),
+              ("bad.lua", "setmetatable({}, {__gc = function() print('closed bad') end})\nerror('boom')"),
+              ("throwing.lua", "setmetatable({}, {__gc = function() error('in gc') end})"));
+        Assert.Contains("closed ok", SuiteRunner.Run("ok.lua", WaiverManifest.Empty, _dir).Detail);
+        var bad = SuiteRunner.Run("bad.lua", WaiverManifest.Empty, _dir);
+        Assert.Equal(SuiteStatus.Failed, bad.Status);
+        Assert.Equal(SuiteStatus.Passed, SuiteRunner.Run("throwing.lua", WaiverManifest.Empty, _dir).Status);
+    }
+
+    [Fact]
+    public void Only_the_suite_runner_mutates_process_global_state()
+    {
+        string[] mutators =
+        [
+            "Environment.CurrentDirectory =", "SetCurrentDirectory(", "Directory.SetCurrentDirectory",
+            "SetEnvironmentVariable(", "Console.SetOut(", "Console.SetError(", "Console.SetIn(",
+            "CultureInfo.CurrentCulture =", "CultureInfo.DefaultThreadCurrentCulture =",
+        ];
+        string testsDir = Path.Combine(SuiteRunner.RepoRoot, "tests");
+        var offenders = Directory.GetFiles(testsDir, "*.cs", SearchOption.AllDirectories)
+            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
+                     && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
+                     && Path.GetFileName(f) is not ("SuiteRunner.cs" or "HarnessTests.cs"))
+            .Where(f => { string t = File.ReadAllText(f); return mutators.Any(t.Contains); })
+            .Select(Path.GetFileName)
+            .ToList();
+        Assert.Empty(offenders);
+    }
+
+    [Fact]
     public void Whole_file_waiver_skips_the_file_and_reports_waived()
     {
         Suite(("api.lua", "print(1 // 0)"));

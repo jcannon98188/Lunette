@@ -29,18 +29,37 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
-      - run: dotnet test -c Release
+      # The official-suite per-file tests run in the sharded `suite` job, not here.
+      - run: dotnet test -c Release --filter "FullyQualifiedName!~Lunette.Tests.Suite.SuiteTests"
       # String-engine variants (ADR 0005): correctness must not depend on interning or on hash quality.
       - name: Tests with constant hash
-        run: dotnet test -c Release --no-build tests/Lunette.Tests
+        run: dotnet test -c Release --no-build --filter "FullyQualifiedName!~Lunette.Tests.Suite.SuiteTests" tests/Lunette.Tests
         env:
           LUNETTE_CONSTANT_HASH: "1"
       - name: Tests with capacity-1 intern cache
-        run: dotnet test -c Release --no-build tests/Lunette.Tests
+        run: dotnet test -c Release --no-build --filter "FullyQualifiedName!~Lunette.Tests.Suite.SuiteTests" tests/Lunette.Tests
         env:
           LUNETTE_INTERN_CAPACITY: "1"
 
-  # Analyzer failures are part of ci-gate: the build above already fails on LD001-LD005, banned APIs and
+  # Official suite per file, 4 shards by file index (LUNETTE_SUITE_SHARD=i/n, see tests/Lunette.Tests/Suite/SuiteShard.cs).
+  suite:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      LUNETTE_SUITE_SHARD: ${{ matrix.shard }}/4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - run: dotnet test -c Release --filter "FullyQualifiedName~Lunette.Tests.Suite.SuiteTests" tests/Lunette.Tests
+
+  # Analyzer failures are part of ci-gate: the build above already fails on LD001-LD006, banned APIs and
   # AOT analyzers (warnings and analyzer diagnostics are errors); this job proves that, and ratchets suppressions.
   fast-checks:
     needs: build
@@ -56,6 +75,9 @@ jobs:
       - name: Suppression ratchet (count may only decrease)
         run: node ci/check-suppressions.js ${{ github.base_ref && format('--base-ref origin/{0}', github.base_ref) || '' }}
       - run: node --test ci/check-suppressions.test.js
+      - run: node --test bench/lib/perf.test.mjs
+      - name: CI self-checks (ci-gate aggregates every job)
+        run: node --test ci/ci-lib.test.mjs
       - name: Analyzer canary (violations of every rule fail the build)
         run: node ci/analyzer-canary.js
 
@@ -84,6 +106,37 @@ jobs:
         with:
           name: reference-lua
           path: .reference/lua
+          retention-days: 14
+
+  # The three differential parts (hand-written corpus, seeded generated programs, official-suite chunks) run through
+  # the Reference binary and the engine CLI as separate processes. A divergence fails unless tests/differential/waivers.toml
+  # covers it with a reason code. LUNETTE_REQUIRE_REFERENCE makes a missing reference a failure rather than a skip.
+  differential:
+    needs: [build, reference]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      LUNETTE_REQUIRE_REFERENCE: "1"
+      LUNETTE_REFERENCE_LUA: ${{ github.workspace }}/.reference/lua
+      LUNETTE_DIFF_ARTIFACTS: ${{ github.workspace }}/diff-failures
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: reference-lua
+          path: .reference
+      - run: chmod +x .reference/lua && .reference/lua -v
+      - run: dotnet test -c Release --filter "FullyQualifiedName~Lunette.Tests.Differential" tests/Lunette.Tests
+      - name: Upload failing differential programs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: differential-failures
+          path: ${{ github.workspace }}/diff-failures
+          if-no-files-found: ignore
           retention-days: 14
 
   # Allocation budgets (alloc-budgets.json) and the interpreter-loop JIT budget (jit-budgets.json); both are part of ci-gate.
@@ -138,11 +191,37 @@ jobs:
           global-json-file: global.json
       - run: dotnet test -c Release --filter "DisplayName~files.lua|DisplayName~main.lua" tests/Lunette.Tests
 
+  # Native AOT + trimming gate: publish the CLI with ILC (TreatWarningsAsErrors makes any trim/AOT warning fail the
+  # publish), then run the pinned core-language suite subset and a smoke script through the native binary.
+  aot:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: dotnet publish src/Lunette.Cli -c Release -r linux-x64 -o aot-out
+      - name: Published output is native (no managed Lunette.Cli.dll)
+        run: test -x aot-out/Lunette.Cli && test ! -e aot-out/Lunette.Cli.dll && test ! -e aot-out/Lunette.dll
+      - run: node ci/run-aot-subset.mjs aot-out/Lunette.Cli --out aot-failures
+      - name: Upload failing file output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aot-failures
+          path: aot-failures
+          retention-days: 14
+
   # The single aggregate check required by branch protection (ADR/ticket 18).
   # Later tickets add their jobs to `needs`; nightly and benchmark jobs never block.
   ci-gate:
     if: always()
-    needs: [build, test, ratchet, reference, fast-checks, alloc-budget, jit-budget, platform-suite]
+    needs: [build, test, suite, ratchet, reference, differential, fast-checks, alloc-budget, jit-budget, aot, platform-suite]
     runs-on: ubuntu-latest
     steps:
       - name: Require every upstream job to succeed
@@ -150,3 +229,18 @@ jobs:
           if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}" = "true" ]; then
             echo "an upstream job did not succeed"; exit 1
           fi
+
+  # Non-blocking (not in ci-gate): flags a PR workflow that exceeds the ~15 minute budget (spec ticket 18).
+  time-budget:
+    if: github.event_name == 'pull_request' && always()
+    needs: [ci-gate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: node ci/check-pr-budget.mjs 15

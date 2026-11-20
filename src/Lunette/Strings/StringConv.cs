@@ -74,7 +74,7 @@ internal static class StringConv
         TryGetBytes(a, sa, out ReadOnlySpan<byte> x);
         TryGetBytes(b, sb, out ReadOnlySpan<byte> y);
         long total = (long)x.Length + y.Length;
-        if (total > int.MaxValue - 64) throw new LuaException("string length overflow");
+        if (total > int.MaxValue - 64) throw LuaErrors.Error("string length overflow");
         if (total <= LuaString.MaxShortLength)
         {
             Span<byte> tmp = stackalloc byte[LuaString.MaxShortLength];

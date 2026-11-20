@@ -178,6 +178,13 @@ internal static class LuaNumber
         return true;
     }
 
+    /// <summary>C fmod as glibc on x86-64 yields it: an invalid operation (inf % y, x % 0.0) is the negative default NaN, an input NaN propagates.</summary>
+    public static double FMod(double a, double b)
+    {
+        double m = a % b;
+        return double.IsNaN(m) && !double.IsNaN(a) && !double.IsNaN(b) ? BitConverter.Int64BitsToDouble(unchecked((long)0xFFF8000000000000UL)) : m;
+    }
+
     /// <summary>
     /// Formats a float as Lua's tostring does: "%.14g", then ".0" appended when the result looks like an
     /// integer. This is the engine's own formatter, not the framework's "G14" (ADR: number formatting).

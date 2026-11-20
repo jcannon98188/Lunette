@@ -24,8 +24,8 @@ internal static class Utf8Lib
         {
             LuaString s = CheckString(st, "codes", a, 0);
             bool lax = a.Length > 1 && !a[1].IsFalsy;
-            if (s.Length > 0 && IsCont(s[0])) throw new LuaException("bad argument #1 to 'codes' (invalid UTF-8 code)");
-            return [LuaValue.FromObject(lax ? laxIter : strictIter), LuaValue.FromString(s), LuaValue.FromInteger(0)];
+            if (s.Length > 0 && IsCont(s[0])) throw LuaErrors.Error("bad argument #1 to 'codes' (invalid UTF-8 code)");
+            return Rets.Three(LuaValue.FromObject(lax ? laxIter : strictIter), LuaValue.FromString(s), LuaValue.FromInteger(0));
         });
         ReadOnlySpan<byte> pattern = [(byte)'[', 0, (byte)'-', 0x7F, 0xC2, (byte)'-', 0xFD, (byte)']', (byte)'[', 0x80, (byte)'-', 0xBF, (byte)']', (byte)'*'];
         lib.Set(LuaValue.FromString(state.Strings.FromUtf16("charpattern")), LuaValue.FromString(state.Strings.Intern(pattern)));
@@ -79,11 +79,11 @@ internal static class Utf8Lib
         while (posi <= posj)
         {
             int next = Decode(s, (int)posi, out _, !lax);
-            if (next < 0) return [default, LuaValue.FromInteger(posi + 1)];
+            if (next < 0) return Rets.Two(default, LuaValue.FromInteger(posi + 1));
             posi = next;
             n++;
         }
-        return [LuaValue.FromInteger(n)];
+        return Rets.One(LuaValue.FromInteger(n));
     }
 
     private static LuaValue[] CodePoint(LuaState state, ReadOnlySpan<LuaValue> args)
@@ -97,13 +97,13 @@ internal static class Utf8Lib
         if (posi < 1) throw ArgError("codepoint", 2, "out of bounds");
         if (pose > len) throw ArgError("codepoint", 3, "out of bounds");
         if (posi > pose) return [];
-        if (pose - posi >= int.MaxValue) throw new LuaException("string slice too long");
+        if (pose - posi >= int.MaxValue) throw LuaErrors.Error("string slice too long");
         var res = new List<LuaValue>();
         int at = (int)posi - 1;
         while (at < pose)
         {
             int next = Decode(s, at, out uint code, !lax);
-            if (next < 0) throw new LuaException("invalid UTF-8 code");
+            if (next < 0) throw LuaErrors.Error("invalid UTF-8 code");
             res.Add(LuaValue.FromInteger(code));
             at = next;
         }
@@ -141,7 +141,7 @@ internal static class Utf8Lib
                 if ((ulong)code > MaxUtf) throw ArgError("char", i + 1, "value out of range");
                 PutUtf8(ref b, (uint)code);
             }
-            return [LuaValue.FromString(b.ToLuaString(state.Strings))];
+            return Rets.One(LuaValue.FromString(b.ToLuaString(state.Strings)));
         }
         finally
         {
@@ -164,7 +164,7 @@ internal static class Utf8Lib
         }
         else
         {
-            if (Cont(s, posi)) throw new LuaException("initial position is a continuation byte");
+            if (Cont(s, posi)) throw LuaErrors.Error("initial position is a continuation byte");
             if (n < 0)
             {
                 while (n < 0 && posi > 0)
@@ -196,9 +196,9 @@ internal static class Utf8Lib
         {
             while (n < (ulong)len && IsCont(s[(int)n])) n++;
         }
-        if (n >= (ulong)len) return [default];
+        if (n >= (ulong)len) return Rets.One(default);
         int next = Decode(s, (int)n, out uint code, strict);
-        if (next < 0 || (next < s.Length && IsCont(s[next]))) throw new LuaException("invalid UTF-8 code");
-        return [LuaValue.FromInteger((long)n + 1), LuaValue.FromInteger(code)];
+        if (next < 0 || (next < s.Length && IsCont(s[next]))) throw LuaErrors.Error("invalid UTF-8 code");
+        return Rets.Two(LuaValue.FromInteger((long)n + 1), LuaValue.FromInteger(code));
     }
 }

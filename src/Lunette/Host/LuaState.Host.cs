@@ -167,6 +167,7 @@ public sealed partial class LuaState
     private void EndRun()
     {
         if (--_runDepth != 0) return;
+        Main.RaisingBuiltin = default;
         long used = _runBudget - _budgetLeft + (_sliceSize - Ticks);
         if (used > 0) _cumulativeUsed += used;
     }

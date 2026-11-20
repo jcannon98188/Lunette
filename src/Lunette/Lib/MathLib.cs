@@ -10,11 +10,14 @@ namespace Lunette.Lib;
 internal sealed class MathLib
 {
     private readonly ulong[] _rng = new ulong[4];
+    /// <summary>The host-chosen seed; when set, <c>math.randomseed()</c> without arguments returns to it instead of reading the clock.</summary>
+    private readonly (ulong, ulong)? _hostSeed;
 
     public Dictionary<string, LuaValue> Members { get; } = new();
 
-    public MathLib()
+    public MathLib((ulong, ulong)? hostSeed = null)
     {
+        _hostSeed = hostSeed;
         Members["pi"] = LuaValue.FromFloat(Math.PI);
         Members["huge"] = LuaValue.FromFloat(double.PositiveInfinity);
         Members["maxinteger"] = LuaValue.FromInteger(long.MaxValue);
@@ -42,13 +45,14 @@ internal sealed class MathLib
         Add("min", static (_, a) => MinMax("min", a, false));
         Add("random", (_, a) => Random(a));
         Add("randomseed", (_, a) => RandomSeed(a));
-        SetSeed((ulong)DateTime.UtcNow.Ticks, (ulong)Environment.TickCount64);
+        if (hostSeed is var (h1, h2)) SetSeed(h1, h2);
+        else SetSeed((ulong)DateTime.UtcNow.Ticks, (ulong)Environment.TickCount64);
     }
 
     private void Add(string name, BuiltinBody body) => Members[name] = LuaValue.FromObject(new BuiltinFunction(body));
 
-    private static LuaValue[] One(double d) => [LuaValue.FromFloat(d)];
-    private static LuaValue[] One(LuaValue v) => [v];
+    private static LuaValue[] One(double d) => Rets.One(LuaValue.FromFloat(d));
+    private static LuaValue[] One(LuaValue v) => Rets.One(v);
 
     // ---- argument checking (messages follow luaL_argerror / luaL_typeerror) ----
 
@@ -111,17 +115,17 @@ internal sealed class MathLib
             }
             return One(LuaValue.FromInteger(x.AsInteger % d));
         }
-        return One(Num("fmod", a, 0) % Num("fmod", a, 1));
+        return One(LuaNumber.FMod(Num("fmod", a, 0), Num("fmod", a, 1)));
     }
 
     private static LuaValue[] Modf(LuaState _, ReadOnlySpan<LuaValue> a)
     {
         LuaValue v = Number("modf", a, 0);
-        if (v.IsInteger) return [v, LuaValue.FromFloat(0.0)];
+        if (v.IsInteger) return Rets.Two(v, LuaValue.FromFloat(0.0));
         double n = v.AsFloat;
         double ip = n < 0 ? Math.Ceiling(n) : Math.Floor(n);
         double frac = double.IsInfinity(n) ? 0.0 : n - ip;
-        return [LuaValue.FromFloat(ip), LuaValue.FromFloat(frac)];
+        return Rets.Two(LuaValue.FromFloat(ip), LuaValue.FromFloat(frac));
     }
 
     private static LuaValue[] Log(LuaState _, ReadOnlySpan<LuaValue> a)
@@ -150,9 +154,9 @@ internal sealed class MathLib
     }
 
     /// <summary>Installs a fresh <c>math</c> table (with its own random state) as the global <c>math</c>.</summary>
-    public static void Register(LuaState state)
+    public static void Register(LuaState state, (ulong, ulong)? hostSeed = null)
     {
-        var lib = new MathLib();
+        var lib = new MathLib(hostSeed);
         var table = new LuaTable();
         foreach (var (name, value) in lib.Members)
             table.Set(LuaValue.FromString(state.Strings.FromUtf16(name)), value);
@@ -233,7 +237,7 @@ internal sealed class MathLib
             default:
                 throw LuaErrors.Error("wrong number of arguments");
         }
-        if (low > up) throw ArgError("random", a.Length - 1, "interval is empty");
+        if (low > up) throw ArgError("random", 0, "interval is empty");
         return One(LuaValue.FromInteger(unchecked((long)(Project(rv, (ulong)up - (ulong)low) + (ulong)low))));
     }
 
@@ -242,16 +246,19 @@ internal sealed class MathLib
         long n1, n2;
         if (a.Length == 0)
         {
-            n1 = DateTime.UtcNow.Ticks;
-            n2 = Environment.TickCount64;
+            if (_hostSeed is var (h1, h2)) { n1 = (long)h1; n2 = (long)h2; }
+            else
+            {
+                n1 = DateTime.UtcNow.Ticks;
+                n2 = Environment.TickCount64;
+            }
         }
         else
         {
-            LuaValue v = Number("randomseed", a, 0);
-            n1 = LuaNumber.TryToInteger(v, out long iv) ? iv : BitConverter.DoubleToInt64Bits(v.AsFloat);
+            n1 = Int("randomseed", a, 0);
             n2 = a.Length > 1 && !a[1].IsNil ? Int("randomseed", a, 1) : 0;
         }
         SetSeed((ulong)n1, (ulong)n2);
-        return [LuaValue.FromInteger(n1), LuaValue.FromInteger(n2)];
+        return Rets.Two(LuaValue.FromInteger(n1), LuaValue.FromInteger(n2));
     }
 }

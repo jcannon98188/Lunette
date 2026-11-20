@@ -1,0 +1,57 @@
+name: nightly-differential
+
+# Fresh-seed generated programs against the Reference binary (ticket lua-engine-spec/18). Never blocks a merge;
+# a failing seed is minimised by hand and committed to tests/differential/corpus.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  fresh-seeds:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      LUNETTE_REQUIRE_REFERENCE: "1"
+      LUNETTE_REFERENCE_LUA: ${{ github.workspace }}/.reference/lua
+      LUNETTE_DIFF_ARTIFACTS: ${{ github.workspace }}/diff-failures
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/cache@v4
+        with:
+          path: .reference
+          key: reference-lua-5.4.9-2335b6c5-${{ runner.os }}-${{ runner.arch }}-ubuntu-latest
+      - run: ci/build-reference.sh .reference
+      - name: Pick today's seed range
+        run: echo "LUNETTE_DIFF_SEEDS=$(( $(date +%s) / 86400 * 1000 )):500" >> "$GITHUB_ENV"
+      - run: dotnet test -c Release --filter "FullyQualifiedName~Lunette.Tests.Differential.GeneratedDifferentialTests" tests/Lunette.Tests
+      - name: Upload failing seeds
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: differential-failing-seeds
+          path: ${{ github.workspace }}/diff-failures
+          if-no-files-found: ignore
+          retention-days: 14
+      # Open the tracking issue, or comment on it if one is already open.
+      - name: Open or update tracking issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Nightly differential run failing"
+          body="Run ${RUN_URL} failed (seeds ${LUNETTE_DIFF_SEEDS}). Download the differential-failing-seeds artifact, minimise, and commit to tests/differential/corpus."
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi

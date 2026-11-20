@@ -41,6 +41,9 @@ internal sealed class BuiltinFunction(BuiltinBody body, BuiltinKind kind = Built
     /// <summary>The host delegate behind a <see cref="BuiltinKind.Host"/> function.</summary>
     public HostFunction? Host { get; init; }
 
+    /// <summary>True for a host closure that owns state (such as a <c>coroutine.wrap</c> function), which a weak table may drop; library functions are never collected.</summary>
+    public bool Collectable { get; init; }
+
     public LuaValue[]? Invoke(LuaState state, ReadOnlySpan<LuaValue> args) => body(state, args);
 }
 

@@ -66,17 +66,17 @@ internal static class LoadLib
         bool binary = source.Length > 0 && source[0] == BinarySignature[0]; // PUC only checks the first byte
         if (binary)
         {
-            if (!mode.Contains('b')) return [default, Str(state, $"attempt to load a binary chunk (mode is '{mode}')")];
-            return [default, Str(state, $"{ChunkIdOf(chunkName)}: precompiled chunks are not supported")];
+            if (!mode.Contains('b')) return Rets.Two(default, Str(state, $"attempt to load a binary chunk (mode is '{mode}')"));
+            return Rets.Two(default, Str(state, $"{ChunkIdOf(chunkName)}: precompiled chunks are not supported"));
         }
-        if (!mode.Contains('t')) return [default, Str(state, $"attempt to load a text chunk (mode is '{mode}')")];
+        if (!mode.Contains('t')) return Rets.Two(default, Str(state, $"attempt to load a text chunk (mode is '{mode}')"));
         try
         {
-            return [LuaValue.FromObject(state.Load(source, chunkName, env))];
+            return Rets.One(LuaValue.FromObject(state.Load(source, chunkName, env)));
         }
         catch (LuaException e)
         {
-            return [default, e.Value];
+            return Rets.Two(default, e.Value);
         }
     }
 
@@ -106,7 +106,7 @@ internal static class LoadLib
             catch (LuaException e) { return [default, e.Value]; }
             LuaValue p = piece.Length > 0 ? piece[0] : default;
             if (p.IsNil) break;
-            if (p.Ref is not byte[] pb) return [default, Str(state, "reader function must return a string")];
+            if (p.Ref is not byte[] pb) return Rets.Two(default, Str(state, "reader function must return a string"));
             var ps = new LuaString(pb);
             if (ps.Length == 0) break;
             buf.AddRange(ps.Bytes.ToArray());
@@ -155,7 +155,7 @@ internal static class LoadLib
     private static LuaValue[] LoadFileCore(LuaState state, string? filename, string mode, LuaValue env)
     {
         byte[]? src = ReadSource(state, filename ?? "", out string error);
-        if (src is null) return [default, Str(state, error)];
+        if (src is null) return Rets.Two(default, Str(state, error));
         return Compile(state, src, filename is null ? "=stdin" : "@" + filename, mode, env);
     }
 
@@ -193,10 +193,11 @@ internal static class LoadLib
             return null;
         }
         if (!state.WarningsOn) return null;
-        var sb = new StringBuilder("Lua warning: ");
+        var sb = new StringBuilder();
         for (int i = 0; i < args.Length; i++) sb.Append(LibArgs.CheckString(state, "warn", args, i).ToString());
-        state.Warn?.Invoke(sb.ToString());
-        if (state.Warn is null) Console.Error.WriteLine(sb.ToString());
+        // The same sink receives collector warnings; with none set, the standalone interpreter's stderr format applies.
+        if (state.Gc.Warn is { } sink) sink(sb.ToString());
+        else Console.Error.WriteLine("Lua warning: " + sb);
         return null;
     }
 
@@ -248,19 +249,19 @@ internal static class LoadLib
         LuaValue preload = state.Package!.Get(Str(state, "preload"));
         if (preload.Ref is not LuaTable pt) throw LuaErrors.Error("'package.preload' must be a table");
         LuaValue loader = pt.Get(name);
-        if (loader.IsNil) return [Str(state, $"no field package.preload['{new LuaString((byte[])name.Ref!)}']")];
-        return [loader, Str(state, ":preload:")];
+        if (loader.IsNil) return Rets.One(Str(state, $"no field package.preload['{new LuaString((byte[])name.Ref!)}']"));
+        return Rets.Two(loader, Str(state, ":preload:"));
     }
 
     private static LuaValue[] SearcherLua(LuaState state, ReadOnlySpan<LuaValue> args)
     {
         string name = new LuaString((byte[])args[0].Ref!).ToString();
         string? file = SearchPathCore(state, name, PackageString(state, "path"), ".", "/", out string error);
-        if (file is null) return [Str(state, error)];
+        if (file is null) return Rets.One(Str(state, error));
         LuaValue[] r = LoadFileCore(state, file, "bt", LuaValue.FromTable(state.Globals));
         if (r[0].IsNil)
             throw LuaErrors.Error($"error loading module '{name}' from file '{file}':\n\t{Meta.ToStringValue(state, r[1])}");
-        return [r[0], Str(state, file)];
+        return Rets.Two(r[0], Str(state, file));
     }
 
     /// <summary>
@@ -291,7 +292,7 @@ internal static class LoadLib
         if (state.Package!.Get(Str(state, "loaded")).Ref is not LuaTable loaded)
             throw LuaErrors.Error("'package.loaded' must be a table");
         LuaValue cached = loaded.Get(name);
-        if (!cached.IsFalsy) return [cached];
+        if (!cached.IsFalsy) return Rets.One(cached);
 
         if (state.Package.Get(Str(state, "searchers")).Ref is not LuaTable searchers)
             throw LuaErrors.Error("'package.searchers' must be a table");
@@ -320,6 +321,6 @@ internal static class LoadLib
         LuaValue[] res = Interpreter.CallValues(state, loader, [name, extra]);
         if (res.Length > 0 && !res[0].IsNil) loaded.Set(name, res[0]);
         else if (loaded.Get(name).IsNil) loaded.Set(name, LuaValue.FromBoolean(true));
-        return [loaded.Get(name), extra];
+        return Rets.Two(loaded.Get(name), extra);
     }
 }

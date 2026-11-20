@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Per-opcode and per-stdlib-family micro-benchmarks (BenchmarkDotNet). Report-only; not shipped, not part of ci-gate.
+       Each bench/micro/*.lua snippet is one benchmark; bench/run-micro.mjs joins the results with PUC timings. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Lunette.Benchmarks</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" Version="0.15.8" />
+    <ProjectReference Include="..\..\src\Lunette\Lunette.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="..\micro\*.lua" Link="micro\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

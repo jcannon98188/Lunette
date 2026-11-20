@@ -48,16 +48,13 @@ public sealed partial class LuaState : IDisposable
     internal LuaTable? Package;
     /// <summary>Whether warn() output is enabled (toggled by warn("@on") / warn("@off")).</summary>
     internal bool WarningsOn;
-    /// <summary>Host sink for warnings; null writes to standard error.</summary>
-    internal Action<string>? Warn;
 
     /// <summary>A collector warning (a failed <c>__gc</c>): shown like <c>warn</c> output, only while warnings are on.</summary>
     private void EmitGcWarning(string message)
     {
         if (!WarningsOn) return;
         string text = "Lua warning: " + message;
-        if (Warn is { } sink) sink(text);
-        else Console.Error.WriteLine(text);
+        Console.Error.WriteLine(text);
     }
 
     public LuaState() : this(DefaultInternCapacity())
@@ -81,7 +78,7 @@ public sealed partial class LuaState : IDisposable
         Platform = platform ?? new DefaultLuaPlatform();
         Strings = new StringCache(internCapacity);
         Gc = new Gc.GcState(this);
-        Gc.Warn = EmitGcWarning;
+        Gc.WarnFallback = EmitGcWarning;
         Main.IsMain = true;
         Main.Status = CoStatus.Running;
         Running = Main;
@@ -130,7 +127,12 @@ public sealed partial class LuaState : IDisposable
         if (_trampolines.TryGetValue(fn, out LuaClosure? cl)) return cl;
         var env = new LuaTable();
         env.Set(LuaValue.FromString(Strings.FromUtf16(name)), LuaValue.FromObject(fn));
-        byte[] src = name == "pcall" ? "return pcall(...)"u8.ToArray() : "return xpcall(...)"u8.ToArray();
+        byte[] src = name switch
+        {
+            "pcall" => "return pcall(...)"u8.ToArray(),
+            "xpcall" => "return xpcall(...)"u8.ToArray(),
+            _ => "return host(...)"u8.ToArray(),
+        };
         cl = Load(src, "=(" + name + ")", LuaValue.FromTable(env));
         _trampolines[fn] = cl;
         return cl;
@@ -168,6 +170,7 @@ public sealed partial class LuaState : IDisposable
         Proto proto = LuaCompiler.Compile(source, chunkName, Strings);
         var values = new LuaValue[args.Count];
         for (int i = 0; i < values.Length; i++) values[i] = LuaValue.FromString(Strings.FromUtf16(args[i]));
+        Main.CBase = true;
         Interpreter.Execute(this, proto, values);
     }
 

@@ -47,6 +47,11 @@ internal sealed class Frame
     public bool IsTail;
     /// <summary>True when a host function (not a Lua call instruction) called this Frame, so no call-site name exists.</summary>
     public bool Native;
+    /// <summary>The <c>top</c> of a returning Frame whose <c>__close</c> handler is running as a Frame, restored when the handler returns.</summary>
+    public int SavedTop;
+    /// <summary>True while a failed protected call runs its <c>__close</c> handlers as Frames above this one; <see cref="ErrValue"/> is the error being passed on.</summary>
+    public bool Closing;
+    public LuaValue ErrValue;
 }
 
 /// <summary>How a metamethod Frame finishes the instruction that called it (the equivalent of luaV_finishOp).</summary>
@@ -59,6 +64,10 @@ internal enum Continuation : byte
     Bool,
     /// <summary>Drop the results.</summary>
     Discard,
+    /// <summary>A <c>__close</c> handler run by a Return or Close instruction: when it returns, that instruction runs again for the next variable.</summary>
+    Close,
+    /// <summary>A <c>__close</c> handler run while a protected call unwinds an error: when it returns, the unwinding goes on.</summary>
+    CloseError,
 }
 
 internal enum CoStatus : byte
@@ -84,6 +93,10 @@ internal sealed class Coroutine
     public int RaisingDepth;
 
     public bool IsMain;
+    /// <summary>The builtin a running call/return hook reports was called by another host function, so it has no call-site name.</summary>
+    public bool HookBuiltinNested;
+    /// <summary>The main coroutine was entered from a C function, as lua.c's pmain does (a script run by the driver): debug levels end with a host entry.</summary>
+    public bool CBase;
     public CoStatus Status = CoStatus.Suspended;
     /// <summary>The body function, until the first resume starts it.</summary>
     public LuaValue Body;
@@ -100,6 +113,8 @@ internal sealed class Coroutine
     /// <summary>The continuation of the host function that yielded, run with the resume values; null when the values are the results.</summary>
     public HostContinuation? YieldCont;
     public bool YieldPcall;
+    /// <summary>The host function whose call the pending yield is part of; its return hook event fires when the coroutine resumes.</summary>
+    public BuiltinFunction? YieldFn;
     /// <summary>Number of non-yieldable host calls in progress on this coroutine (PUC nny).</summary>
     public int Nny;
     /// <summary>The error that killed the coroutine, reported once by coroutine.close.</summary>
@@ -181,6 +196,7 @@ internal sealed class Coroutine
         f.Cont = Continuation.None;
         f.IsTail = false;
         f.Native = false;
+        f.Closing = false;
         return f;
     }
 

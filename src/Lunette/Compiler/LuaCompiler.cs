@@ -14,6 +14,9 @@ internal sealed class LuaCompiler
         public int Reg { get; } = reg;
         public VarKind Kind { get; } = kind;
         public bool Captured { get; set; }
+        /// <summary>Set for a <c>&lt;const&gt;</c> local whose initializer is a literal: it has no register and every use loads <see cref="Folded"/>.</summary>
+        public bool IsFolded { get; set; }
+        public LuaValue Folded { get; set; }
         public int StartPc { get; set; }
         public int EndPc { get; set; } = -1;
     }
@@ -182,6 +185,17 @@ internal sealed class LuaCompiler
         Advance();
     }
 
+    /// <summary>lparser.c check_match: closes a construct opened at <paramref name="line"/>; names the opener when it is on another line.</summary>
+    private void ExpectMatch(Tok kind, string what, string who, int line)
+    {
+        if (_tok.Kind != kind)
+        {
+            if (line == _tok.Line) throw Err($"'{what}' expected");
+            throw Err($"'{what}' expected (to close '{who}' at line {line})");
+        }
+        Advance();
+    }
+
     private string ExpectName()
     {
         if (_tok.Kind != Tok.Name) throw Err("<name> expected");
@@ -275,8 +289,28 @@ internal sealed class LuaCompiler
         return fs.Upvals.Count - 1;
     }
 
+    /// <summary>The literal a folded <c>&lt;const&gt;</c> local stands for, found through enclosing functions; null when the name is not one.</summary>
+    private LuaValue? FoldedValue(string name)
+    {
+        for (var fs = _fs; fs is not null; fs = fs.Parent)
+        {
+            if (FindLocal(fs, name) is not { } v) continue;
+            if (v.IsFolded) return v.Folded;
+            return default(LuaValue?);
+        }
+        return default(LuaValue?);
+    }
+
+    private void EmitFolded(LuaValue v, int target, int line)
+    {
+        if (v.IsNil) Emit(Instruction.Abc(OpCode.LoadNil, target, 0, 0), line);
+        else if (v.IsBoolean) Emit(Instruction.Abc(OpCode.LoadBool, target, v.IsFalsy ? 0 : 1, 0), line);
+        else EmitLoadK(target, AddConst(v), line);
+    }
+
     private void LoadVariable(string name, int target, int line)
     {
+        if (FoldedValue(name) is { } folded) { EmitFolded(folded, target, line); return; }
         var local = FindLocal(_fs, name);
         if (local is not null) { Emit(Instruction.Abc(OpCode.Move, target, local.Reg, 0), line); return; }
         int up = FindUpval(_fs, name);
@@ -315,9 +349,11 @@ internal sealed class LuaCompiler
             return;
         }
         int save2 = _fs.Free;
+        int envR = env.Reg;
+        if (env.IsFolded) { envR = Alloc(); EmitFolded(env.Folded, envR, line); }
         int key = Alloc();
         EmitLoadK(key, k, line);
-        Emit(Instruction.Abc(OpCode.GetTable, target, env.Reg, key), line);
+        Emit(Instruction.Abc(OpCode.GetTable, target, envR, key), line);
         _fs.Free = save2;
     }
 
@@ -343,9 +379,11 @@ internal sealed class LuaCompiler
             return;
         }
         int save2 = _fs.Free;
+        int envR = env.Reg;
+        if (env.IsFolded) { envR = Alloc(); EmitFolded(env.Folded, envR, line); }
         int key = Alloc();
         EmitLoadK(key, k, line);
-        Emit(Instruction.Abc(OpCode.SetTable, env.Reg, key, source), line);
+        Emit(Instruction.Abc(OpCode.SetTable, envR, key, source), line);
         _fs.Free = save2;
     }
 
@@ -420,7 +458,12 @@ internal sealed class LuaCompiler
     }
 
     /// <summary>First register above the first <paramref name="nactvar"/> active locals.</summary>
-    private int RegLevel(int nactvar) => nactvar == 0 ? 0 : _fs.Locals[nactvar - 1].Reg + 1;
+    private int RegLevel(int nactvar)
+    {
+        for (int i = nactvar - 1; i >= 0; i--)
+            if (!_fs.Locals[i].IsFolded) return _fs.Locals[i].Reg + 1;
+        return 0;
+    }
 
     private void GotoStatement()
     {
@@ -509,9 +552,10 @@ internal sealed class LuaCompiler
                 return;
             case Tok.Do:
             {
+                int doLine = _tok.Line;
                 Advance();
                 ScopedBlock();
-                Expect(Tok.End, "end");
+                ExpectMatch(Tok.End, "end", "do", doLine);
                 return;
             }
             case Tok.Break:
@@ -536,7 +580,7 @@ internal sealed class LuaCompiler
     {
         int line = _tok.Line;
         Advance();
-        if (_fs.Loops.Count == 0) throw _lex.Error($"break outside a loop at line {line}", line);
+        if (_fs.Loops.Count == 0) throw _lex.Error($"break outside loop at line {line}", line);
         var loop = _fs.Loops[^1];
         Emit(Instruction.Abc(OpCode.Close, loop.BaseReg, 0, 0), line);
         loop.Breaks.Add(EmitJmp(line));
@@ -568,7 +612,6 @@ internal sealed class LuaCompiler
             else Emit(Instruction.Abc(OpCode.Return, first, n + 1, 0), line);
         }
         if (_tok.Kind == Tok.Semi) Advance();
-        if (!BlockFollow()) throw Err("<eof> expected");
         _fs.Free = first;
     }
 
@@ -651,11 +694,18 @@ internal sealed class LuaCompiler
             kinds.Add(kind);
         } while (_tok.Kind == Tok.Comma);
         int baseReg = _fs.Free;
+        int startPc = Here;
         int n = 0, open = -1;
         if (_tok.Kind == Tok.Assign)
         {
             Advance();
             (n, open) = ExprList();
+        }
+        if (names.Count == 1 && n == 1 && kinds[0] == VarKind.Const && TryTakeLiteral(startPc, baseReg) is { } literal)
+        {
+            _fs.Free = baseReg;
+            _fs.Locals.Add(new LocalVar(names[0], baseReg, VarKind.Const) { IsFolded = true, Folded = literal, StartPc = Here });
+            return;
         }
         AdjustList(names.Count, n, open, baseReg);
         for (int i = 0; i < names.Count; i++)
@@ -665,6 +715,35 @@ internal sealed class LuaCompiler
             Emit(Instruction.ABx(OpCode.Tbc, baseReg + i, AddName(names[i])), line);
             _fs.Blocks[^1].InsideTbc = true;
         }
+    }
+
+    /// <summary>
+    /// When the code emitted since <paramref name="startPc"/> only loads one literal (nil, a boolean, a number, a string, or a negated number)
+    /// into <paramref name="reg"/>, removes that code and returns the literal; otherwise leaves the code alone and returns null.
+    /// </summary>
+    private LuaValue? TryTakeLiteral(int startPc, int reg)
+    {
+        var code = _fs.Code;
+        int count = code.Count - startPc;
+        if (count is < 1 or > 2 || code[startPc].A != reg) return null;
+        var first = code[startPc];
+        LuaValue value;
+        switch (first.Op)
+        {
+            case OpCode.LoadNil when first.B == 0: value = default; break;
+            case OpCode.LoadBool: value = LuaValue.FromBoolean(first.B != 0); break;
+            case OpCode.LoadK: value = _fs.Consts[first.Bx]; break;
+            default: return null;
+        }
+        if (count == 2)
+        {
+            var second = code[startPc + 1];
+            if (second.Op != OpCode.Unm || second.A != reg || second.B != reg || !value.IsNumber) return null;
+            value = value.IsInteger ? LuaValue.FromInteger(unchecked(-value.AsInteger)) : LuaValue.FromFloat(-value.AsFloat);
+        }
+        code.RemoveRange(startPc, count);
+        _fs.Lines.RemoveRange(startPc, count);
+        return value;
     }
 
     /// <summary>A suffixed expression seen as a statement: an assignable place or a call.</summary>
@@ -791,6 +870,7 @@ internal sealed class LuaCompiler
     private void IfStatement()
     {
         var endJumps = new List<int>();
+        int ifLine = _tok.Line;
         while (true)
         {
             int line = _tok.Line;
@@ -808,7 +888,7 @@ internal sealed class LuaCompiler
             }
             break;
         }
-        Expect(Tok.End, "end");
+        ExpectMatch(Tok.End, "end", "if", ifLine);
         foreach (int j in endJumps) PatchJmp(j, Here);
     }
 
@@ -834,7 +914,7 @@ internal sealed class LuaCompiler
         var loop = new LoopInfo(_fs.Free);
         _fs.Loops.Add(loop);
         ScopedBlock();
-        Expect(Tok.End, "end");
+        ExpectMatch(Tok.End, "end", "while", line);
         _fs.Loops.RemoveAt(_fs.Loops.Count - 1);
         PatchJmp(EmitJmp(line), top);
         PatchJmp(exit, Here);
@@ -852,7 +932,7 @@ internal sealed class LuaCompiler
         int free = _fs.Free;
         EnterBlock();
         Block();
-        Expect(Tok.Until, "until");
+        ExpectMatch(Tok.Until, "until", "repeat", line);
         int t = Alloc();
         Expr(t, 0);
         bool captured = false;
@@ -904,7 +984,7 @@ internal sealed class LuaCompiler
         EnterBlock();
         Block();
         LeaveBlock();
-        Expect(Tok.End, "end");
+        ExpectMatch(Tok.End, "end", "for", line);
         _fs.Loops.RemoveAt(_fs.Loops.Count - 1);
         LeaveScope(nlocals, free);
         Emit(Instruction.Abc(OpCode.ForLoop, a, 0, 0), line);
@@ -943,7 +1023,7 @@ internal sealed class LuaCompiler
         EnterBlock();
         Block();
         LeaveBlock();
-        Expect(Tok.End, "end");
+        ExpectMatch(Tok.End, "end", "for", line);
         LeaveBlock();
         _fs.Loops.RemoveAt(_fs.Loops.Count - 1);
         LeaveScope(nlocals, free);
@@ -993,7 +1073,7 @@ internal sealed class LuaCompiler
         Block();
         int endLine = _tok.Line;
         child.LastLineDefined = endLine;
-        Expect(Tok.End, "end");
+        ExpectMatch(Tok.End, "end", "function", line);
         LeaveBlock();
         Emit(Instruction.Abc(OpCode.Return, 0, 1, 0), endLine);
         _fs = child.Parent!;
@@ -1175,7 +1255,7 @@ internal sealed class LuaCompiler
             case Tok.LParen:
                 Advance();
                 Expr(target, 0);
-                Expect(Tok.RParen, ")");
+                ExpectMatch(Tok.RParen, ")", "(", line);
                 _openIdx = -1;
                 break;
             default:
@@ -1219,6 +1299,7 @@ internal sealed class LuaCompiler
                 break;
             case Tok.LParen:
             {
+                int parenLine = _tok.Line;
                 Advance();
                 if (_tok.Kind != Tok.RParen)
                 {
@@ -1230,7 +1311,7 @@ internal sealed class LuaCompiler
                     }
                     else b += n;
                 }
-                Expect(Tok.RParen, ")");
+                ExpectMatch(Tok.RParen, ")", "(", parenLine);
                 break;
             }
             default:
@@ -1319,7 +1400,7 @@ internal sealed class LuaCompiler
             if (_tok.Kind is Tok.Comma or Tok.Semi) Advance();
             else break;
         }
-        Expect(Tok.RBrace, "}");
+        ExpectMatch(Tok.RBrace, "}", "{", line);
         if (pending > 0) FlushList(t, openList ? 0 : pending, flushed, line);
         _fs.Code[newIdx] = Instruction.Abc(OpCode.NewTable, t, Math.Min(hashSize, 255), 0);
         _fs.Code[newIdx + 1] = Instruction.Extra(arraySize);

@@ -1,5 +1,5 @@
 {
-  "_comment": "Exact per-iteration allocation budgets in bytes (GC.GetAllocatedBytesForCurrentThread, Release). Zero-alloc paths use bytesPerIteration 0. String-library scenarios budget the single result allocation: resultLength is the result's byte length (a Lua string is one byte[] with an 8-byte header, so the result costs 24 + round8(8 + resultLength) bytes). excessBytes records allocation beyond that single result in the current implementation (a known gap against spec ticket 17 decision 3: the target is 0); it may only be lowered, and raising it needs a PR citing before/after numbers; CODEOWNERS enforces.",
+  "_comment": "Exact per-iteration allocation budgets in bytes (GC.GetAllocatedBytesForCurrentThread, Release). Zero-alloc paths use bytesPerIteration 0. String-library scenarios budget the single result allocation: resultLength is the result's byte length (a Lua string is one byte[] with an 8-byte header, so the result costs 24 + round8(8 + resultLength) bytes). excessBytes records allocation beyond that single result; it is 0 everywhere (spec ticket 17 decision 3) and raising it needs a PR citing before/after numbers; CODEOWNERS enforces.",
   "budgets": {
     "arithmetic-loop": { "bytesPerIteration": 0 },
     "lua-call-return": { "bytesPerIteration": 0 },
@@ -7,9 +7,18 @@
     "table-hash-get-set": { "bytesPerIteration": 0 },
     "pcall-ok": { "bytesPerIteration": 0 },
     "pcall-error": { "bytesPerIteration": 0 },
-    "string-sub": { "resultLength": 51, "excessBytes": 40 },
-    "string-format-d": { "resultLength": 6, "excessBytes": 40 },
-    "string-rep": { "resultLength": 60, "excessBytes": 40 },
-    "string-gsub": { "resultLength": 60, "excessBytes": 56 }
+    "string-sub": { "resultLength": 51, "excessBytes": 0 },
+    "string-format-d": { "resultLength": 6, "excessBytes": 0 },
+    "string-rep": { "resultLength": 60, "excessBytes": 0 },
+    "string-gsub": { "resultLength": 60, "excessBytes": 0 },
+    "string-byte": { "bytesPerIteration": 0 },
+    "string-len": { "bytesPerIteration": 0 },
+    "string-concat": { "resultLength": 26, "excessBytes": 0 },
+    "math-builtins": { "bytesPerIteration": 0 },
+    "pairs-iteration": { "bytesPerIteration": 0 },
+    "ipairs-iteration": { "bytesPerIteration": 0 },
+    "select-varargs": { "bytesPerIteration": 0 },
+    "metamethod-arith": { "bytesPerIteration": 0 },
+    "coroutine-resume-yield": { "bytesPerIteration": 0 }
   }
 }

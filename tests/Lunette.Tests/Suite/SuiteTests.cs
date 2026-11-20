@@ -6,7 +6,9 @@ namespace Lunette.Tests.Suite;
 /// <summary>One test per official suite file. Files outside required-files may fail (reported); required ones may not.</summary>
 public class SuiteTests(ITestOutputHelper log)
 {
-    public static IEnumerable<object[]> Files() => SuiteRunner.SuiteFiles().Select(f => new object[] { f });
+    public static IEnumerable<object[]> Files() =>
+        SuiteShard.Select(SuiteRunner.SuiteFiles(), Environment.GetEnvironmentVariable(SuiteShard.EnvVar))
+            .Select(f => new object[] { f });
 
     [Theory]
     [MemberData(nameof(Files))]

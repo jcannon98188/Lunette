@@ -74,7 +74,12 @@ internal static partial class Interpreter
                 f.Native = true;
                 return Run(state, co, f, stop) - fa;
             }
-            return CallBuiltin(state, co, fa, nargs, -1, null, 0) - fa;
+            if (!co.Traced) return CallBuiltin(state, co, fa, nargs, -1, null, 0) - fa;
+            var bf = (BuiltinFunction)co.Stack[fa].Ref!;
+            TraceBuiltin(state, co, bf, fa + 1 + nargs, true, true);
+            int end = CallBuiltin(state, co, fa, nargs, -1, null, 0);
+            TraceBuiltin(state, co, bf, end, false, true);
+            return end - fa;
         }
         finally
         {
@@ -88,7 +93,8 @@ internal static partial class Interpreter
     {
         for (int guard = 0; co.Stack[fa].Ref is not (LuaClosure or BuiltinFunction); guard++)
         {
-            LuaValue tm = co.Stack[fa].Ref is LuaTable { Metatable: { } callMt } ? callMt.GetTagMethod(TagMethod.Call) : default;
+            LuaTable? callMt = co.Stack[fa].Ref switch { LuaTable t => t.Metatable, LuaUserdata u => u.Metatable, _ => null };
+            LuaValue tm = callMt is null ? default : callMt.GetTagMethod(TagMethod.Call);
             if (tm.IsNil || guard > 100)
                 throw new LuaException($"{(p is null ? "" : Where(p, pc) + " ")}attempt to call a {Meta.ObjTypeName(co.Stack[fa])} value{VarInfo.DescribeCallee(p, pc)}");
             co.EnsureStack(fa + nargs + 2, p, pc);
@@ -104,12 +110,25 @@ internal static partial class Interpreter
     /// Runs the dispatch loop. The only <c>try</c> lives here, outside the loop method: a thrown LuaException
     /// is converted to pending-error state, unwound to the nearest protected Frame and the loop re-entered (ADR 0003).
     /// </summary>
-    private static int Run(LuaState state, Coroutine co, Frame f, int stop, int top = 0)
+    private static int Run(LuaState state, Coroutine co, Frame f, int stop, int top = 0) =>
+        Run(state, co, f, stop, top, default, false);
+
+    /// <summary>
+    /// <paramref name="resuming"/> first gives the resume values to the continuations of the host function that yielded (inside the
+    /// <c>try</c>, so an error they raise reaches a Lua pcall of the coroutine) and then continues the top Frame with its results.
+    /// </summary>
+    private static int Run(LuaState state, Coroutine co, Frame f, int stop, int top, ReadOnlySpan<LuaValue> resumeArgs, bool resuming)
     {
         while (true)
         {
             try
             {
+                if (resuming)
+                {
+                    resuming = false;
+                    if (!FinishYield(state, co, resumeArgs, out top)) return 0;
+                    f = co.Frames[co.Depth - 1]!;
+                }
                 int result = co.Traced ? RunLoop<TracedLoop>(state, co, f, stop, top) : RunLoop<FastLoop>(state, co, f, stop, top);
                 if (co.CollectPending)
                 {
@@ -131,6 +150,8 @@ internal static partial class Interpreter
                 DebugLib.NoteFault(co, ex);
                 if (!Unwind(state, co, stop, ex.Value))
                 {
+                    // The structured trace is captured at the first point the error leaves every protected frame, host-initiated calls included.
+                    ex.StackFrames ??= DebugLib.CaptureFrames(state, co);
                     if (state.NativeDepth == 0)
                     {
                         ex.Traceback ??= DebugLib.CaptureTraceback(state, co);
@@ -465,6 +486,14 @@ internal static partial class Interpreter
                         TraceBuiltin(state, co, bf, Math.Max(top, end), false);
                         r = co.Stack;
                     }
+                    else if (co.Traced)
+                    {
+                        // The builtin ran a nested loop in which a hook was set: carry on in the traced loop.
+                        co.Reenter = true;
+                        co.ResumeFrame = f;
+                        co.ResumeTop = top;
+                        return top;
+                    }
                     break;
                 }
                 case OpCode.TailCall:
@@ -521,22 +550,29 @@ internal static partial class Interpreter
                 {
                     int ra = bs + i.A;
                     int n = i.B != 0 ? i.B - 1 : top - ra;
+                    if (co.OpenUpvals.Count > 0) co.Close(bs);
+                    if (co.Tbc.Count > 0 && co.Tbc[^1] >= bs)
+                    {
+                        // Each __close handler runs as a Frame so it can yield; this instruction runs again when it returns.
+                        f.Pc = pc;
+                        Frame? hf = StartClose(state, co, f, bs, Math.Max(bs + proto.MaxStack, ra + n), top);
+                        r = co.Stack;
+                        if (hf is not null)
+                        {
+                            f = hf;
+                            goto newframe;
+                        }
+                    }
                     if (TMode.Traced)
                     {
                         TraceReturn(state, co, f, pc, Math.Max(top, ra + n));
                         r = co.Stack;
                     }
-                    if (co.OpenUpvals.Count > 0) co.Close(bs);
-                    if (co.Tbc.Count > 0 && co.Tbc[^1] >= bs)
-                    {
-                        f.Pc = pc;
-                        CloseTbc(state, co, bs, Math.Max(bs + proto.MaxStack, ra + n));
-                        r = co.Stack;
-                    }
                     if (f.Cont != Continuation.None)
                     {
+                        Continuation cont = f.Cont;
                         FinishMeta(f, n > 0 ? r[ra] : default, r);
-                        f = co.Frames[--co.Depth - 1]!;
+                        f = ResumeAfterMeta(state, co, cont, ref top);
                         goto newframe;
                     }
                     int dst = f.FuncIdx;
@@ -586,8 +622,13 @@ internal static partial class Interpreter
                     if (co.Tbc.Count > 0 && co.Tbc[^1] >= bs + i.A)
                     {
                         f.Pc = pc;
-                        CloseTbc(state, co, bs + i.A, bs + proto.MaxStack);
+                        Frame? hf = StartClose(state, co, f, bs + i.A, bs + proto.MaxStack, top);
                         r = co.Stack;
+                        if (hf is not null)
+                        {
+                            f = hf;
+                            goto newframe;
+                        }
                     }
                     break;
                 case OpCode.Tbc:
@@ -719,9 +760,20 @@ internal static partial class Interpreter
                 }
                 case OpCode.Concat:
                 {
-                    LuaValue res = Meta.Concat(state, r[bs + i.B], r[bs + i.C], proto, pc - 1);
-                    r = co.Stack;
-                    r[bs + i.A] = res;
+                    LuaValue lhs = r[bs + i.B], rhs = r[bs + i.C];
+                    if ((lhs.IsString || lhs.IsNumber) && (rhs.IsString || rhs.IsNumber)) r[bs + i.A] = StringConv.Concat(state, lhs, rhs);
+                    else
+                    {
+                        MetaCall mc = Meta.PrepareConcat(state, lhs, rhs, proto, pc - 1);
+                        Frame? nf = StartMeta(state, co, f, in mc, Continuation.Value, bs + i.A, pc, proto, out LuaValue res);
+                        if (nf is not null)
+                        {
+                            f = nf;
+                            goto newframe;
+                        }
+                        r = co.Stack;
+                        r[bs + i.A] = res;
+                    }
                     break;
                 }
                 case OpCode.TForLoop:
@@ -784,12 +836,14 @@ internal static partial class Interpreter
         {
             co.EnsureStack(fa + n, proto, pc);
             res?.CopyTo(co.Stack, fa);
+            Rets.Release(res);
             return fa + n;
         }
         var r = co.Stack;
         int c = Math.Min(n, wanted);
         for (int j = 0; j < c; j++) r[fa + j] = res![j];
         for (int j = c; j < wanted; j++) r[fa + j] = default;
+        Rets.Release(res);
         return fa + wanted;
     }
 

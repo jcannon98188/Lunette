@@ -32,7 +32,7 @@ internal static class StringPack
     private static int GetNumLimit(ReadOnlySpan<byte> fmt, ref int pos, int dflt)
     {
         int sz = GetNum(fmt, ref pos, dflt);
-        if (sz > MaxIntSize || sz <= 0) throw new LuaException($"integral size ({sz}) out of limits [1,{MaxIntSize}]");
+        if (sz > MaxIntSize || sz <= 0) throw LuaErrors.Error($"integral size ({sz}) out of limits [1,{MaxIntSize}]");
         return sz;
     }
 
@@ -59,7 +59,7 @@ internal static class StringPack
             case 's': size = GetNumLimit(fmt, ref pos, 8); return Kind.String;
             case 'c':
                 size = GetNum(fmt, ref pos, -1);
-                if (size == -1) throw new LuaException("missing size for format option 'c'");
+                if (size == -1) throw LuaErrors.Error("missing size for format option 'c'");
                 return Kind.Char;
             case 'z': return Kind.Zstr;
             case 'x': size = 1; return Kind.Padding;
@@ -69,7 +69,7 @@ internal static class StringPack
             case '>': h.IsLittle = false; break;
             case '=': h.IsLittle = true; break;
             case '!': h.MaxAlign = GetNumLimit(fmt, ref pos, MaxAlign); break;
-            default: throw new LuaException($"invalid format option '{opt}'");
+            default: throw LuaErrors.Error($"invalid format option '{opt}'");
         }
         return Kind.Nop;
     }
@@ -132,7 +132,7 @@ internal static class StringPack
             for (int i = limit; i < size; i++)
             {
                 if (str[little ? i : size - 1 - i] != mask)
-                    throw new LuaException($"{size}-byte integer does not fit into Lua Integer");
+                    throw LuaErrors.Error($"{size}-byte integer does not fit into Lua Integer");
             }
         }
         return (long)res;

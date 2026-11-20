@@ -11,12 +11,27 @@ public sealed record SuiteResult(string File, SuiteStatus Status, double Seconds
 /// <summary>Locates the vendored suite and runs one file at a time in a fresh <see cref="LuaState"/>.</summary>
 public static class SuiteRunner
 {
-    public static readonly TimeSpan FileTimeout = TimeSpan.FromMinutes(5);
+    public static readonly TimeSpan FileTimeout = TimeSpan.FromSeconds(180);
     private static readonly object CwdLock = new();
 
     /// <summary>The CLI apphost built next to the test assembly: what a suite file spawns as "the interpreter".</summary>
     public static string LauncherPath { get; } =
         Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "Lunette.Cli.exe" : "Lunette.Cli");
+
+    /// <summary>
+    /// The only sanctioned way for a test to change the process working directory: serialized against every other
+    /// such change (the suite runner's included) and restored afterwards. Tests must not use cwd-relative paths.
+    /// </summary>
+    public static void WithWorkingDirectory(string dir, Action body)
+    {
+        lock (CwdLock)
+        {
+            string previous = Environment.CurrentDirectory;
+            Environment.CurrentDirectory = dir;
+            try { body(); }
+            finally { Environment.CurrentDirectory = previous; }
+        }
+    }
 
     public static string RepoRoot { get; } = FindRepoRoot();
     public static string SuiteDir => Path.Combine(RepoRoot, "tests", "lua-suite");
@@ -79,8 +94,12 @@ public static class SuiteRunner
             string? error = null;
             var worker = new Thread(() =>
             {
-                try { new LuaState { Output = output }.DoBytes(Encoding.Latin1.GetBytes(source), "@" + file); }
+                var state = new LuaState { Output = output };
+                try { state.DoBytes(Encoding.Latin1.GetBytes(source), "@" + file); }
                 catch (Exception e) { error = e.Message; }
+                // Closing the state runs the end-of-state __gc finalizers (gc.lua relies on them); their errors are not the file's.
+                try { state.Dispose(); }
+                catch (Exception) { }
             }, 256 * 1024 * 1024) { IsBackground = true };
 
             string? previous = null;

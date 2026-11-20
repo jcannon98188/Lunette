@@ -26,3 +26,4 @@ events.lua
 files.lua
 main.lua
 calls.lua
+coroutine.lua

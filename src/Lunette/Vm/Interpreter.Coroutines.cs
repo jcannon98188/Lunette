@@ -22,6 +22,7 @@ internal static partial class Interpreter
         }
         if (mc.Fn.Ref is not LuaClosure cl)
         {
+            f.Pc = pc;
             result = Meta.CallMeta(state, in mc);
             return null;
         }
@@ -62,10 +63,11 @@ internal static partial class Interpreter
             if (viaPcall) return Special.None;
             throw new LuaException(co.IsMain ? "attempt to yield from outside a coroutine" : "attempt to yield across a C-call boundary");
         }
-        co.YieldValues = args.ToArray();
+        co.YieldValues = Rets.Of(args); // shared for up to three values; Resume hands it straight to its caller, who consumes it at once
         co.YieldFa = fa;
         co.YieldWanted = wanted;
         co.YieldPcall = viaPcall;
+        co.YieldFn = co.Stack[fa].Ref as BuiltinFunction;
         co.Yielded = true;
         return Special.Yield;
     }
@@ -107,7 +109,7 @@ internal static partial class Interpreter
                 {
                     LuaValue[]? res = ((BuiltinFunction)co.Body.Ref!).Invoke(state, args);
                     co.Status = CoStatus.Dead;
-                    results = res ?? [];
+                    results = res is null ? [] : Rets.Own(res);
                     return true;
                 }
                 co.EnsureStack(args.Length + 2, null, 0);
@@ -118,12 +120,7 @@ internal static partial class Interpreter
             }
             else
             {
-                if (RunContinuations(state, co, args, out LuaValue[]? contValues))
-                {
-                    int top = PlaceResumeValues(co, contValues ?? args);
-                    end = Run(state, co, co.Frames[co.Depth - 1]!, 0, top);
-                }
-                else end = 0;
+                end = Run(state, co, co.Frames[co.Depth - 1]!, 0, 0, args, true);
             }
             if (co.Yielded)
             {
@@ -183,6 +180,23 @@ internal static partial class Interpreter
         co.Depth = 0;
         co.Status = CoStatus.Dead;
         return err.IsNil ? (LuaValue?)null : err;
+    }
+
+    /// <summary>
+    /// Completes the yield call that suspended <paramref name="co"/>: runs host continuations, stores the results and reports the
+    /// host function's return to a hook. Returns false when a continuation yielded again.
+    /// </summary>
+    private static bool FinishYield(LuaState state, Coroutine co, ReadOnlySpan<LuaValue> args, out int top)
+    {
+        top = 0;
+        if (!RunContinuations(state, co, args, out LuaValue[]? contValues)) return false;
+        top = PlaceResumeValues(co, contValues ?? args);
+        if (co.YieldFn is { } yf)
+        {
+            co.YieldFn = null;
+            if (co.Traced) TraceBuiltin(state, co, yf, top, false);
+        }
+        return true;
     }
 
     /// <summary>Stores the resume arguments as the results of the yield call that suspended <paramref name="co"/>; returns the new top.</summary>

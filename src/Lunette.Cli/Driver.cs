@@ -77,7 +77,7 @@ local function msghandler(msg)
     if not s then break end
     at, from = s, s + 1
   end
-  return at and string.sub(tb, 1, at - 1) or tb
+  return at and string.sub(tb, 1, at - 1) .. "\n\t[C]: in ?" or tb
 end
 
 local function report(ok, msg)
