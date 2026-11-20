@@ -133,7 +133,77 @@ internal static class Meta
         throw new LuaException($"{At(p, pc)}'__index' chain too long; possible loop");
     }
 
-    /// <summary>Raw store with positioned errors for invalid keys.</summary>
+    /// <summary>
+    /// Follows the __index chain of <paramref name="t"/> (whose raw lookup of <paramref name="key"/> already missed) through table-valued handlers.
+    /// Returns 0 when the lookup is settled with <paramref name="result"/> (a value or nil), 1 when <paramref name="at"/>'s __index is the
+    /// function <paramref name="tm"/> to call with (at, key), and 2 when the generic <see cref="PrepareIndex"/> must take over (<paramref name="at"/> is where to resume it).
+    /// </summary>
+    public static int IndexChainStr(LuaTable t, byte[] key, out LuaValue result, out LuaTable at, out LuaValue tm)
+    {
+        LuaTable cur = t;
+        for (int loop = 0; loop < MaxTagLoop; loop++)
+        {
+            LuaTable? mt = cur.Metatable;
+            if (mt is null)
+            {
+                result = default;
+                at = cur;
+                tm = default;
+                return 0;
+            }
+            tm = mt.GetTagMethod(TagMethod.Index);
+            at = cur;
+            if (tm.Ref is LuaTable next)
+            {
+                ref readonly LuaValue v = ref next.GetStrRef(key);
+                if (!v.IsNil)
+                {
+                    result = v;
+                    return 0;
+                }
+                cur = next;
+                continue;
+            }
+            result = default;
+            if (tm.IsNil) return 0;
+            if (tm.Ref is LuaFunction) return 1;
+            return 2;
+        }
+        result = default;
+        at = t;
+        tm = default;
+        return 2;
+    }
+
+    /// <summary>
+    /// Follows the __newindex chain of table <paramref name="t"/> for a store of <paramref name="key"/> through table-valued handlers.
+    /// Returns 0 when the store is a raw store into <paramref name="at"/>, 1 when <paramref name="at"/>'s __newindex is the function <paramref name="tm"/>
+    /// to call with (at, key, value), and 2 when the generic <see cref="PrepareSetIndex"/> must take over.
+    /// </summary>
+    public static int NewIndexChain(LuaTable t, in LuaValue key, out LuaTable at, out LuaValue tm)
+    {
+        LuaTable cur = t;
+        for (int loop = 0; loop < MaxTagLoop; loop++)
+        {
+            at = cur;
+            LuaTable? mt = cur.Metatable;
+            tm = default;
+            if (mt is null || !cur.GetRef(in key).IsNil) return 0;
+            tm = mt.GetTagMethod(TagMethod.NewIndex);
+            if (tm.IsNil) return 0;
+            if (tm.Ref is LuaTable next)
+            {
+                cur = next;
+                continue;
+            }
+            return tm.Ref is LuaFunction ? 1 : 2;
+        }
+        at = t;
+        tm = default;
+        return 2;
+    }
+
+
     public static void RawSet(LuaTable t, LuaValue key, LuaValue value, Proto? p, int pc)
     {
         if (key.IsNil) throw new LuaException($"{At(p, pc)}table index is nil");
@@ -406,3 +476,4 @@ internal static class Meta
     private static readonly LuaValue ToStringKey = LuaValue.FromString("__tostring");
     private static readonly LuaValue NameKey = LuaValue.FromString("__name");
 }
+    /// <summary>Raw store with positioned errors for invalid keys.</summary>

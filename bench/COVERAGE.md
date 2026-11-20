@@ -130,6 +130,44 @@ None of the whole-script ratios exceeds 2.5x (warmup is 2.3-2.65x), so the gaps 
 
 Footprint is under the threshold everywhere (worst: table with 4 hash fields, 1.6x; closure, 1.4x).
 
+## After ticket 52 (metamethod function calls)
+
+Hypotheses checked first. (a) "`Meta.CallMeta` uses a nested loop": not for Lua functions; `StartMeta` already pushed a Frame with a
+`Continuation`, only builtin metamethods use the nested call. (b) "no absent-metamethod cache": `LuaTable.Flags` already caches the
+absence of six events; only a *present* `__index` costs a hash lookup per level. (c) `__index` chain walk and (d) `__call` argument
+reshuffle were real costs. Measured with per-construct probes (2M iterations, min of 7 interleaved rounds, WSL, ms; noise about 5%) and
+`oop.lua` (min of 9, whole script):
+
+| Probe | PUC | before | after |
+|---|---:|---:|---:|
+| `d:get` 4-level inheritance | 90 | 283 | 253 |
+| `a:get` 1-level | 58 | 169 | 155 |
+| field via chain `d.get` | 59 | 234 | 210 |
+| `__index` function | 47 | 196 | 143 |
+| `__newindex` function | 52 | 177 | 166 |
+| `__newindex` table | 27 | 116 | 113 (no change) |
+| `__call` object | 50 | 151 | 141 |
+| `__add` function | 44 | 158 | 103 |
+| `__eq` function | 49 | 149 | 105 |
+| plain function call (control) | 33 | 77 | 76 |
+| `oop.lua` whole script | 562 | 1357 | 1275 |
+
+Kept (each measured):
+- `Meta.IndexChainStr` / `Meta.NewIndexChain`: walk table-valued `__index`/`__newindex` handlers for `GetField`/`SelfK`/`SetField`
+  without building a `MetaCall`; a Lua function handler gets its Frame directly (`StartMetaLua`, which writes the arguments in place).
+- `ArithSlow` and `CondSlow` (`__eq`) push the Lua metamethod Frame directly; `Return` completes `Continuation.Value` and `Cond` frames inline
+  (nested inside the single `f.Cont != None` test, so plain returns pay nothing extra; an earlier form with two extra compares cost 4-8% on call-heavy closures sections).
+- `ResolveCallable` fast path for a table with a closure/builtin `__call` (shift arguments up once, no loop over handler chains).
+- `setmetatable(t, mt)` as a `CallFast` builtin (112 to 90 ns per call for the unprotected, unmetatabled-table case; every other case falls back to the builtin so errors are unchanged).
+
+Tried and reverted: inlining a one-level `__index` lookup into `SelfK` (1-level 148 to 135, but 4-level +10% from repeated lookups); caching
+`__index` presence through a ref accessor on `LuaTable` (no measurable gain over the Flags path).
+
+Not attempted (gaps): a per-table cached `__index` slot (+8 bytes per table) and a global method inline cache with epoch invalidation
+(correctness and GC-retention risk). What remains is mostly the general Lua call cost: a plain call is already about 2.3x PUC, which bounds every
+metamethod-call ratio (now about 2.8x for 4-level methods, 2.7x for 1-level, 3.0x `__index` function, 2.1-2.4x `__add`/`__eq`/`__call`);
+`oop.lua` section 5 (vector class) is allocation bound at about 1.5x.
+
 ## Reproducing
 
 ```

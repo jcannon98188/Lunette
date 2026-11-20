@@ -75,6 +75,16 @@ internal static partial class Interpreter
                     return DeliverOne(st, co, fa, wanted, LuaValue.FromInteger(nargs - 1));
                 return Special.None;
             }
+            case BuiltinKind.SetMetatable:
+            {
+                // Giving a fresh table (no metatable yet, so nothing protected) its metatable: the object-construction idiom.
+                if (nargs != 2 || a.Ref is not LuaTable smt || smt.Metatable is not null) return Special.None;
+                LuaValue mv = st[fa + 2];
+                if (mv.Ref is not LuaTable && !mv.IsNil) return Special.None;
+                smt.Metatable = mv.Ref as LuaTable;
+                state.Gc.OnSetMetatable(smt, smt.Metatable);
+                return DeliverOne(st, co, fa, wanted, a);
+            }
             default:
                 return Special.None;
         }

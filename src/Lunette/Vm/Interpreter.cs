@@ -104,6 +104,23 @@ internal static partial class Interpreter
     /// <summary>Makes R[fa] a function by inserting __call handlers in front of it; returns the new argument count.</summary>
     private static int ResolveCallable(Coroutine co, int fa, int nargs, Proto? p, int pc)
     {
+        // The usual case, a table whose metatable's __call is a function: shift the arguments up by one in place.
+        var st0 = co.Stack;
+        if (st0[fa].Ref is LuaTable { Metatable: { } cmt } && fa + nargs + 2 <= st0.Length)
+        {
+            LuaValue ctm = cmt.GetTagMethod(TagMethod.Call);
+            if (ctm.Ref is LuaClosure or BuiltinFunction)
+            {
+                for (int j = nargs; j >= 0; j--) Regs.Copy(ref Regs.At(st0, fa + 1 + j), in Regs.At(st0, fa + j));
+                Regs.Copy(ref Regs.At(st0, fa), in ctm);
+                return nargs + 1;
+            }
+        }
+        return ResolveCallableSlow(co, fa, nargs, p, pc);
+    }
+
+    private static int ResolveCallableSlow(Coroutine co, int fa, int nargs, Proto? p, int pc)
+    {
         for (int guard = 0; co.Stack[fa].Ref is not (LuaClosure or BuiltinFunction); guard++)
         {
             LuaTable? callMt = co.Stack[fa].Ref switch { LuaTable t => t.Metatable, LuaUserdata u => u.Metatable, _ => null };
@@ -570,6 +587,23 @@ internal static partial class Interpreter
                     if (f.Cont != Continuation.None)
                     {
                         Continuation cont = f.Cont;
+                        if (cont == Continuation.Value)
+                        {
+                            // An __index/arithmetic metamethod returning: store its first result and go back to the instruction's Frame.
+                            if (n > 0) Regs.Copy(ref Regs.At(r, f.ContDest), in Regs.At(r, ra));
+                            else Regs.At(r, f.ContDest) = default;
+                            f = co.Frames[--co.Depth - 1]!;
+                            goto newframe;
+                        }
+                        if (cont == Continuation.Cond)
+                        {
+                            // An __eq/__lt/__le metamethod returning to a fused compare-and-jump: the Jmp that follows runs when the truthiness matches.
+                            bool truth = n > 0 && !Regs.IsFalsy(ref Regs.At(r, ra));
+                            bool want = f.ContDest != 0;
+                            f = co.Frames[--co.Depth - 1]!;
+                            if (truth != want) f.Pc++;
+                            goto newframe;
+                        }
                         int expect = f.ContDest;
                         LuaValue mres = n > 0 ? r[ra] : default;
                         FinishMeta(f, mres, r);
@@ -844,6 +878,19 @@ internal static partial class Interpreter
         LuaValue obj = r[bs + i.B];
         LuaValue key = op is OpCode.GetField or OpCode.SelfK ? k[i.C] : r[bs + i.C];
         if (op is OpCode.Self or OpCode.SelfK) r[bs + i.A + 1] = obj;
+        if (op is OpCode.GetField or OpCode.SelfK && obj.Ref is LuaTable t0)
+        {
+            // Inherited field or method: walk table-valued __index handlers without building a MetaCall.
+            int kind = Meta.IndexChainStr(t0, (byte[])key.Ref!, out LuaValue cres, out LuaTable at, out LuaValue ctm);
+            if (kind == 0)
+            {
+                r[bs + i.A] = cres;
+                return null;
+            }
+            if (kind == 1 && ctm.Ref is LuaClosure ccl)
+                return StartMetaLua(co, f, ccl, LuaValue.FromTable(at), in key, default, 2, Continuation.Value, bs + i.A, pc, proto);
+            obj = LuaValue.FromTable(at);
+        }
         if (Meta.PrepareIndex(state, obj, key, proto, pc - 1, out LuaValue res, out MetaCall mc))
         {
             Frame? nf = StartMeta(state, co, f, in mc, Continuation.Value, bs + i.A, pc, proto, out res);
@@ -859,6 +906,21 @@ internal static partial class Interpreter
     {
         LuaValue[] r = co.Stack;
         LuaValue key = i.Op == OpCode.SetField ? k[i.B] : r[bs + i.B];
+        if (r[bs + i.A].Ref is LuaTable st0)
+        {
+            // Table-valued __newindex handlers are followed here; a Lua function handler gets its Frame without a MetaCall.
+            int kind = Meta.NewIndexChain(st0, in key, out LuaTable sat, out LuaValue stm);
+            if (kind == 0)
+            {
+                Meta.RawSet(sat, key, r[bs + i.C], proto, pc - 1);
+                return null;
+            }
+            if (kind == 1 && stm.Ref is LuaClosure scl)
+            {
+                LuaValue sval = r[bs + i.C];
+                return StartMetaLua(co, f, scl, LuaValue.FromTable(sat), in key, in sval, 3, Continuation.Discard, 0, pc, proto);
+            }
+        }
         if (!Meta.PrepareSetIndex(state, r[bs + i.A], key, r[bs + i.C], proto, pc - 1, out MetaCall mc)) return null;
         return StartMeta(state, co, f, in mc, Continuation.Discard, 0, pc, proto, out _);
     }
@@ -880,6 +942,13 @@ internal static partial class Interpreter
                 ? Arith.Bitwise(op, lhs, rhs, proto, pc - 1)
                 : Arith.Binary(Meta.BaseArith(op), lhs, rhs, proto, pc - 1);
             return null;
+        }
+        if (lhs.Ref is LuaTable alt && alt.Metatable is { } amt)
+        {
+            // A table operand whose metamethod is a Lua function: push its Frame without building a MetaCall.
+            TagMethod aev = Meta.ArithEvent(op);
+            if (amt.GetTagMethod(aev).Ref is LuaClosure acl)
+                return StartMetaLua(co, f, acl, in lhs, in rhs, default, 2, Continuation.Value, bs + i.A, pc, proto);
         }
         MetaCall mc = Meta.PrepareArith(state, Meta.ArithEvent(op), lhs, rhs, proto, pc - 1);
         Frame? nf = StartMeta(state, co, f, in mc, Continuation.Value, bs + i.A, pc, proto, out LuaValue res);
@@ -905,6 +974,13 @@ internal static partial class Interpreter
         bool needMeta;
         MetaCall mc;
         take = false;
+        if (op is OpCode.JEq or OpCode.JEqK && lhs.Ref is LuaTable eta && rhs.Ref is LuaTable etb && !ReferenceEquals(eta, etb))
+        {
+            // Two different tables: __eq from the first, else the second; a Lua function handler gets its Frame without a MetaCall.
+            LuaValue etm = eta.Metatable is null ? default : eta.Metatable.GetTagMethod(TagMethod.Eq);
+            if (etm.IsNil) etm = etb.Metatable is null ? default : etb.Metatable.GetTagMethod(TagMethod.Eq);
+            if (etm.Ref is LuaClosure ecl) return StartMetaLua(co, f, ecl, in lhs, in rhs, default, 2, Continuation.Cond, i.A, pc, proto);
+        }
         if (op is OpCode.JEq or OpCode.JEqK) needMeta = Meta.PrepareEqual(lhs, rhs, out res, out mc);
         else
         {

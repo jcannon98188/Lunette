@@ -37,7 +37,7 @@ internal static class BaseLib
             if (v.Ref is byte[] s) return Rets.One(LuaValue.FromInteger(new LuaString(s).Length));
             throw ArgError("rawlen", 1, $"table or string expected, got {(args.Length > 0 ? v.TypeName : "no value")}");
         });
-        Add(state, "setmetatable", SetMetatable);
+        Add(state, "setmetatable", SetMetatable, BuiltinKind.SetMetatable);
         Add(state, "getmetatable", (st, args) =>
         {
             var mt = Meta.GetMetatable(st, Arg(args, 0));

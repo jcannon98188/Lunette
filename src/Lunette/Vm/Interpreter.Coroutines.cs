@@ -1,4 +1,5 @@
 using Lunette.Compiler;
+using Lunette.Unsafe;
 
 namespace Lunette.Vm;
 
@@ -26,15 +27,27 @@ internal static partial class Interpreter
             result = Meta.CallMeta(state, in mc);
             return null;
         }
+        return StartMetaLua(co, f, cl, in mc.A, in mc.B, in mc.C, mc.N, cont, dest, pc, proto);
+    }
+
+    /// <summary>Pushes the Frame of the Lua metamethod <paramref name="cl"/> called with up to three arguments, in the running loop (no nested loop, so it can yield).</summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private static Frame StartMetaLua(Coroutine co, Frame f, LuaClosure cl, in LuaValue a, in LuaValue b, in LuaValue c, int nargs, Continuation cont, int dest, int pc, Proto proto)
+    {
         f.Pc = pc;
         int fa = co.CallTop;
-        co.EnsureStack(fa + 5, proto, pc - 1);
         var st = co.Stack;
-        st[fa] = mc.Fn;
-        st[fa + 1] = mc.A;
-        st[fa + 2] = mc.B;
-        st[fa + 3] = mc.C;
-        Frame nf = Precall(co, cl, fa, mc.N, 1, null, proto, pc - 1);
+        if (fa + 5 > st.Length)
+        {
+            co.EnsureStack(fa + 5, proto, pc - 1);
+            st = co.Stack;
+        }
+        LuaValue fv = LuaValue.FromObject(cl);
+        Regs.Copy(ref Regs.At(st, fa), in fv);
+        Regs.Copy(ref Regs.At(st, fa + 1), in a);
+        Regs.Copy(ref Regs.At(st, fa + 2), in b);
+        if (nargs > 2) Regs.Copy(ref Regs.At(st, fa + 3), in c); // PrecallLua nils the parameters beyond nargs
+        Frame nf = PrecallLua(co, cl, fa, nargs, 1, proto, pc - 1);
         nf.Cont = cont;
         nf.ContDest = dest;
         return nf;
