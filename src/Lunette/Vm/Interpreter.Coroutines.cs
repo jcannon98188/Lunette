@@ -112,8 +112,12 @@ internal static partial class Interpreter
             }
             else
             {
-                int top = PlaceResumeValues(co, args);
-                end = Run(state, co, co.Frames[co.Depth - 1]!, 0, top);
+                if (RunContinuations(state, co, args, out LuaValue[]? contValues))
+                {
+                    int top = PlaceResumeValues(co, contValues ?? args);
+                    end = Run(state, co, co.Frames[co.Depth - 1]!, 0, top);
+                }
+                else end = 0;
             }
             if (co.Yielded)
             {
@@ -167,7 +171,7 @@ internal static partial class Interpreter
         co.Close(0);
         co.Depth = 0;
         co.Status = CoStatus.Dead;
-        return err.IsNil ? null : err;
+        return err.IsNil ? (LuaValue?)null : err;
     }
 
     /// <summary>Stores the resume arguments as the results of the yield call that suspended <paramref name="co"/>; returns the new top.</summary>

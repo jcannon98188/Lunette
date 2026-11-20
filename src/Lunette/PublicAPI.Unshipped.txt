@@ -1,0 +1,114 @@
+#nullable enable
+const Lunette.CallContext.YieldRequest = -1 -> int
+Lunette.CallContext
+Lunette.CallContext.Args.get -> System.ReadOnlySpan<Lunette.LuaValue>
+Lunette.CallContext.CallContext() -> void
+Lunette.CallContext.Error(string! message) -> Lunette.LuaException!
+Lunette.CallContext.Push(Lunette.LuaValue value) -> void
+Lunette.CallContext.State.get -> Lunette.LuaState!
+Lunette.CallContext.Yield(Lunette.HostContinuation? continuation = null) -> int
+Lunette.HostContinuation
+Lunette.HostFunction
+Lunette.LuaException
+Lunette.LuaException.LuaException(string! message) -> void
+Lunette.LuaFunction
+Lunette.LuaLimits
+Lunette.LuaLimits.InstructionLimit.get -> long
+Lunette.LuaLimits.InstructionLimit.init -> void
+Lunette.LuaLimits.LuaLimits() -> void
+Lunette.LuaLimits.MemoryLimitBytes.get -> long
+Lunette.LuaLimits.MemoryLimitBytes.init -> void
+Lunette.LuaLimits.StackDepthLimit.get -> int
+Lunette.LuaLimits.StackDepthLimit.init -> void
+Lunette.LuaState
+Lunette.LuaState.Call(Lunette.LuaFunction! function) -> Lunette.LuaValue
+Lunette.LuaState.Call(Lunette.LuaFunction! function, Lunette.LuaValue a) -> Lunette.LuaValue
+Lunette.LuaState.Call(Lunette.LuaFunction! function, Lunette.LuaValue a, Lunette.LuaValue b) -> Lunette.LuaValue
+Lunette.LuaState.Call(Lunette.LuaFunction! function, Lunette.LuaValue a, Lunette.LuaValue b, Lunette.LuaValue c) -> Lunette.LuaValue
+Lunette.LuaState.Call(Lunette.LuaFunction! function, Lunette.LuaValue a, Lunette.LuaValue b, Lunette.LuaValue c, Lunette.LuaValue d) -> Lunette.LuaValue
+Lunette.LuaState.Call(Lunette.LuaFunction! function, System.ReadOnlySpan<Lunette.LuaValue> args) -> Lunette.LuaValue[]!
+Lunette.LuaState.ClearInterrupt() -> void
+Lunette.LuaState.Dispose() -> void
+Lunette.LuaState.CreateFunction(Lunette.HostFunction! function) -> Lunette.LuaFunction!
+Lunette.LuaState.CreateUserdata(object! value) -> Lunette.LuaUserdata!
+Lunette.LuaState.DoBytes(byte[]! source, string! chunkName = "=(load)") -> void
+Lunette.LuaState.DoString(string! source, string! chunkName = "=(load)") -> void
+Lunette.LuaState.GetGlobal(string! name) -> Lunette.LuaValue
+Lunette.LuaState.Limits.get -> Lunette.LuaLimits!
+Lunette.LuaState.Load(string! source) -> Lunette.LuaFunction!
+Lunette.LuaState.Load(string! source, string! chunkName) -> Lunette.LuaFunction!
+Lunette.LuaState.Load(System.ReadOnlySpan<byte> source, string! chunkName) -> Lunette.LuaFunction!
+Lunette.LuaState.LuaState() -> void
+Lunette.LuaState.LuaState(Lunette.LuaLimits! limits) -> void
+Lunette.LuaState.Output.get -> System.IO.TextWriter!
+Lunette.LuaState.Output.set -> void
+Lunette.LuaState.Register(string! name, Lunette.HostFunction! function) -> void
+Lunette.LuaState.Register(string! name, System.Func<double, double, double>! function) -> void
+Lunette.LuaState.Register(string! name, System.Func<double, double>! function) -> void
+Lunette.LuaState.Register(string! name, System.Func<string!, string!>! function) -> void
+Lunette.LuaState.RegisterMetatable<T>(Lunette.LuaTable! metatable) -> void
+Lunette.LuaState.RequestInterrupt() -> void
+Lunette.LuaState.SetGlobal(string! name, Lunette.LuaValue value) -> void
+Lunette.LuaState.SetLimits(Lunette.LuaLimits! limits) -> void
+Lunette.LuaTable
+Lunette.LuaTable.Get(Lunette.LuaValue key) -> Lunette.LuaValue
+Lunette.LuaTable.GetInt(long k) -> Lunette.LuaValue
+Lunette.LuaTable.Length() -> long
+Lunette.LuaTable.LuaTable() -> void
+Lunette.LuaTable.LuaTable(int arraySize, int hashSize) -> void
+Lunette.LuaTable.Metatable -> Lunette.LuaTable?
+Lunette.LuaTable.Next(Lunette.LuaValue key, out Lunette.LuaValue nextKey, out Lunette.LuaValue nextValue) -> bool
+Lunette.LuaTable.Set(Lunette.LuaValue key, Lunette.LuaValue value) -> void
+Lunette.LuaTable.SetInt(long k, Lunette.LuaValue value) -> void
+Lunette.LuaType
+Lunette.LuaType.Boolean = 1 -> Lunette.LuaType
+Lunette.LuaType.Function = 5 -> Lunette.LuaType
+Lunette.LuaType.Nil = 0 -> Lunette.LuaType
+Lunette.LuaType.Number = 2 -> Lunette.LuaType
+Lunette.LuaType.String = 3 -> Lunette.LuaType
+Lunette.LuaType.Table = 4 -> Lunette.LuaType
+Lunette.LuaType.Thread = 7 -> Lunette.LuaType
+Lunette.LuaType.Userdata = 6 -> Lunette.LuaType
+Lunette.LuaUserdata
+Lunette.LuaUserdata.Metatable.get -> Lunette.LuaTable?
+Lunette.LuaUserdata.Metatable.set -> void
+Lunette.LuaUserdata.Value.get -> object!
+Lunette.LuaValue
+Lunette.LuaValue.AsFloat.get -> double
+Lunette.LuaValue.AsInteger.get -> long
+Lunette.LuaValue.IsBoolean.get -> bool
+Lunette.LuaValue.IsFalsy.get -> bool
+Lunette.LuaValue.IsFloat.get -> bool
+Lunette.LuaValue.IsInteger.get -> bool
+Lunette.LuaValue.IsNil.get -> bool
+Lunette.LuaValue.IsNumber.get -> bool
+Lunette.LuaValue.LuaValue() -> void
+Lunette.LuaValue.TryGet<T>(out T value) -> bool
+Lunette.LuaValue.TryGetBoolean(out bool value) -> bool
+Lunette.LuaValue.TryGetBytes(out System.ReadOnlySpan<byte> bytes) -> bool
+Lunette.LuaValue.TryGetInteger(out long value) -> bool
+Lunette.LuaValue.TryGetLatin1String(out string? value) -> bool
+Lunette.LuaValue.TryGetNumber(out double value) -> bool
+Lunette.LuaValue.TryGetStrictString(out string? value) -> bool
+Lunette.LuaValue.TryGetString(out string? value) -> bool
+Lunette.LuaValue.Type.get -> Lunette.LuaType
+override Lunette.LuaException.Message.get -> string!
+override Lunette.LuaFunction.ToString() -> string!
+override Lunette.LuaTable.ToString() -> string!
+override Lunette.LuaUserdata.ToString() -> string!
+override Lunette.LuaValue.ToString() -> string!
+static Lunette.LuaValue.FromBoolean(bool v) -> Lunette.LuaValue
+static Lunette.LuaValue.FromBytes(System.ReadOnlySpan<byte> bytes) -> Lunette.LuaValue
+static Lunette.LuaValue.FromFloat(double v) -> Lunette.LuaValue
+static Lunette.LuaValue.FromFunction(Lunette.LuaFunction! f) -> Lunette.LuaValue
+static Lunette.LuaValue.FromInteger(long v) -> Lunette.LuaValue
+static Lunette.LuaValue.FromLatin1(string! s) -> Lunette.LuaValue
+static Lunette.LuaValue.FromString(string! s) -> Lunette.LuaValue
+static Lunette.LuaValue.FromTable(Lunette.LuaTable! t) -> Lunette.LuaValue
+static Lunette.LuaValue.FromUserdata(Lunette.LuaUserdata! u) -> Lunette.LuaValue
+static Lunette.LuaValue.implicit operator Lunette.LuaValue(bool v) -> Lunette.LuaValue
+static Lunette.LuaValue.implicit operator Lunette.LuaValue(double v) -> Lunette.LuaValue
+static Lunette.LuaValue.implicit operator Lunette.LuaValue(int v) -> Lunette.LuaValue
+static Lunette.LuaValue.implicit operator Lunette.LuaValue(long v) -> Lunette.LuaValue
+static Lunette.LuaValue.implicit operator Lunette.LuaValue(string? v) -> Lunette.LuaValue
+static Lunette.LuaValue.Nil.get -> Lunette.LuaValue

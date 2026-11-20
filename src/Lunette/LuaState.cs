@@ -5,7 +5,7 @@ using Lunette.Vm;
 namespace Lunette;
 
 /// <summary>The single-threaded embedding root: owns globals and the output sink.</summary>
-public sealed class LuaState : IDisposable
+public sealed partial class LuaState : IDisposable
 {
     /// <summary>Collector bookkeeping: <c>__gc</c>, weak tables and the <c>collectgarbage</c> options.</summary>
     internal Gc.GcState Gc { get; }

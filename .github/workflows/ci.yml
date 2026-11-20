@@ -86,11 +86,46 @@ jobs:
           path: .reference/lua
           retention-days: 14
 
+  # Allocation budgets (alloc-budgets.json) and the interpreter-loop JIT budget (jit-budgets.json); both are part of ci-gate.
+  # They need a Release build and the plain JIT path (R2R and NativeAOT skip the MinOpts thresholds), so they get their own job.
+  alloc-budget:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      LUNETTE_REQUIRE_RELEASE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - run: dotnet test -c Release --filter "FullyQualifiedName~Lunette.Tests.AllocationTests" tests/Lunette.Tests
+
+  jit-budget:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      LUNETTE_REQUIRE_RELEASE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - run: dotnet test -c Release --filter "FullyQualifiedName~Lunette.Tests.JitBudgetTests|FullyQualifiedName~Lunette.Tests.JitProbeTests" tests/Lunette.Tests
+      - name: Upload JIT disasm summaries on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jit-disasm
+          path: /tmp/lunette-jit-*.txt
+          retention-days: 14
+
   # The single aggregate check required by branch protection (ADR/ticket 18).
   # Later tickets add their jobs to `needs`; nightly and benchmark jobs never block.
   ci-gate:
     if: always()
-    needs: [build, test, ratchet, reference, fast-checks]
+    needs: [build, test, ratchet, reference, fast-checks, alloc-budget, jit-budget]
     runs-on: ubuntu-latest
     steps:
       - name: Require every upstream job to succeed

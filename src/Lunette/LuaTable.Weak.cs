@@ -34,13 +34,13 @@ internal sealed class WeakDetach(WeakReference<LuaTable> table, WeakSlot[] slots
 /// moved into handles, the .NET GC runs, and the survivors are written back in place. Strong tables therefore
 /// pay nothing on any access, and the node layout (and so <c>#t</c> and <c>next</c> order) is preserved.
 /// </summary>
-internal sealed partial class LuaTable
+public sealed partial class LuaTable
 {
     /// <summary>Marks a key whose object was collected; the node keeps its place in the collision chain.</summary>
     private static readonly LuaValue DeadKey = LuaValue.FromObject(new object());
 
     /// <summary>Weak-key / weak-value flags from this table's metatable <c>__mode</c> string.</summary>
-    public (bool Keys, bool Values) WeakMode()
+    internal (bool Keys, bool Values) WeakMode()
     {
         if (Metatable is null) return (false, false);
         LuaValue mode = Metatable.GetTagMethod(TagMethod.Mode);
@@ -55,7 +55,7 @@ internal sealed partial class LuaTable
     }
 
     /// <summary>Takes this table's weakly held entries out of it; null when there are none.</summary>
-    public WeakDetach? DetachWeak(bool weakKeys, bool weakValues, WeakReference<LuaTable> self)
+    internal WeakDetach? DetachWeak(bool weakKeys, bool weakValues, WeakReference<LuaTable> self)
     {
         var slots = new List<WeakSlot>();
         if (weakValues)
@@ -107,7 +107,7 @@ internal sealed partial class LuaTable
     }
 
     /// <summary>Writes the surviving entries back where they were; entries with a dead part stay removed.</summary>
-    public void RestoreWeak(WeakDetach detached)
+    internal void RestoreWeak(WeakDetach detached)
     {
         foreach (ref WeakSlot s in detached.Slots.AsSpan())
         {

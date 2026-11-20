@@ -7,7 +7,7 @@ namespace Lunette;
 /// The single 16-byte Lua value (ADR 0001): the type is derived from <see cref="Ref"/>,
 /// number payloads live in <see cref="Bits"/>. A null Ref is nil.
 /// </summary>
-public readonly struct LuaValue
+public readonly partial struct LuaValue
 {
     private sealed class Tag(string name)
     {
@@ -48,9 +48,7 @@ public readonly struct LuaValue
     /// <summary>A Lua string value: the object slot holds the headered byte[] of a <see cref="LuaString"/>.</summary>
     internal static LuaValue FromString(LuaString s) => new(s.Backing, 0);
 
-    /// <summary>A string value from a .NET string, encoded as UTF-8 (host boundary and engine-internal names).</summary>
-    internal static LuaValue FromString(string s) => FromString(LuaString.FromUtf16(s));
-    internal static LuaValue FromTable(LuaTable t) => new(t, 0);
+    public static LuaValue FromTable(LuaTable t) => new(t, 0);
 
     internal bool IsString => Ref is byte[];
     internal LuaString AsString => new((byte[])Ref!);
