@@ -18,7 +18,7 @@ public class ErrorTests
 
     [Fact]
     public void Error_levels_pick_the_reported_position() =>
-        Assert.Equal("(load):1: a\n(load):2: b\nc\n", Run("""
+        Assert.Equal("(load):1: a\n(load):4: b\nc\n", Run("""
             local ok, e = pcall(function() error('a', 1) end) print(e)
             local function lvl2() error('b', 2) end
             ok, e = pcall(function()
