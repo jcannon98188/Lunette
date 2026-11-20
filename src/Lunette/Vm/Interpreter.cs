@@ -347,6 +347,12 @@ internal static partial class Interpreter
                     int ra = bs + i.A;
                     int n = i.B != 0 ? i.B - 1 : top - ra;
                     if (co.OpenUpvals.Count > 0) co.Close(bs);
+                    if (co.Tbc.Count > 0 && co.Tbc[^1] >= bs)
+                    {
+                        f.Pc = pc;
+                        CloseTbc(state, co, bs, Math.Max(bs + proto.MaxStack, ra + n));
+                        r = co.Stack;
+                    }
                     int dst = f.FuncIdx;
                     int wanted = f.Wanted;
                     if (f.PcallKind != 0)
@@ -391,6 +397,15 @@ internal static partial class Interpreter
                 }
                 case OpCode.Close:
                     if (co.OpenUpvals.Count > 0) co.Close(bs + i.A);
+                    if (co.Tbc.Count > 0 && co.Tbc[^1] >= bs + i.A)
+                    {
+                        f.Pc = pc;
+                        CloseTbc(state, co, bs + i.A, bs + proto.MaxStack);
+                        r = co.Stack;
+                    }
+                    break;
+                case OpCode.Tbc:
+                    MarkToBeClosed(state, co,bs + i.A, proto, pc - 1, proto.Names[i.Bx]);
                     break;
                 case OpCode.Vararg:
                 {

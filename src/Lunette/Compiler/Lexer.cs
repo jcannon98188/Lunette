@@ -11,7 +11,7 @@ internal enum Tok
     Plus, Minus, Star, Slash, DSlash, Percent, Caret, Concat,
     Amp, Pipe, Tilde, Shl, Shr,
     LParen, RParen, Comma, Assign, Semi,
-    String, Hash, LBrace, RBrace, LBracket, RBracket, Dot, Colon,
+    String, Hash, LBrace, RBrace, LBracket, RBracket, Dot, Colon, Goto, DColon,
 }
 
 internal struct Token
@@ -69,7 +69,7 @@ internal sealed class Lexer(byte[] bytes, string chunkName, StringCache cache)
                 "local" => Tok.Local, "nil" => Tok.Nil, "true" => Tok.True, "false" => Tok.False,
                 "if" => Tok.If, "then" => Tok.Then, "else" => Tok.Else, "elseif" => Tok.Elseif, "end" => Tok.End,
                 "while" => Tok.While, "do" => Tok.Do, "repeat" => Tok.Repeat, "until" => Tok.Until, "for" => Tok.For,
-                "function" => Tok.Function, "return" => Tok.Return, "break" => Tok.Break,
+                "function" => Tok.Function, "return" => Tok.Return, "break" => Tok.Break, "goto" => Tok.Goto,
                 "in" => Tok.In, "and" => Tok.And, "or" => Tok.Or, "not" => Tok.Not,
                 _ => Tok.Name,
             };
@@ -100,7 +100,9 @@ internal sealed class Lexer(byte[] bytes, string chunkName, StringCache cache)
                 break;
             }
             case ']': t.Kind = Tok.RBracket; break;
-            case ':': t.Kind = Tok.Colon; break;
+            case ':':
+                if (_pos < src.Length && src[_pos] == ':') { _pos++; t.Kind = Tok.DColon; t.Text = "::"; return t; }
+                t.Kind = Tok.Colon; break;
             case '"':
             case '\'':
                 return QuotedString(t, c);

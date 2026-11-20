@@ -36,7 +36,7 @@ internal enum OpCode : byte
     ForPrep,   // prepare numeric loop at R[A..A+3]; if it runs skip the next instruction (a Jmp to the exit)
     ForLoop,   // step numeric loop at R[A..A+3]; if it continues run the next instruction (a Jmp back), else skip it
     Closure,   // R[A] = closure(Protos[Bx])
-    Close,     // close upvalues >= R[A]
+    Close,     // close upvalues and run pending to-be-closed variables >= R[A]
     Vararg,    // R[A .. A+C-2] = ... ; C == 0: all, sets top
     NewTable,  // R[A] = {} sized for B hash entries and, from the Extra that follows, Ax array slots
     GetTable,  // R[A] = R[B][R[C]]
@@ -46,6 +46,7 @@ internal enum OpCode : byte
     Len,       // R[A] = #R[B]
     Concat,    // R[A] = R[B] .. R[C]
     TForLoop,  // generic for at R[A..A+3], loop variables from R[A+4]: if R[A+4] is not nil, R[A+2] = R[A+4] and run the next instruction (a Jmp back), else skip it
+    Tbc,       // mark R[A] to be closed (Names[Bx] is the variable's name for the error message); nil and false are ignored
     Extra,     // operand word of the preceding instruction (Ax)
 }
 

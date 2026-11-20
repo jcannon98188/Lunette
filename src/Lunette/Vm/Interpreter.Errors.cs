@@ -61,6 +61,7 @@ internal static partial class Interpreter
             if (fr.PcallKind == 2) value = RunHandler(state, co, fr.Handler, value);
             int dst = fr.PcallBase;
             int wanted = fr.Wanted;
+            value = CloseTbcOnError(state, co, fr.FuncIdx, value);
             co.Close(fr.FuncIdx);
             co.Depth = i;
             var r = co.Stack;

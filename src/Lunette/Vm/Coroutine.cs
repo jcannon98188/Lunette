@@ -62,9 +62,12 @@ internal sealed class Coroutine
     public int CallTop;
     /// <summary>Open upvalues, ascending by stack index.</summary>
     public readonly List<UpVal> OpenUpvals = new();
+    /// <summary>Stack indices of live to-be-closed variables, ascending.</summary>
+    public readonly List<int> Tbc = new();
 
     public void Reset()
     {
+        Tbc.Clear();
         Depth = 0;
         InHandler = false;
         OpenUpvals.Clear();
