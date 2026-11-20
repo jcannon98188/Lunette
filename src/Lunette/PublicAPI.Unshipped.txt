@@ -130,3 +130,12 @@ Lunette.LuaState.CallInstructionLimit.set -> void
 Lunette.LuaState.CumulativeInstructionsUsed.get -> long
 Lunette.LuaState.IsAborted.get -> bool
 Lunette.LuaState.ResetCumulativeBudget() -> void
+Lunette.LuaState.LuaState(Lunette.LuaStateOptions! options) -> void
+Lunette.LuaStateOptions
+Lunette.LuaStateOptions.AddModule(string! name, System.Func<Lunette.LuaState!, Lunette.LuaValue>! loader) -> Lunette.LuaStateOptions!
+Lunette.LuaStateOptions.Allow(params string![]! names) -> Lunette.LuaStateOptions!
+Lunette.LuaStateOptions.Limits.get -> Lunette.LuaLimits?
+Lunette.LuaStateOptions.Limits.init -> void
+Lunette.LuaStateOptions.LuaStateOptions() -> void
+Lunette.LuaStateOptions.Replace(string! name, Lunette.HostFunction! function) -> Lunette.LuaStateOptions!
+Lunette.LuaStateOptions.SeedRandom(long seed, long seed2 = 0) -> Lunette.LuaStateOptions!
