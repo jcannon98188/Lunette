@@ -3,6 +3,8 @@
     <OutputType>Exe</OutputType>
     <AssemblyName>Lunette.Cli</AssemblyName>
     <RootNamespace>Lunette.Cli</RootNamespace>
+    <!-- Native AOT + trimming gate (ADR/ticket 18): the CLI must publish with no ILC/trim warnings (warnings are errors). -->
+    <PublishAot>true</PublishAot>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Lunette\Lunette.csproj" />
