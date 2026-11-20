@@ -649,6 +649,14 @@ public sealed partial class LuaTable
     /// <summary>Advances the traversal after <paramref name="key"/> (nil starts it); false when it is exhausted.</summary>
     public bool Next(LuaValue key, out LuaValue nextKey, out LuaValue nextValue)
     {
+        int step = Step(key, out nextKey, out nextValue);
+        if (step < 0) ThrowBadKey("invalid key to 'next'");
+        return step > 0;
+    }
+
+    /// <summary>One traversal step: 1 when a pair was found, 0 when exhausted, -1 when <paramref name="key"/> is not in the table (nothing thrown).</summary>
+    internal int Step(LuaValue key, out LuaValue nextKey, out LuaValue nextValue)
+    {
         int asize = _arr.Length;
         int i;
         if (key.IsNil) i = 0;
@@ -659,7 +667,12 @@ public sealed partial class LuaTable
             else
             {
                 int n = FindNode(key);
-                if (n < 0) ThrowBadKey("invalid key to 'next'");
+                if (n < 0)
+                {
+                    nextKey = default;
+                    nextValue = default;
+                    return -1;
+                }
                 i = n + 1 + asize;
             }
         }
@@ -669,7 +682,7 @@ public sealed partial class LuaTable
             {
                 nextKey = LuaValue.FromInteger(i + 1);
                 nextValue = _arr[i];
-                return true;
+                return 1;
             }
         }
         for (i -= asize; i < _nodes.Length; i++)
@@ -678,12 +691,12 @@ public sealed partial class LuaTable
             {
                 nextKey = _nodes[i].Key;
                 nextValue = _nodes[i].Value;
-                return true;
+                return 1;
             }
         }
         nextKey = default;
         nextValue = default;
-        return false;
+        return 0;
     }
 
     public override string ToString() => $"table: 0x{RuntimeHelpers.GetHashCode(this):x8}";

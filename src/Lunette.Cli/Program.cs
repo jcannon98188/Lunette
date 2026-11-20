@@ -137,10 +137,10 @@ public static class Program
 
     private const int SigInt = 2;
 
-#pragma warning disable SYSLIB1054 // a blittable libc call; the LibraryImport generator would need AllowUnsafeBlocks
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Interoperability", "SYSLIB1054",
+        Justification = "A blittable libc call; the LibraryImport generator would need AllowUnsafeBlocks.")]
     [DllImport("libc", EntryPoint = "signal")]
     private static extern IntPtr CSignal(int signum, IntPtr handler);
-#pragma warning restore SYSLIB1054
 
     private static void ResetSigint()
     {
