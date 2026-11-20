@@ -1,11 +1,11 @@
 ---
 kind: ticket
 title: "SimGame: host-controlled globals, require and randomness"
-status: open
+status: resolved
 blocked_by: [10, 14]
 tags: [ready-for-agent, enhancement]
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-20T10:53:05Z
 ---
 
 ## Question
@@ -26,3 +26,7 @@ Requirements from the SimGame embedder, which gives each mod pack its own state 
 - [ ] require resolves only host-registered modules, no filesystem/package access
 - [ ] math.random deterministic per host seed; replaceable
 - [ ] Tests for each path above
+
+## Answer
+
+SimGame: host-controlled globals, require and seeded randomness via LuaStateOptions allowlist; withheld libs no longer constructed (34).

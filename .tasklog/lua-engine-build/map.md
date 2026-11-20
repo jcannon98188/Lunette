@@ -14,6 +14,46 @@ A pure-managed C# (.NET 11) Lua 5.4 engine and minimal CLI, built to the lua-eng
 
 ## Decisions so far
 
+- [Walking skeleton](tickets/01-walking-skeleton.md): Walking skeleton landed.
+- [Suite harness and ratchet](tickets/02-suite-harness-and-ratchet.md): Suite harness and ratchet landed.
+- [Control flow, functions and closures](tickets/03-control-flow-functions-and-closures.md): Control flow and closures landed.
+- [Tables and metatables](tickets/04-tables-and-metatables.md): Tables and metatables landed.
+- [Number tower and math library](tickets/05-number-tower-and-math-library.md): Number tower and math landed.
+- [Byte strings and string library](tickets/06-byte-strings-and-string-library.md): Byte strings and string lib landed.
+- [Errors and pcall](tickets/07-errors-and-pcall.md): Errors and pcall landed.
+- [Coroutines](tickets/08-coroutines.md): Coroutines landed.
+- [goto, to-be-closed and const](tickets/09-goto-to-be-closed-and-const.md): goto, tbc and const landed.
+- [Remaining base, table and load](tickets/10-remaining-base-table-and-load.md): Base, table and load landed.
+- [debug library and hooks](tickets/11-debug-library-and-hooks.md): debug library and hooks landed.
+- [GC: weak tables, __gc and collectgarbage](tickets/12-gc-weak-tables-gc-and-collectgarbage.md): GC landed.
+- [Platform interface, io and os](tickets/13-platform-interface-io-and-os.md): Platform interface, io and os landed.
+- [Host API and interop](tickets/14-host-api-and-interop.md): Host API landed.
+- [Analyzers](tickets/15-analyzers.md): Analyzers landed.
+- [Allocation and JIT-budget tests](tickets/16-allocation-and-jit-budget-tests.md): Alloc and JIT budget tests landed.
+- [Differential testing](tickets/17-differential-testing.md): Differential testing landed.
+- [Native AOT and trimming gate](tickets/18-native-aot-and-trimming-gate.md): AOT gate landed (unrun on CI).
+- [Benchmarks](tickets/19-benchmarks.md): Benchmarks landed.
+- [Full green and nightly variants](tickets/20-full-green-and-nightly-variants.md): Full green and nightly variants landed; CI unrun on GitHub.
+- [Install math library globals, math.type and string coercion](tickets/21-install-math-library-globals-math-type-and-string-coercion.md): Math globals and coercion landed.
+- [Close allocation and JIT-budget gaps](tickets/22-close-allocation-and-jit-budget-gaps.md): Alloc and JIT gaps closed.
+- [SimGame: uncatchable per-call budget abort](tickets/23-simgame-uncatchable-per-call-budget-abort.md): Uncatchable budget abort landed.
+- [SimGame: host-controlled globals, require and randomness](tickets/24-simgame-host-controlled-globals-require-and-randomness.md): Host-controlled globals landed.
+- [SimGame: dev-mode diagnostics and lifecycle](tickets/25-simgame-dev-mode-diagnostics-and-lifecycle.md): Dev-mode diagnostics landed.
+- [Yieldability gaps](tickets/26-yieldability-gaps.md): Yieldability gaps closed (two documented exceptions).
+- [Error message and debug fidelity](tickets/27-error-message-and-debug-fidelity.md): Error/debug fidelity landed with documented gaps.
+- [Raw byte output and resource limits polish](tickets/28-raw-byte-output-and-resource-limits-polish.md): Raw byte output and resource-limit polish landed.
+- [Compiler and analyzer spec deviations](tickets/29-compiler-and-analyzer-spec-deviations.md): Compiler/analyzer deviations closed with two explicit waivers.
+- [Test isolation and suite runner cleanup](tickets/30-test-isolation-and-suite-runner-cleanup.md): Test isolation landed.
+- [CI shards, timeouts and unrun-CI verification](tickets/31-ci-shards-timeouts-and-unrun-ci-verification.md): CI hardening landed; workflows unrun on GitHub.
+- [Verify behaviour against reference Lua 5.4.9](tickets/32-verify-behaviour-against-reference-lua-5-4-9.md): Reference verification landed.
+- [GC suite failures: gc.lua, closure.lua, coroutine.lua close-handler frames](tickets/33-gc-suite-failures-gc-lua-closure-lua-coroutine-lua-close-han.md): GC suite failures closed (two waivers).
+- [Sandbox allowlist: build states without registering withheld libraries](tickets/34-sandbox-allowlist-build-states-without-registering-withheld.md): Sandbox allowlist landed.
+- [Fix differential-test divergences from reference 5.4.9](tickets/35-fix-differential-test-divergences-from-reference-5-4-9.md): Differential divergences fixed.
+- [CI: add all-lua job and verify ci-gate covers every job](tickets/36-ci-add-all-lua-job-and-verify-ci-gate-covers-every-job.md): all-lua CI job landed.
+- [Fix DoString inside a host function running under require](tickets/37-fix-dostring-inside-a-host-function-running-under-require.md): DoString re-entry fixed.
+- [Suite: make db.lua, errors.lua, all.lua, locals.lua pass or waive](tickets/38-suite-make-db-lua-errors-lua-all-lua-locals-lua-pass-or-waiv.md): db/errors/all/locals suite files green.
+- [Fix gc.lua timeout flake in the full test run](tickets/39-fix-gc-lua-timeout-flake-in-the-full-test-run.md): gc.lua full-run timeout fixed.
+
 ## Not yet specified
 
 ## Out of scope

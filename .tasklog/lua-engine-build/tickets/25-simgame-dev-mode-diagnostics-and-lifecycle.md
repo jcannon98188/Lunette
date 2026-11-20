@@ -1,11 +1,11 @@
 ---
 kind: ticket
 title: "SimGame: dev-mode diagnostics and lifecycle"
-status: open
+status: resolved
 blocked_by: [10, 11, 14]
 tags: [ready-for-agent, enhancement]
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-20T10:53:06Z
 ---
 
 ## Question
@@ -24,3 +24,7 @@ Requirements from the SimGame embedder, which has an off-by-default dev mode in 
 - [ ] Snippet evaluation inside a live state returns values or a structured error
 - [ ] Repeated create/dispose cycles leak nothing (tested)
 - [ ] Tests for each path above
+
+## Answer
+
+SimGame dev-mode diagnostics: structured LuaException (TraceEntries, Chunk, Line), LuaState.Evaluate console evaluation, dispose/finalizer lifecycle tests. DoString-under-require bug found and fixed in 37.

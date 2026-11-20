@@ -1,11 +1,11 @@
 ---
 kind: ticket
 title: "GC suite failures: gc.lua, closure.lua, coroutine.lua close-handler frames"
-status: open
+status: resolved
 blocked_by: [13]
 tags: [ready-for-agent, enhancement]
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-20T10:53:18Z
 ---
 
 ## Question
@@ -20,3 +20,7 @@ Acceptance criteria:
 - [ ] gc.lua, closure.lua and coroutine.lua pass or carry minimal reason-coded overlays, and are in required-files.txt
 - [ ] gengc.lua waiver re-justified or removed
 - [ ] Tests for each engine change
+
+## Answer
+
+gc.lua, closure.lua, gengc.lua pass and are required; collections now run outside RunLoop with Proto.LiveRegisters, weak-table/finalizer fixes. Waivers: closure.lua:262 host-C-API (debug.upvalueid on builtin), gc.lua 559-569 gc-accounting. gc.lua timeout in full runs fixed in 39.

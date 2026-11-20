@@ -1,11 +1,11 @@
 ---
 kind: ticket
 title: Allocation and JIT-budget tests
-status: open
+status: resolved
 blocked_by: [6, 15]
 tags: [ready-for-agent, enhancement]
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-20T10:52:55Z
 ---
 
 ## Question
@@ -19,3 +19,7 @@ Exact-byte allocation tests on hot paths and a per-PR JIT check holding the VM l
 - [ ] An allocation regression on a covered hot path fails CI
 - [ ] A loop over the budget or a MinOpts downgrade fails CI
 - [ ] Both checks are part of `ci-gate`
+
+## Answer
+
+Allocation-budget (alloc-budgets.json) and JIT-budget (jit-budgets.json, inlineLeftovers now empty) tests implemented; gaps closed in 22.

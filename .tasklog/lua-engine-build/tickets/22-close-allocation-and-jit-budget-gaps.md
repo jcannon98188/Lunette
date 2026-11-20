@@ -1,11 +1,11 @@
 ---
 kind: ticket
 title: Close allocation and JIT-budget gaps
-status: open
+status: resolved
 blocked_by: [10]
 tags: [ready-for-agent, enhancement]
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-20T10:53:03Z
 ---
 
 ## Question
@@ -25,3 +25,7 @@ Additional findings from ticket 19's micro benchmarks (BenchmarkDotNet MemoryDia
 
 - [ ] Allocation-budget scenarios added for math builtins, pairs/ipairs, select/varargs, string.sub/byte, concat, metamethod arithmetic and coroutine resume/yield, each at its justified minimum
 - [ ] Micro benchmark before/after numbers recorded
+
+## Answer
+
+Per-thread result-array reuse (Rets.cs), AggressiveInlining on FromBoolean/Op, nine new alloc scenarios at 0 bytes/iter (string-concat budgets its 26-byte result), jit inlineLeftovers = {}. Micro before→after: math-arith 24,000,796→0 B; pairs 23.6 MB→6.8 MB; string-sub-byte 16 MB→4 MB. Remaining: select(i, ...) with ≥4 results and coroutine.resume with ≥3 values still allocate; math-arith still slowest at ~122 ms.

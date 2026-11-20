@@ -1,11 +1,11 @@
 ---
 kind: ticket
 title: Install math library globals, math.type and string coercion
-status: open
+status: resolved
 blocked_by: [4, 6]
 tags: [ready-for-agent, enhancement]
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-20T10:53:01Z
 ---
 
 ## Question
@@ -16,3 +16,7 @@ Acceptance criteria:
 - [ ] `math` global installed with all functions including math.type
 - [ ] String coercion in arithmetic, bitwise ops and math args
 - [ ] math.lua and bitwise.lua pass the suite and are in required-files.txt
+
+## Answer
+
+Math library globals installed, math.type and string-to-number arithmetic coercion implemented.

@@ -1,11 +1,11 @@
 ---
 kind: ticket
 title: Fix differential-test divergences from reference 5.4.9
-status: open
+status: resolved
 blocked_by: [17]
 tags: [ready-for-agent, enhancement]
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-20T10:53:20Z
 ---
 
 ## Question
@@ -26,3 +26,7 @@ Acceptance criteria:
 - [ ] known-*.lua files merged into the normal corpus
 - [ ] Differential tests (60 + generated seeds) pass with zero waivers other than justified ones
 - [ ] Generator extended to cover the previously avoided areas (string builtin arguments, strings in arithmetic, NaN)
+
+## Answer
+
+All differential divergences fixed (argument-error positions, string arithmetic messages, math argument checks, -nan, parser unclosed-block messages); the ten known-*.lua files merged into the corpus; differential waivers.toml is empty.

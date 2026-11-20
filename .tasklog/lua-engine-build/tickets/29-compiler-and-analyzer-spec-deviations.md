@@ -1,11 +1,11 @@
 ---
 kind: ticket
 title: Compiler and analyzer spec deviations
-status: open
+status: resolved
 blocked_by: [10]
 tags: [ready-for-agent, enhancement]
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-20T10:53:13Z
 ---
 
 ## Question
@@ -21,3 +21,7 @@ Acceptance criteria:
 - [ ] try-in-dispatch analyzer with canary coverage
 - [ ] Test proving the fast loop variant has no hook checks
 - [ ] Any missing spec'd build variants added or listed as explicit waivers in the ticket answer
+
+## Answer
+
+Single-name literal const folding, LD006 analyzer (no try/using/lock in [LuaInterpreterLoop]), canary repair, fast-loop no-hook-check JIT test. Explicit waivers: multi-name const lists not folded; LUA_SAFE_ACCESS safe-twin variant not built (no unsafe helpers exist; documented in ci.yml/nightly-variants.yml and asserted by ci/nightly-variants.test.mjs).

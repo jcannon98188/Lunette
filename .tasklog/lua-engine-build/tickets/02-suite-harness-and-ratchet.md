@@ -1,11 +1,11 @@
 ---
 kind: ticket
 title: Suite harness and ratchet
-status: open
+status: resolved
 blocked_by: [1]
 tags: [ready-for-agent, enhancement]
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-20T10:52:41Z
 ---
 
 ## Question
@@ -20,3 +20,7 @@ The conformance harness: the pinned, unmodified Lua 5.4.9 suite, a per-file runn
 - [ ] Waivers are applied from the manifest as overlays; the suite is never edited in place
 - [ ] `required-files` ratchet fails CI when a listed file regresses
 - [ ] Reference binary builds in CI from checksummed source
+
+## Answer
+
+Suite harness with required-files ratchet and reason-coded waivers.toml implemented; later extended with platform key and sharding (31).

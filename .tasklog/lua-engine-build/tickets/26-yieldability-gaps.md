@@ -1,11 +1,11 @@
 ---
 kind: ticket
 title: Yieldability gaps
-status: open
+status: resolved
 blocked_by: [10]
 tags: [ready-for-agent, enhancement]
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-20T10:53:08Z
 ---
 
 ## Question
@@ -23,3 +23,7 @@ Acceptance criteria:
 - [ ] Errors in host continuations reach an enclosing Lua pcall in the same coroutine
 - [ ] __call works on userdata
 - [ ] Tests for each, including under hooks; coroutine.lua and related suite files still pass
+
+## Answer
+
+Yieldability gaps closed: __concat and __close run as VM frames, pcall/xpcall around host functions via trampoline, host continuations that throw, __call on userdata; coroutine.lua passes and is in required-files. Not yieldable: pcall of a standard-library function that yields (e.g. dofile) and pcall(pairs, obj) with a yielding __pairs.

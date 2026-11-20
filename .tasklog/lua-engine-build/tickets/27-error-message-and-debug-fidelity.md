@@ -1,11 +1,11 @@
 ---
 kind: ticket
 title: Error message and debug fidelity
-status: open
+status: resolved
 blocked_by: [10]
 tags: [ready-for-agent, enhancement]
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-20T10:53:10Z
 ---
 
 ## Question
@@ -24,3 +24,7 @@ Acceptance criteria:
 - [ ] errors.lua, db.lua and calls.lua suite assertions touching these pass (or carry reason-coded overlays)
 - [ ] Tests for each
 Added from ticket 35: (a) when a builtin is called directly by `pcall`, the reference names it by global path (`'math.random'`), the engine says `'random'`; (b) parser close-matching messages for `)` and `}` (`(to close '(' at line N)`) are not implemented; (c) restore the removed differential probes for (a) in the corpus once fixed.
+
+## Answer
+
+Call-site argument names, metamethod line numbers, pcall overflow, traceback base entry, get/setuservalue, warn sink, hook events for builtin-to-builtin calls, parser ')' / '}' close-matching messages. Gaps: hook set inside a builtin invoked as a metamethod from a non-call instruction applies on outer-loop re-entry; one user value per userdata; '[C]: in ?' base entry only for RunScript, not DoString; debug.getlocal for temporaries unchanged; builtin called by a builtin (e.g. table.sort comparator) takes the outer call-site name.

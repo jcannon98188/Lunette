@@ -1,10 +1,10 @@
 ---
 kind: ticket
 title: Walking skeleton
-status: open
+status: resolved
 tags: [ready-for-agent, enhancement]
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-20T10:52:40Z
 ---
 
 ## Question
@@ -18,3 +18,7 @@ The thinnest end-to-end path: a script file run through the CLI that does intege
 - [ ] CLI runs a script file and prints the result of integer/float arithmetic
 - [ ] Solution layout matches the single-core-assembly decision
 - [ ] CI builds on Linux and exposes a single `ci-gate` check
+
+## Answer
+
+Implemented on integration branch `lua-engine-build`: solution skeleton (Lunette core, CLI, Interop, Analyzers, tests), 16-byte LuaValue, end-to-end compile+run of a trivial chunk, CI skeleton with the ci-gate aggregate.

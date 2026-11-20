@@ -1,11 +1,11 @@
 ---
 kind: ticket
 title: "Sandbox allowlist: build states without registering withheld libraries"
-status: open
+status: resolved
 blocked_by: [13]
 tags: [ready-for-agent, enhancement]
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-20T10:53:19Z
 ---
 
 ## Question
@@ -21,3 +21,7 @@ Acceptance criteria:
 - [ ] Reachability test over globals, registry and metatables passes for a minimal state
 - [ ] dofile/loadfile use the platform interface; documented
 - [ ] load rejects binary chunks with a clear error; tested
+
+## Answer
+
+Withheld libraries and base functions are never constructed in an allowlisted state (LuaState.Wants/Define); reachability test; optional LuaStateOptions.Platform. Leftovers: function objects for withheld base functions are allocated then dropped; with require allowlisted the standard require is built then replaced.

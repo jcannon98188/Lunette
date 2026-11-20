@@ -1,11 +1,11 @@
 ---
 kind: ticket
 title: Raw byte output and resource limits polish
-status: open
+status: resolved
 blocked_by: [10]
 tags: [ready-for-agent, enhancement]
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-20T10:53:11Z
 ---
 
 ## Question
@@ -21,3 +21,7 @@ Acceptance criteria:
 - [ ] Huge single library allocations abort at the cap before allocating
 - [ ] Budget unit documented with a test pinning the bound
 - [ ] Dispose semantics documented and tested
+
+## Answer
+
+Raw byte output (LuaState.OutputStream), CheckAlloc pre-checks for string.rep/table.concat/table.unpack/string.format/gsub, documented budget unit and Dispose semantics; non-ASCII differential waiver removed. Gap: io.stderr through CLI with a TextWriter overload still decodes as UTF-8 (real Main uses raw stderr).

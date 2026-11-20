@@ -1,11 +1,11 @@
 ---
 kind: ticket
 title: Test isolation and suite runner cleanup
-status: open
+status: resolved
 blocked_by: [10]
 tags: [ready-for-agent, enhancement]
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-20T10:53:13Z
 ---
 
 ## Question
@@ -21,3 +21,7 @@ Acceptance criteria:
 - [ ] SuiteRunner disposes state after each file
 - [ ] Checksum provenance documented
 - [ ] No test mutates process-global state without isolation
+
+## Answer
+
+Test isolation: temp-dir scripts, SuiteRunner.WithWorkingDirectory, guard test that only the suite runner mutates process-global state; flaky CLI traceback test fixed.

@@ -1,11 +1,11 @@
 ---
 kind: ticket
 title: "SimGame: uncatchable per-call budget abort"
-status: open
+status: resolved
 blocked_by: [12, 14]
 tags: [ready-for-agent, enhancement]
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-20T10:53:04Z
 ---
 
 ## Question
@@ -29,3 +29,7 @@ Notes from ticket 14's implementation: the memory limit currently counts bytes a
 - [ ] State documented unusable after abort; disposal releases everything
 - [ ] Tests for each path above, including aborts inside coroutines and __close handlers
 - [ ] alloc-budget and jit-budget tests still pass
+
+## Answer
+
+SimGame: uncatchable per-call budget abort (LuaAbortException not catchable by pcall/xpcall/__close/__gc), memory cap checks; extra tests for frames/stacks/userdata caps and aborts inside xpcall handlers and coroutine.close added in review fixes.

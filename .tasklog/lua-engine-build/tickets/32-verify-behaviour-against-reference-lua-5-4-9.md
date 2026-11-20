@@ -1,11 +1,11 @@
 ---
 kind: ticket
 title: Verify behaviour against reference Lua 5.4.9
-status: open
+status: resolved
 blocked_by: [10, 17]
 tags: [ready-for-agent, enhancement]
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-20T10:53:17Z
 ---
 
 ## Question
@@ -22,3 +22,7 @@ Acceptance criteria:
 - [ ] Where no reference binary could be run, the ticket answer says so and cites the source-derived expectations
 
 Update after ticket 17: a reference 5.4.9 binary was built locally in WSL Ubuntu and the differential tests ran for real. Fixed-seed `math.random`, the `#t` borders tried and `%.14g` formatting already match the reference. Remaining scope for this ticket: widen the corpora (more `#t` hole patterns, `string.format` corner cases, `tostring`/`tonumber` edge cases, more `math.random` ranges and seeds), fix any new mismatches, and fill gaps listed in ticket 35.
+
+## Answer
+
+Verified against reference 5.4.9: random-wide, table-borders-holes, format-and-conversion and error-fidelity corpora all agree, no waivers; fixed pcall qualified builtin names and string.format missing-argument ordering.

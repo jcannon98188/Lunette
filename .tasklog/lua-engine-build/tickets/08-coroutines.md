@@ -1,11 +1,11 @@
 ---
 kind: ticket
 title: Coroutines
-status: open
+status: resolved
 blocked_by: [7]
 tags: [ready-for-agent, enhancement]
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-20T10:52:46Z
 ---
 
 ## Question
@@ -18,3 +18,7 @@ Coroutines whose resume/yield works across metamethods, iterators and `pcall`; `
 
 - [ ] `coroutine.lua` passes or carries reason-coded waivers
 - [ ] Added to the `required-files` ratchet
+
+## Answer
+
+Coroutines on heap frames implemented; yieldability gaps closed in 26 (__concat, __close, pcall of host functions, __call on userdata).
