@@ -38,18 +38,12 @@ Settled in charting (grilling with the user):
 - [Test harness and waiver policy](tickets/09-test-harness-and-waiver-policy.md): Pinned unmodified 5.4.9 suite, one test per file plus CLI `all.lua` run, no managed `T` (`api.lua` waived), reason-coded waiver manifest applied as overlays, reference 5.4.9 built in CI for differential testing, tiered milestones, ratchet CI via `required-files`.
 - [Native AOT, trimming and IL-compilation backend](tickets/10-native-aot-trimming-and-il-compilation-backend.md): Core is AOT/trim-safe with no dynamic code; any IL backend is a separate optional package gated on IsDynamicCodeSupported and not committed to by the spec; AOT verified by a CI Native AOT CLI run on a suite subset; Lua-to-C# AOT compilation out of scope.
 - [JIT MinOpts thresholds and detecting them in CI](tickets/11-jit-minopts-thresholds-and-detecting-them-in-ci.md): Retail JIT hard-codes five MinOpts limits (60000 IL bytes, 20000 IL instrs, 2000 blocks, 2000 locals, 8000 local refs; unchanged .NET 8–11, not configurable); detect via JitDisasmSummary or MethodLoadVerbose; AggressiveOptimization does not bypass them; an 85-opcode loop is only 20–40% of each limit; instr count/local refs trip before IL size, and a silent inlining cliff sits at 921 locals.
+- [GC, weak tables and __gc on the .NET GC](tickets/12-gc-weak-tables-and-gc-on-the-net-gc.md): Weak tables are a separate storage variant on WeakReference/DependentHandle (ephemerons, no own mark pass); `__gc` via a finalizable sentinel plus a Lua-thread drain queue (reverse-mark order per batch, registry for Dispose); `collectgarbage` maps best-effort onto the .NET GC; `gc.lua` gets per-assertion overlays, `gengc.lua` is waived whole.
+- [Short-string intern table lifetime and weakness](tickets/13-short-string-intern-table-lifetime-and-weakness.md): Interning is a best-effort optimisation, not an invariant: per-state bounded 4-way set-associative strong cache (no weak handles), 40-byte cut-off, seeded full-length hash, pointer-first equality with hash/length/bytes fallback, pinned reserved strings, non-allocating span lookup, and CI variants (capacity-1 cache, constant hash) prove correctness without it.
 
 ## Not yet specified
 
-- Module and solution layout, and the build order for the stdlib (string patterns/format/pack, table, math, utf8, os, io, coroutine, debug).
-- The `io` and `os` portability story (files, processes, clock, locale) on .NET.
-- GC/weak-table/`__gc` implementation approach on the .NET GC.
-- Performance methodology: benchmarks and profiling, with no pass/fail gate.
-- Structure and format of the final build spec document.
-- CI and how the suite and differential tests run in it.
-- Enforcement of code-discipline rules: which Roslyn analyzers and tests guard the performance rules (e.g. no intermediate string allocations, header-aware string access, allocation budgets on hot paths).
-- Lifetime and weakness of the short-string intern table under the .NET GC (depends on the GC/weak-table approach above).
-- Interpreter-loop JIT budget enforcement (from [JIT MinOpts thresholds](tickets/11-jit-minopts-thresholds-and-detecting-them-in-ci.md)): CI gate on IL instruction count / local refs / blocks / locals (about 70% of the JIT limits), a `MinOptJitted` event check, and a leftover-`call` check for the 921-locals inlining cliff; whether the loop method carries `AggressiveOptimization`. Folds into the code-discipline enforcement and CI items above.
+_Nothing currently in the fog: all remaining decisions are live tickets._
 
 ## Out of scope
 
