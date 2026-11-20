@@ -34,6 +34,9 @@ internal sealed class StringCache
 
     public int Capacity => _slots.Length;
 
+    /// <summary>Forgets every cached string; safe because interning is not an invariant.</summary>
+    public void Clear() => Array.Clear(_slots);
+
     /// <summary>Returns the shared instance for short strings, or a fresh string for long ones.</summary>
     public LuaString Intern(ReadOnlySpan<byte> data)
     {

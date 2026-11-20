@@ -60,6 +60,12 @@ public static class SuiteRunner
             string source = waivers.ApplyOverlays(file, File.ReadAllText(path, Encoding.Latin1));
             if (source.StartsWith('#')) source = "--" + source; // the standalone interpreter skips a leading '#' line
             if (file == "all.lua") source = "_U=true;" + source;
+            // big.lua yields 'b' and returns 'a'; all.lua drives it as a coroutine body, so do the same here.
+            if (file == "big.lua")
+            {
+                File.WriteAllText(path, source, Encoding.Latin1);
+                source = "local f = coroutine.wrap(assert(loadfile('big.lua'))); assert(f() == 'b'); assert(f() == 'a')";
+            }
 
             var output = new StringWriter { NewLine = "\n" };
             string? error = null;

@@ -64,7 +64,7 @@ public static class Program
             else if (a[1] == 'e')
             {
                 ranSomething = true;
-                if (!Protected(() => state.DoBytes(Encoding.UTF8.GetBytes(value!), "=(command line)"), stderr)) return 1;
+                if (!Protected(state, () => state.DoBytes(Encoding.UTF8.GetBytes(value!), "=(command line)"), stderr)) return 1;
             }
             else if (a[1] == 'l')
             {
@@ -73,7 +73,7 @@ public static class Program
                 int eq = mod.IndexOf('=');
                 if (eq >= 0) { global = mod[..eq]; mod = mod[(eq + 1)..]; }
                 string code = $"{global} = require('{mod.Replace("'", "\\'")}')";
-                if (!Protected(() => state.DoString(code, "=(command line)"), stderr)) return 1;
+                if (!Protected(state, () => state.DoString(code, "=(command line)"), stderr)) return 1;
             }
         }
 
@@ -98,7 +98,7 @@ public static class Program
         source = SkipShebang(source);
         var scriptArgs = args[(scriptIndex + 1)..];
         string chunk = path == "-" ? "=stdin" : "@" + path;
-        return Protected(() => state.DoBytes(source, chunk, scriptArgs), stderr) ? 0 : 1;
+        return Protected(state, () => state.RunScript(source, chunk, scriptArgs), stderr) ? 0 : 1;
     }
 
     private static int Fail(TextWriter stderr, string message)
@@ -108,7 +108,7 @@ public static class Program
         return 1;
     }
 
-    private static bool Protected(Action run, TextWriter stderr)
+    private static bool Protected(LuaState state, Action run, TextWriter stderr)
     {
         try
         {
@@ -117,7 +117,8 @@ public static class Program
         }
         catch (LuaException e)
         {
-            stderr.WriteLine($"lunette: {e.Message}");
+            stderr.WriteLine($"lunette: {e.Describe(state)}");
+            if (e.Traceback is not null) stderr.WriteLine(e.Traceback);
             return false;
         }
     }

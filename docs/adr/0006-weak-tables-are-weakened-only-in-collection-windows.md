@@ -1,0 +1,5 @@
+# Weak tables are weakened only inside collection windows
+
+Lua weak tables and `__gc` ride the .NET GC. A table whose metatable has `__mode` is registered; when a collection runs (`collectgarbage`, or an allocation-threshold safepoint) its weak entries are moved into `WeakReference` / `DependentHandle` (ephemerons) handles, `GC.Collect` runs, and survivors are written back in place, so node layout, `#t` and `next` order are preserved and strong-table access pays nothing. `__gc` uses a finalizable sentinel that strongly references its target; the .NET finalizer thread only enqueues, and the queue is drained on the Lua thread (never the finalizer thread), in reverse marking order. Generational mode is accepted but behaves as incremental. Source: [GC: weak tables, __gc and collectgarbage](../../.tasklog/lua-engine-build/tickets/12-gc-weak-tables-gc-and-collectgarbage.md).
+
+Consequence: weak entries are not reclaimed between collection windows, and the Lua stack's stale slots are cleared at a collection so dead references do not pin objects.

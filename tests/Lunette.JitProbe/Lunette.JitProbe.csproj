@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Child-process probe for the JIT-budget tests: runs a Lua workload with an in-process EventListener and
+       prints the tier each interpreter-loop method was jitted at. Not shipped; not covered by the product analyzers. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Lunette.JitProbe</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Lunette\Lunette.csproj" />
+  </ItemGroup>
+</Project>

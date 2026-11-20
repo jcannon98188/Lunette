@@ -6,6 +6,11 @@ namespace Lunette;
 /// <summary>A callable Lua function value.</summary>
 public abstract class LuaFunction
 {
+    /// <summary>Only the engine creates function values.</summary>
+    internal LuaFunction()
+    {
+    }
+
     public override string ToString() => $"function: 0x{System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(this):x8}";
 }
 
@@ -21,11 +26,18 @@ internal enum BuiltinKind : byte
     Xpcall,
     Yield,
     Pairs,
+    Collect,
+    SetHook,
+    /// <summary>A host function made with LuaState.CreateFunction: it may request a yield.</summary>
+    Host,
 }
 
 internal sealed class BuiltinFunction(BuiltinBody body, BuiltinKind kind = BuiltinKind.None) : LuaFunction
 {
     public BuiltinKind Kind { get; } = kind;
+
+    /// <summary>The host delegate behind a <see cref="BuiltinKind.Host"/> function.</summary>
+    public HostFunction? Host { get; init; }
 
     public LuaValue[]? Invoke(LuaState state, ReadOnlySpan<LuaValue> args) => body(state, args);
 }

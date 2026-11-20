@@ -43,6 +43,10 @@ internal sealed class Frame
     public Continuation Cont;
     /// <summary>Stack index the finished instruction stores its result into.</summary>
     public int ContDest;
+    /// <summary>True when this Frame replaced its caller through a tail call (debug.getinfo istailcall).</summary>
+    public bool IsTail;
+    /// <summary>True when a host function (not a Lua call instruction) called this Frame, so no call-site name exists.</summary>
+    public bool Native;
 }
 
 /// <summary>How a metamethod Frame finishes the instruction that called it (the equivalent of luaV_finishOp).</summary>
@@ -84,15 +88,50 @@ internal sealed class Coroutine
     public bool Started;
     /// <summary>Set by a yield: the dispatch loop returned so the resumer can take <see cref="YieldValues"/>.</summary>
     public bool Yielded;
+    /// <summary>A full collection requested by <c>collectgarbage</c>; the loop returned so <see cref="Interpreter"/> runs it, and where its result goes.</summary>
+    public bool CollectPending;
+    public int CollectFa, CollectNargs, CollectWanted;
     public LuaValue[] YieldValues = [];
     /// <summary>Where the results of the pending yield call go once resumed, how many are wanted, and whether a pcall status (true) leads them.</summary>
     public int YieldFa;
     public int YieldWanted;
+    /// <summary>The continuation of the host function that yielded, run with the resume values; null when the values are the results.</summary>
+    public HostContinuation? YieldCont;
     public bool YieldPcall;
     /// <summary>Number of non-yieldable host calls in progress on this coroutine (PUC nny).</summary>
     public int Nny;
     /// <summary>The error that killed the coroutine, reported once by coroutine.close.</summary>
     public LuaValue? ErrorValue;
+
+    // ---- debug hooks (debug.sethook), per coroutine ----
+    public const byte HookCall = 1, HookReturn = 2, HookLine = 4, HookCount = 8;
+    /// <summary>The hook function, or nil.</summary>
+    public LuaValue HookFn;
+    /// <summary>Which events call the hook (HookCall | HookReturn | HookLine | HookCount); 0 means the fast loop runs.</summary>
+    public byte HookMask;
+    /// <summary>The count-hook period and the instructions left before it fires.</summary>
+    public int HookPeriod, HookCounter;
+    /// <summary>False while the hook function itself runs, so hooks do not nest.</summary>
+    public bool AllowHook = true;
+    /// <summary>Previous instruction index seen by the line hook.</summary>
+    public int OldPc;
+    /// <summary>Set by sethook when the running coroutine must switch between the fast and the traced loop.</summary>
+    public bool Reenter;
+    /// <summary>Set by sethook: the traced loop owes a return event for the sethook call that installed it.</summary>
+    public bool PendingReturnHook;
+    /// <summary>Frames index of the running hook function, or -1.</summary>
+    public int HookFrameIndex = -1;
+    /// <summary>The host function whose call or return event is being reported, or nil.</summary>
+    public LuaValue HookBuiltin;
+
+    /// <summary>The error or assert builtin that is raising the error being unwound, so a handler's traceback lists it.</summary>
+    public LuaValue RaisingBuiltin;
+
+    /// <summary>The source line of the instruction that killed this coroutine's top Frame, and the Frame depth it belongs to (the saved pc is stale for VM-detected errors).</summary>
+    public int FaultLine, FaultDepth;
+
+    /// <summary>True when the traced loop must run: a hook is set and not currently inside the hook function.</summary>
+    public bool Traced => HookMask != 0 && AllowHook;
 
     public override string ToString() => $"thread: 0x{System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(this):x8}";
 
@@ -138,6 +177,8 @@ internal sealed class Coroutine
         f.PcallKind = 0;
         f.PcallLevel = Depth > 1 ? Frames[Depth - 2]!.PcallLevel : 0;
         f.Cont = Continuation.None;
+        f.IsTail = false;
+        f.Native = false;
         return f;
     }
 

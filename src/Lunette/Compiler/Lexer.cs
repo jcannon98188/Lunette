@@ -186,7 +186,7 @@ internal sealed class Lexer(byte[] bytes, string chunkName, StringCache cache)
         if (isComment) return t;
         t.Kind = Tok.String;
         t.Text = "string";
-        t.Str = cache.Intern(new ReadOnlySpan<byte>(_buf, 0, _bufLen));
+        t.Str = InternBuffer();
         return t;
     }
 
@@ -194,8 +194,37 @@ internal sealed class Lexer(byte[] bytes, string chunkName, StringCache cache)
 
     private int ReadHexDigit(int line)
     {
-        if (_pos >= src.Length || !char.IsAsciiHexDigit(src[_pos])) throw Error("hexadecimal digit expected", line);
+        if (_pos >= src.Length || !char.IsAsciiHexDigit(src[_pos])) throw EscError("hexadecimal digit expected", line);
         return HexValue(src[_pos++]);
+    }
+
+    private readonly Dictionary<string, LuaString> _longStrings = new();
+
+    /// <summary>Interns the scanned string; long strings are shared within one compilation, like PUC's scanner table.</summary>
+    private LuaString InternBuffer()
+    {
+        var span = new ReadOnlySpan<byte>(_buf, 0, _bufLen);
+        if (_bufLen <= LuaString.MaxShortLength) return cache.Intern(span);
+        var chars = new char[_bufLen];
+        for (int i = 0; i < chars.Length; i++) chars[i] = (char)_buf[i];
+        string key = new(chars);
+        if (_longStrings.TryGetValue(key, out LuaString found)) return found;
+        LuaString made = LuaString.Create(span);
+        _longStrings[key] = made;
+        return made;
+    }
+
+    private char _quote;
+    private int _escStart;
+
+    /// <summary>An escape-sequence error: like PUC, "near" shows the string read so far, the escape and the offending character.</summary>
+    private LuaException EscError(string msg, int line)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append(_quote);
+        for (int i = 0; i < _bufLen; i++) sb.Append((char)_buf[i]);
+        sb.Append(src.Slice(_escStart, Math.Min(_pos + 1, src.Length)));
+        return Error($"{msg} near '{sb}'", line);
     }
 
     private void PutUtf8(long x)
@@ -217,6 +246,7 @@ internal sealed class Lexer(byte[] bytes, string chunkName, StringCache cache)
     private Token QuotedString(Token t, char quote)
     {
         _bufLen = 0;
+        _quote = quote;
         while (true)
         {
             if (_pos >= src.Length) throw Error("unfinished string near <eof>", _line);
@@ -225,6 +255,7 @@ internal sealed class Lexer(byte[] bytes, string chunkName, StringCache cache)
             if (c == '\n' || c == '\r') throw Error("unfinished string", _line);
             if (c != '\\') { Put((byte)c); continue; }
             if (_pos >= src.Length) throw Error("unfinished string near <eof>", _line);
+            _escStart = _pos - 1;
             char e = src[_pos++];
             switch (e)
             {
@@ -264,15 +295,15 @@ internal sealed class Lexer(byte[] bytes, string chunkName, StringCache cache)
                     break;
                 case 'u':
                 {
-                    if (_pos >= src.Length || src[_pos] != '{') throw Error("missing '{' in \\u{xxxx}", _line);
+                    if (_pos >= src.Length || src[_pos] != '{') throw EscError("missing '{' in \\u{xxxx}", _line);
                     _pos++;
                     long v = ReadHexDigit(_line);
                     while (_pos < src.Length && char.IsAsciiHexDigit(src[_pos]))
                     {
+                        if (v > (0x7FFFFFFF >> 4)) throw EscError("UTF-8 value too large", _line);
                         v = v * 16 + HexValue(src[_pos++]);
-                        if (v > 0x7FFFFFFF) throw Error("UTF-8 value too large", _line);
                     }
-                    if (_pos >= src.Length || src[_pos] != '}') throw Error("missing '}' in \\u{xxxx}", _line);
+                    if (_pos >= src.Length || src[_pos] != '}') throw EscError("missing '}' in \\u{xxxx}", _line);
                     _pos++;
                     PutUtf8(v);
                     break;
@@ -281,16 +312,16 @@ internal sealed class Lexer(byte[] bytes, string chunkName, StringCache cache)
                 {
                     int v = e - '0';
                     for (int k = 0; k < 2 && _pos < src.Length && char.IsAsciiDigit(src[_pos]); k++) v = v * 10 + (src[_pos++] - '0');
-                    if (v > 255) throw Error("decimal escape too large", _line);
+                    if (v > 255) throw EscError("decimal escape too large", _line);
                     Put((byte)v);
                     break;
                 }
-                default: throw Error("invalid escape sequence '\\" + e + "'", _line);
+                default: _pos--; throw EscError("invalid escape sequence", _line);
             }
         }
         t.Kind = Tok.String;
         t.Text = "string";
-        t.Str = cache.Intern(new ReadOnlySpan<byte>(_buf, 0, _bufLen));
+        t.Str = InternBuffer();
         return t;
     }
 
@@ -322,8 +353,13 @@ internal sealed class Lexer(byte[] bytes, string chunkName, StringCache cache)
         while (_pos < src.Length)
         {
             char c = src[_pos];
-            if (c == '\n') { _line++; _pos++; }
-            else if (c is ' ' or '\t' or '\r') _pos++;
+            if (c is '\n' or '\r')
+            {
+                _pos++;
+                if (_pos < src.Length && src[_pos] is '\n' or '\r' && src[_pos] != c) _pos++;
+                _line++;
+            }
+            else if (c is ' ' or '\t' or '\f' or '\v') _pos++;
             else if (c == '-' && _pos + 1 < src.Length && src[_pos + 1] == '-')
             {
                 _pos += 2;
@@ -338,7 +374,7 @@ internal sealed class Lexer(byte[] bytes, string chunkName, StringCache cache)
                     }
                     _pos = save;
                 }
-                while (_pos < src.Length && src[_pos] != '\n') _pos++;
+                while (_pos < src.Length && src[_pos] is not ('\n' or '\r')) _pos++;
             }
             else break;
         }

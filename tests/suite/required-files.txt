@@ -10,3 +10,7 @@ math.lua
 api.lua
 code.lua
 bwcoercion.lua
+constructs.lua
+goto.lua
+heavy.lua
+big.lua

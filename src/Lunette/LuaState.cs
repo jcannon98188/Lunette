@@ -5,14 +5,40 @@ using Lunette.Vm;
 namespace Lunette;
 
 /// <summary>The single-threaded embedding root: owns globals and the output sink.</summary>
-public sealed class LuaState
+public sealed partial class LuaState : IDisposable
 {
+    /// <summary>Collector bookkeeping: <c>__gc</c>, weak tables and the <c>collectgarbage</c> options.</summary>
+    internal Gc.GcState Gc { get; }
+    /// <summary>Back-edges left before the interpreter's next collector safepoint.</summary>
+    internal int GcTick = Lunette.Gc.GcState.SafepointInterval;
     /// <summary>The global environment table (_G): the initial value of every main chunk's _ENV upvalue.</summary>
     internal readonly LuaTable Globals = new();
     /// <summary>Best-effort intern cache for short strings (ADR 0005).</summary>
     internal readonly StringCache Strings;
     /// <summary>The metatable shared by all string values; its __index is the string library table.</summary>
     internal LuaTable? StringMetatable;
+    /// <summary>The registry table (debug.getregistry).</summary>
+    internal LuaTable? Registry;
+    /// <summary>Metatables shared by all values of nil, boolean, number, function, thread and userdata (debug.setmetatable).</summary>
+    private LuaTable?[]? _primitiveMetatables;
+
+    internal LuaTable? TypeMetatable(LuaValue v) => _primitiveMetatables?[TypeSlot(v)];
+
+    internal void SetTypeMetatable(LuaValue v, LuaTable? mt)
+    {
+        _primitiveMetatables ??= new LuaTable?[6];
+        _primitiveMetatables[TypeSlot(v)] = mt;
+    }
+
+    private static int TypeSlot(LuaValue v) => v.TypeName switch
+    {
+        "nil" => 0,
+        "boolean" => 1,
+        "number" => 2,
+        "function" => 3,
+        "thread" => 4,
+        _ => 5,
+    };
     internal readonly Coroutine Main = new();
     /// <summary>The coroutine currently executing.</summary>
     internal Coroutine Running;
@@ -36,6 +62,7 @@ public sealed class LuaState
     internal LuaState(int internCapacity)
     {
         Strings = new StringCache(internCapacity);
+        Gc = new Gc.GcState(this);
         Main.IsMain = true;
         Main.Status = CoStatus.Running;
         Running = Main;
@@ -59,11 +86,10 @@ public sealed class LuaState
         ErrorLib.Register(this);
         CoroutineLib.Register(this);
         TableLib.Register(this);
+        GcLib.Register(this);
+        DebugLib.Register(this);
         LoadLib.Register(this);
     }
-
-    internal void SetGlobal(string name, LuaValue value) =>
-        Globals.Set(LuaValue.FromString(Strings.FromUtf16(name)), value);
 
     /// <summary>A closure for a compiled main chunk whose single upvalue (_ENV) holds <paramref name="env"/>.</summary>
     internal LuaClosure NewMainClosure(Proto proto, LuaValue env) => new(proto, [new UpVal { Value = env }]);
@@ -89,17 +115,33 @@ public sealed class LuaState
         return cl;
     }
 
+    /// <summary>
+    /// Closes the state: runs every remaining <c>__gc</c> in reverse marking order (errors are swallowed). An aborted state
+    /// (<see cref="IsAborted"/>) runs no Lua code; it just drops every reference it holds. Safe to call repeatedly.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        if (IsAborted) DiscardAborted();
+        else
+        {
+            BeginRun();
+            Gc.Close();
+        }
+    }
+
     public TextWriter Output { get; set; } = Console.Out;
 
     /// <summary>Compiles and runs a chunk of Lua source (encoded as UTF-8).</summary>
     public void DoString(string source, string chunkName = "=(load)")
     {
         Proto proto = LuaCompiler.Compile(source, chunkName, Strings);
-        Interpreter.Execute(this, proto);
+        RunTopLevel(proto);
     }
 
     /// <summary>Runs a chunk given as raw bytes with <paramref name="args"/> as its <c>...</c> (the command-line driver's script arguments).</summary>
-    public void DoBytes(byte[] source, string chunkName, IReadOnlyList<string> args)
+    public void RunScript(byte[] source, string chunkName, IReadOnlyList<string> args)
     {
         Proto proto = LuaCompiler.Compile(source, chunkName, Strings);
         var values = new LuaValue[args.Count];
@@ -120,6 +162,14 @@ public sealed class LuaState
     public void DoBytes(byte[] source, string chunkName = "=(load)")
     {
         Proto proto = LuaCompiler.Compile(source, chunkName, Strings);
-        Interpreter.Execute(this, proto);
+        RunTopLevel(proto);
+    }
+
+    private void RunTopLevel(Proto proto)
+    {
+        ThrowIfAborted();
+        BeginHostRun();
+        try { Interpreter.Execute(this, proto); }
+        finally { EndRun(); }
     }
 }
