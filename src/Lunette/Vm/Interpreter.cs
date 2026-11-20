@@ -77,6 +77,16 @@ internal static class Interpreter
                 case OpCode.Pow:
                     r[bs + i.A] = Arith.Binary(i.Op, r[bs + i.B], r[bs + i.C], proto, pc - 1);
                     break;
+                case OpCode.BAnd:
+                case OpCode.BOr:
+                case OpCode.BXor:
+                case OpCode.Shl:
+                case OpCode.Shr:
+                    r[bs + i.A] = Arith.Bitwise(i.Op, r[bs + i.B], r[bs + i.C], proto, pc - 1);
+                    break;
+                case OpCode.BNot:
+                    r[bs + i.A] = Arith.BitwiseNot(r[bs + i.B], proto, pc - 1);
+                    break;
                 case OpCode.Unm:
                     r[bs + i.A] = Arith.Negate(r[bs + i.B], proto, pc - 1);
                     break;

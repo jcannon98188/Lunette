@@ -86,23 +86,8 @@ public readonly struct LuaValue
     {
         if (Ref is null) return "nil";
         if (IsInteger) return Bits.ToString(CultureInfo.InvariantCulture);
-        if (IsFloat) return FormatFloat(AsFloat);
+        if (IsFloat) return LuaNumber.FormatFloat(AsFloat);
         if (IsBoolean) return ReferenceEquals(Ref, TrueTag) ? "true" : "false";
         return Ref.ToString() ?? "userdata";
-    }
-
-    private static string FormatFloat(double d)
-    {
-        if (double.IsNaN(d)) return BitConverter.DoubleToInt64Bits(d) < 0 ? "-nan" : "nan";
-        if (double.IsPositiveInfinity(d)) return "inf";
-        if (double.IsNegativeInfinity(d)) return "-inf";
-        // Lua uses "%.14g"; .NET "G14" matches apart from exponent casing.
-        string s = d.ToString("G14", CultureInfo.InvariantCulture).Replace('E', 'e');
-        bool looksLikeInt = true;
-        foreach (char c in s)
-        {
-            if (!(char.IsDigit(c) || c == '-')) { looksLikeInt = false; break; }
-        }
-        return looksLikeInt ? s + ".0" : s;
     }
 }

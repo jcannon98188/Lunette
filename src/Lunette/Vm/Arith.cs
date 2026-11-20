@@ -33,6 +33,36 @@ internal static class Arith
         });
     }
 
+    public static LuaValue Bitwise(OpCode op, LuaValue a, LuaValue b, Proto p, int pc)
+    {
+        long x = ToBitwiseOperand(a, b, a, p, pc);
+        long y = ToBitwiseOperand(a, b, b, p, pc);
+        return LuaValue.FromInteger(op switch
+        {
+            OpCode.BAnd => x & y,
+            OpCode.BOr => x | y,
+            OpCode.BXor => x ^ y,
+            OpCode.Shl => LuaNumber.ShiftLeft(x, y),
+            OpCode.Shr => LuaNumber.ShiftLeft(x, unchecked(-y)),
+            _ => throw new InvalidOperationException(op.ToString()),
+        });
+    }
+
+    public static LuaValue BitwiseNot(LuaValue a, Proto p, int pc) =>
+        LuaValue.FromInteger(~ToBitwiseOperand(a, a, a, p, pc));
+
+    // Mirrors luaG_opinterror/luaG_tointerror: a non-number is reported first; otherwise the float that has no integer form.
+    private static long ToBitwiseOperand(LuaValue a, LuaValue b, LuaValue v, Proto p, int pc)
+    {
+        if (LuaNumber.TryToInteger(v, out long n)) return n;
+        if (!a.IsNumber || !b.IsNumber)
+        {
+            LuaValue bad = a.IsNumber ? b : a;
+            throw new LuaException($"{Interpreter.Where(p, pc)} attempt to perform bitwise operation on a {bad.TypeName} value");
+        }
+        throw new LuaException($"{Interpreter.Where(p, pc)} number has no integer representation");
+    }
+
     public static LuaValue Negate(LuaValue a, Proto p, int pc)
     {
         if (a.IsInteger) return LuaValue.FromInteger(unchecked(-a.AsInteger));
@@ -51,7 +81,7 @@ internal static class Arith
 
     private static long IntMod(long x, long y, Proto p, int pc)
     {
-        if (y == 0) throw new LuaException($"{Interpreter.Where(p, pc)} attempt to perform 'n%%0'");
+        if (y == 0) throw new LuaException($"{Interpreter.Where(p, pc)} attempt to perform 'n%0'");
         if (y == -1) return 0;
         long m = x % y;
         if (m != 0 && (m ^ y) < 0) m += y;

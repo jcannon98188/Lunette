@@ -582,6 +582,10 @@ internal sealed class LuaCompiler
             case Tok.Or: left = right = 1; return true;
             case Tok.And: left = right = 2; return true;
             case Tok.Eq or Tok.Ne or Tok.Lt or Tok.Le or Tok.Gt or Tok.Ge: left = right = 3; return true;
+            case Tok.Pipe: left = right = 4; return true;
+            case Tok.Tilde: left = right = 5; return true;
+            case Tok.Amp: left = right = 6; return true;
+            case Tok.Shl or Tok.Shr: left = right = 7; return true;
             case Tok.Plus or Tok.Minus: left = right = 10; return true;
             case Tok.Star or Tok.Slash or Tok.DSlash or Tok.Percent: left = right = 11; return true;
             case Tok.Caret: left = 14; right = 13; return true;
@@ -594,12 +598,12 @@ internal sealed class LuaCompiler
     {
         _openIdx = -1;
         int line = _tok.Line;
-        if (_tok.Kind is Tok.Minus or Tok.Not)
+        if (_tok.Kind is Tok.Minus or Tok.Not or Tok.Tilde)
         {
-            bool isNot = _tok.Kind == Tok.Not;
+            OpCode unop = _tok.Kind switch { Tok.Not => OpCode.Not, Tok.Tilde => OpCode.BNot, _ => OpCode.Unm };
             Advance();
             Expr(target, UnaryPriority);
-            Emit(Instruction.Abc(isNot ? OpCode.Not : OpCode.Unm, target, target, 0), line);
+            Emit(Instruction.Abc(unop, target, target, 0), line);
             _openIdx = -1;
         }
         else Simple(target);
@@ -639,6 +643,11 @@ internal sealed class LuaCompiler
             case Tok.DSlash: Emit(Instruction.Abc(OpCode.IDiv, target, target, rhs), line); break;
             case Tok.Percent: Emit(Instruction.Abc(OpCode.Mod, target, target, rhs), line); break;
             case Tok.Caret: Emit(Instruction.Abc(OpCode.Pow, target, target, rhs), line); break;
+            case Tok.Amp: Emit(Instruction.Abc(OpCode.BAnd, target, target, rhs), line); break;
+            case Tok.Pipe: Emit(Instruction.Abc(OpCode.BOr, target, target, rhs), line); break;
+            case Tok.Tilde: Emit(Instruction.Abc(OpCode.BXor, target, target, rhs), line); break;
+            case Tok.Shl: Emit(Instruction.Abc(OpCode.Shl, target, target, rhs), line); break;
+            case Tok.Shr: Emit(Instruction.Abc(OpCode.Shr, target, target, rhs), line); break;
             case Tok.Eq: Emit(Instruction.Abc(OpCode.Eq, target, target, rhs), line); break;
             case Tok.Ne:
                 Emit(Instruction.Abc(OpCode.Eq, target, target, rhs), line);
