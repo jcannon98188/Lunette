@@ -146,7 +146,7 @@ internal static class DebugLib
         }
     }
 
-    private static int CurrentLine(Coroutine co, Frame fr, int frameIndex)
+    internal static int CurrentLine(Coroutine co, Frame fr, int frameIndex)
     {
         if (co.FaultLine > 0 && co.FaultDepth == frameIndex + 1) return co.FaultLine;
         int[] lines = fr.Closure.Proto.Lines;
@@ -154,7 +154,7 @@ internal static class DebugLib
     }
 
     /// <summary>How the function at <paramref name="i"/> was called, from the calling instruction (ldebug.c funcnamefromcode).</summary>
-    private static (string? What, string? Name) NameOf(Coroutine co, List<Level> lv, int i)
+    internal static (string? What, string? Name) NameOf(Coroutine co, List<Level> lv, int i)
     {
         Level l = lv[i];
         if (l.Frame < 0 && co.HookBuiltinNested && !co.AllowHook && ReferenceEquals(l.Fn.Ref, co.HookBuiltin.Ref)) return (null, null);
@@ -441,7 +441,7 @@ internal static class DebugLib
     }
 
     /// <summary>Finds the n-th local (or vararg, for n &lt; 0, or temporary) of a Lua level; returns its name and stack slot.</summary>
-    private static string? LocalAt(Coroutine co, Level l, int n, out int slot)
+    internal static string? LocalAt(Coroutine co, Level l, int n, out int slot)
     {
         slot = -1;
         if (l.Frame < 0) return null;
@@ -551,7 +551,7 @@ internal static class DebugLib
         return [Str(UpvalName(cl, n)), cl.Upvals[n - 1].Get()];
     }
 
-    private static string UpvalName(LuaClosure cl, int n) =>
+    internal static string UpvalName(LuaClosure cl, int n) =>
         n - 1 < cl.Proto.UpvalNames.Length ? cl.Proto.UpvalNames[n - 1] : "(no name)";
 
     private static LuaValue[] SetUpvalue(LuaState state, ReadOnlySpan<LuaValue> args)
@@ -640,7 +640,7 @@ internal static class DebugLib
         return null;
     }
 
-    private static void ClearHook(Coroutine co)
+    internal static void ClearHook(Coroutine co)
     {
         co.HookFn = default;
         co.HookMask = 0;

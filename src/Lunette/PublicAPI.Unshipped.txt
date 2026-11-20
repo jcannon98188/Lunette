@@ -209,3 +209,37 @@ Lunette.LuaException.TraceEntries.get -> System.Collections.Generic.IReadOnlyLis
 Lunette.LuaState.Evaluate(string! snippet, string! chunkName = "=(console)") -> Lunette.LuaEvalResult!
 Lunette.LuaState.OutputStream.get -> System.IO.Stream?
 Lunette.LuaState.OutputStream.set -> void
+Lunette.LuaHookMask
+Lunette.LuaHookMask.Call = 1 -> Lunette.LuaHookMask
+Lunette.LuaHookMask.Line = 4 -> Lunette.LuaHookMask
+Lunette.LuaHookMask.None = 0 -> Lunette.LuaHookMask
+Lunette.LuaHookMask.Return = 2 -> Lunette.LuaHookMask
+Lunette.LuaHookEvent
+Lunette.LuaHookEvent.Call = 0 -> Lunette.LuaHookEvent
+Lunette.LuaHookEvent.Count = 4 -> Lunette.LuaHookEvent
+Lunette.LuaHookEvent.Line = 3 -> Lunette.LuaHookEvent
+Lunette.LuaHookEvent.Return = 2 -> Lunette.LuaHookEvent
+Lunette.LuaHookEvent.TailCall = 1 -> Lunette.LuaHookEvent
+Lunette.LuaHookCallback
+Lunette.LuaDebugInfo
+Lunette.LuaDebugInfo.CurrentLine.get -> int
+Lunette.LuaDebugInfo.Function.get -> Lunette.LuaValue
+Lunette.LuaDebugInfo.IsTailCall.get -> bool
+Lunette.LuaDebugInfo.IsVararg.get -> bool
+Lunette.LuaDebugInfo.LastLineDefined.get -> int
+Lunette.LuaDebugInfo.LineDefined.get -> int
+Lunette.LuaDebugInfo.LuaDebugInfo() -> void
+Lunette.LuaDebugInfo.Name.get -> string?
+Lunette.LuaDebugInfo.NameWhat.get -> string!
+Lunette.LuaDebugInfo.ParameterCount.get -> int
+Lunette.LuaDebugInfo.ShortSource.get -> string!
+Lunette.LuaDebugInfo.Source.get -> string!
+Lunette.LuaDebugInfo.UpvalueCount.get -> int
+Lunette.LuaDebugInfo.What.get -> string!
+Lunette.LuaState.RunningThread.get -> Lunette.LuaValue
+Lunette.LuaState.SetHook(Lunette.LuaHookCallback? hook, Lunette.LuaHookMask mask, int count = 0, Lunette.LuaValue thread = default(Lunette.LuaValue)) -> void
+Lunette.LuaState.TryGetInfo(int level, out Lunette.LuaDebugInfo info, Lunette.LuaValue thread = default(Lunette.LuaValue)) -> bool
+Lunette.LuaState.TryGetLocal(int level, int index, out string? name, out Lunette.LuaValue value, Lunette.LuaValue thread = default(Lunette.LuaValue)) -> bool
+Lunette.LuaState.TrySetLocal(int level, int index, Lunette.LuaValue value, out string? name, Lunette.LuaValue thread = default(Lunette.LuaValue)) -> bool
+Lunette.LuaState.TryGetUpvalue(Lunette.LuaFunction! function, int index, out string? name, out Lunette.LuaValue value) -> bool
+Lunette.LuaState.TrySetUpvalue(Lunette.LuaFunction! function, int index, Lunette.LuaValue value, out string? name) -> bool
