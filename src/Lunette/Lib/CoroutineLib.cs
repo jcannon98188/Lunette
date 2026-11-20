@@ -92,6 +92,8 @@ internal static class CoroutineLib
         return [LuaValue.FromObject(new BuiltinFunction((st, a) =>
         {
             if (Interpreter.Resume(st, co, a, out LuaValue[] res)) return res;
+            // Like auxwrap, an error in the coroutine closes its pending to-be-closed variables; an error there replaces it.
+            if (co.Status == CoStatus.Dead && Interpreter.CloseThread(st, co) is LuaValue closeErr) res = [closeErr];
             var ex = new LuaException(res[0]);
             // Like auxwrap: a string error gets the position of the caller of the wrapper.
             if (res[0].Ref is string) ex.WantsPosition = true;

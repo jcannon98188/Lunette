@@ -72,8 +72,12 @@ internal sealed class LuaCompiler
         public List<GotoInfo> Gotos { get; } = new();
         public List<BlockInfo> Blocks { get; } = new();
 
+        /// <summary>Raises the "too many ..." compile error for this function (set by the compiler).</summary>
+        public Action<FuncState, string, int>? OnLimit { get; set; }
+
         public void AddLocal(string name, int reg, VarKind kind = VarKind.Regular)
         {
+            if (Locals.Count >= MaxLocals) OnLimit?.Invoke(this, "local variables", MaxLocals);
             var v = new LocalVar(name, reg, kind) { StartPc = Code.Count };
             Locals.Add(v);
             AllLocals.Add(v);
@@ -119,13 +123,14 @@ internal sealed class LuaCompiler
     {
         var c = new LuaCompiler(source, chunkName, cache ?? new StringCache());
         c._fs.IsVararg = true;
+        c._fs.OnLimit = (fs, what, limit) => throw c.LimitError(fs, what, limit);
         c._fs.Upvals.Add(("_ENV", new UpvalDesc(true, 0)));
         c._fs.LastLineDefined = 0;
         c.EnterBlock();
         c.Block();
         if (c._tok.Kind != Tok.Eof) throw c.Err("<eof> expected");
         c.LeaveBlock();
-        c.Emit(Instruction.Abc(OpCode.Return, 0, 1, 0), c._tok.Line);
+        c.Emit(Instruction.Abc(OpCode.Return, 0, 1, 0), c._lastLine);
         return c.Finish(c._fs);
     }
 
@@ -165,8 +170,11 @@ internal sealed class LuaCompiler
 
     // ---- token helpers ----
 
+    private int _lastLine = 1;
+
     private void Advance()
     {
+        _lastLine = _tok.Line;
         if (_hasAhead) { _tok = _ahead; _hasAhead = false; }
         else _tok = _lex.Next();
     }
@@ -175,6 +183,18 @@ internal sealed class LuaCompiler
     {
         if (!_hasAhead) { _ahead = _lex.Next(); _hasAhead = true; }
         return _ahead;
+    }
+
+    private const int MaxLocals = 200, MaxUpvalues = 255, MaxLevels = 200;
+    private int _level;
+
+    /// <summary>luaY errorlimit: "too many upvalues (limit is 255) in function at line N near 'x'".</summary>
+    private LuaException LimitError(FuncState fs, string what, int limit) =>
+        Err($"too many {what} (limit is {limit}) in {(fs.LineDefined == 0 ? "main function" : $"function at line {fs.LineDefined}")}");
+
+    private void EnterLevel()
+    {
+        if (++_level > MaxLevels) throw LimitError(_fs, "C levels", MaxLevels);
     }
 
     private LuaException Err(string msg) => _lex.Error(_tok.Kind == Tok.Eof ? $"{msg} near <eof>" : $"{msg} near '{_tok.Text}'", _tok.Line);
@@ -271,7 +291,7 @@ internal sealed class LuaCompiler
         return null;
     }
 
-    private static int FindUpval(FuncState fs, string name)
+    private int FindUpval(FuncState fs, string name)
     {
         for (int i = 0; i < fs.Upvals.Count; i++)
             if (fs.Upvals[i].Name == name) return i;
@@ -281,11 +301,13 @@ internal sealed class LuaCompiler
         {
             local.Captured = true;
             fs.Upvals.Add((name, new UpvalDesc(true, local.Reg)));
+            if (fs.Upvals.Count > MaxUpvalues) throw LimitError(fs, "upvalues", MaxUpvalues);
             return fs.Upvals.Count - 1;
         }
         int outer = FindUpval(fs.Parent, name);
         if (outer < 0) return -1;
         fs.Upvals.Add((name, new UpvalDesc(false, outer)));
+        if (fs.Upvals.Count > MaxUpvalues) throw LimitError(fs, "upvalues", MaxUpvalues);
         return fs.Upvals.Count - 1;
     }
 
@@ -525,6 +547,13 @@ internal sealed class LuaCompiler
 
     private void Statement()
     {
+        EnterLevel();
+        StatementCore();
+        _level--;
+    }
+
+    private void StatementCore()
+    {
         switch (_tok.Kind)
         {
             case Tok.Semi:
@@ -676,6 +705,7 @@ internal sealed class LuaCompiler
         {
             if (names.Count > 0) Advance();
             names.Add(ExpectName());
+            if (_fs.Locals.Count + names.Count > MaxLocals) throw LimitError(_fs, "local variables", MaxLocals);
             var kind = VarKind.Regular;
             if (_tok.Kind == Tok.Lt)
             {
@@ -797,17 +827,19 @@ internal sealed class LuaCompiler
             var p = ParsePlace();
             if (p.Kind == 2) throw Err("syntax error");
             places.Add(p);
+            if (places.Count + _level > MaxLevels) throw LimitError(_fs, "C levels", MaxLevels);
         }
         if (_tok.Kind != Tok.Assign) throw Err("syntax error");
         Advance();
         int baseReg = _fs.Free;
         var (n, open) = ExprList();
         AdjustList(places.Count, n, open, baseReg);
+        int storeLine = _lastLine; // PUC stores after reading the whole right-hand side
         for (int i = places.Count - 1; i >= 0; i--)
         {
             var p = places[i];
-            if (p.Kind == 0) StoreVariable(p.Name, baseReg + i, p.Line);
-            else Emit(Instruction.Abc(OpCode.SetTable, p.Table, p.Key, baseReg + i), p.Line);
+            if (p.Kind == 0) StoreVariable(p.Name, baseReg + i, storeLine);
+            else Emit(Instruction.Abc(OpCode.SetTable, p.Table, p.Key, baseReg + i), storeLine);
         }
         _fs.Free = save;
     }
@@ -873,12 +905,10 @@ internal sealed class LuaCompiler
         int ifLine = _tok.Line;
         while (true)
         {
-            int line = _tok.Line;
             Advance(); // if / elseif
-            int skip = Condition(line);
-            Expect(Tok.Then, "then");
+            int skip = Condition(Tok.Then, "then");
             ScopedBlock();
-            if (_tok.Kind is Tok.Elseif or Tok.Else) endJumps.Add(EmitJmp(_tok.Line));
+            if (_tok.Kind is Tok.Elseif or Tok.Else) endJumps.Add(EmitJmp(_lastLine));
             PatchJmp(skip, Here);
             if (_tok.Kind == Tok.Elseif) continue;
             if (_tok.Kind == Tok.Else)
@@ -893,11 +923,13 @@ internal sealed class LuaCompiler
     }
 
     /// <summary>Compiles a condition and emits a jump taken when it is falsy; returns the jump to patch.</summary>
-    private int Condition(int line)
+    private int Condition(Tok follow = Tok.Eof, string followText = "")
     {
         int save = _fs.Free;
         int t = Alloc();
         Expr(t, 0);
+        if (follow != Tok.Eof) Expect(follow, followText);
+        int line = _lastLine; // PUC emits the test after the last token it consumed
         Emit(Instruction.Abc(OpCode.Test, t, 0, 0), line);
         int j = EmitJmp(line);
         _fs.Free = save;
@@ -909,14 +941,14 @@ internal sealed class LuaCompiler
         int line = _tok.Line;
         Advance();
         int top = Here;
-        int exit = Condition(line);
+        int exit = Condition();
         Expect(Tok.Do, "do");
         var loop = new LoopInfo(_fs.Free);
         _fs.Loops.Add(loop);
         ScopedBlock();
+        PatchJmp(EmitJmp(_lastLine), top);
         ExpectMatch(Tok.End, "end", "while", line);
         _fs.Loops.RemoveAt(_fs.Loops.Count - 1);
-        PatchJmp(EmitJmp(line), top);
         PatchJmp(exit, Here);
         foreach (int b in loop.Breaks) PatchJmp(b, Here);
     }
@@ -935,11 +967,12 @@ internal sealed class LuaCompiler
         ExpectMatch(Tok.Until, "until", "repeat", line);
         int t = Alloc();
         Expr(t, 0);
+        int condLine = _lastLine;
         bool captured = false;
         for (int i = nlocals; i < _fs.Locals.Count; i++) captured |= _fs.Locals[i].Captured || _fs.Locals[i].Kind == VarKind.Close;
-        if (captured) Emit(Instruction.Abc(OpCode.Close, free, 0, 0), line);
-        Emit(Instruction.Abc(OpCode.Test, t, 0, 0), line);
-        PatchJmp(EmitJmp(line), top);
+        if (captured) Emit(Instruction.Abc(OpCode.Close, free, 0, 0), condLine);
+        Emit(Instruction.Abc(OpCode.Test, t, 0, 0), condLine);
+        PatchJmp(EmitJmp(condLine), top);
         LeaveBlock();
         _fs.DropLocals(nlocals);
         _fs.Free = free;
@@ -1003,6 +1036,7 @@ internal sealed class LuaCompiler
             names.Add(ExpectName());
         }
         Expect(Tok.In, "in");
+        int inLine = _tok.Line; // the iterator call is attributed to the line where the explist starts, as in PUC
         int a = _fs.Free;
         var (n, open) = ExprList();
         AdjustList(4, n, open, a); // iterator, state, control, closing value
@@ -1028,12 +1062,12 @@ internal sealed class LuaCompiler
         _fs.Loops.RemoveAt(_fs.Loops.Count - 1);
         LeaveScope(nlocals, free);
         PatchJmp(toCall, Here);
-        Emit(Instruction.Abc(OpCode.Move, a + 4, a, 0), line);
-        Emit(Instruction.Abc(OpCode.Move, a + 5, a + 1, 0), line);
-        Emit(Instruction.Abc(OpCode.Move, a + 6, a + 2, 0), line);
-        Emit(Instruction.Abc(OpCode.Call, a + 4, 3, names.Count + 1), line);
-        Emit(Instruction.Abc(OpCode.TForLoop, a, 0, 0), line);
-        PatchJmp(EmitJmp(line), body);
+        Emit(Instruction.Abc(OpCode.Move, a + 4, a, 0), inLine);
+        Emit(Instruction.Abc(OpCode.Move, a + 5, a + 1, 0), inLine);
+        Emit(Instruction.Abc(OpCode.Move, a + 6, a + 2, 0), inLine);
+        Emit(Instruction.Abc(OpCode.Call, a + 4, 3, names.Count + 1), inLine);
+        Emit(Instruction.Abc(OpCode.TForLoop, a, 0, 0), inLine);
+        PatchJmp(EmitJmp(inLine), body);
         Emit(Instruction.Abc(OpCode.Close, a + 3, 0, 0), line);
         foreach (int b in loop.Breaks) PatchJmp(b, Here);
         _fs.Free = a;
@@ -1044,6 +1078,7 @@ internal sealed class LuaCompiler
     private void FunctionBody(int target, int line, bool isMethod)
     {
         var child = new FuncState(_fs) { LineDefined = line };
+        child.OnLimit = (fs, what, limit) => throw LimitError(fs, what, limit);
         _fs = child;
         if (isMethod)
         {
@@ -1078,7 +1113,7 @@ internal sealed class LuaCompiler
         Emit(Instruction.Abc(OpCode.Return, 0, 1, 0), endLine);
         _fs = child.Parent!;
         _fs.Protos.Add(Finish(child));
-        Emit(Instruction.ABx(OpCode.Closure, target, _fs.Protos.Count - 1), line);
+        Emit(Instruction.ABx(OpCode.Closure, target, _fs.Protos.Count - 1), endLine);
     }
 
     // ---- expression lists ----
@@ -1111,7 +1146,7 @@ internal sealed class LuaCompiler
     {
         int extra = nvars - n;
         if (open >= 0) SetOpen(open, Math.Max(extra + 1, 0));
-        else if (extra > 0) Emit(Instruction.Abc(OpCode.LoadNil, baseReg + n, extra - 1, 0), _tok.Line);
+        else if (extra > 0) Emit(Instruction.Abc(OpCode.LoadNil, baseReg + n, extra - 1, 0), _lastLine);
         Reserve(baseReg + Math.Max(nvars, n));
         _fs.Free = baseReg + nvars;
     }
@@ -1140,8 +1175,16 @@ internal sealed class LuaCompiler
     /// <summary>Compiles an expression binding tighter than <paramref name="limit"/> into register <paramref name="target"/>.</summary>
     private void Expr(int target, int limit)
     {
+        EnterLevel();
+        ExprCore(target, limit);
+        _level--;
+    }
+
+    private void ExprCore(int target, int limit)
+    {
         _openIdx = -1;
         int line = _tok.Line;
+        int leftStart = Here;
         if (_tok.Kind is Tok.Minus or Tok.Not or Tok.Tilde or Tok.Hash)
         {
             OpCode unop = _tok.Kind switch { Tok.Not => OpCode.Not, Tok.Tilde => OpCode.BNot, Tok.Hash => OpCode.Len, _ => OpCode.Unm };
@@ -1166,6 +1209,7 @@ internal sealed class LuaCompiler
             }
             else
             {
+                RelabelPendingLeft(leftStart, opLine);
                 int save = _fs.Free;
                 int rhs = Alloc();
                 Expr(rhs, right);
@@ -1174,6 +1218,18 @@ internal sealed class LuaCompiler
             }
             _openIdx = -1;
         }
+    }
+
+    /// <summary>
+    /// PUC discharges a pending variable read (global, upvalue, index) of a left operand only once the operator is read,
+    /// so its loads carry the operator line (what line hooks and active lines show).
+    /// </summary>
+    private void RelabelPendingLeft(int start, int opLine)
+    {
+        if (Here <= start || _fs.Code[Here - 1].Op is not (OpCode.GetGlobal or OpCode.GetUpval or OpCode.GetTable)) return;
+        for (int pc = start; pc < Here; pc++)
+            if (_fs.Code[pc].Op is not (OpCode.Move or OpCode.LoadK or OpCode.GetGlobal or OpCode.GetUpval or OpCode.GetTable)) return;
+        for (int pc = start; pc < Here; pc++) _fs.Lines[pc] = opLine;
     }
 
     private void EmitBinary(Tok op, int target, int rhs, int line)

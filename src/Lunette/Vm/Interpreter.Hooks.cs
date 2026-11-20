@@ -1,3 +1,5 @@
+using Lunette.Compiler;
+
 namespace Lunette.Vm;
 
 /// <summary>
@@ -36,6 +38,9 @@ internal static partial class Interpreter
         if (pc == 0)
         {
             co.OldPc = 0;
+            co.HookXferFirst = 1;
+            co.HookXferCount = f.Closure.Proto.NumParams;
+            co.HookXferBase = -1;
             if ((co.HookMask & Coroutine.HookCall) != 0) FireHook(state, co, f, 1, scratch, f.IsTail ? "tail call" : "call", -1);
             return;
         }
@@ -54,7 +59,10 @@ internal static partial class Interpreter
         byte mask = co.HookMask;
         if (mask == 0 || !co.AllowHook) return;
         int scratch = Math.Max(co.CallTop, top);
-        if ((mask & Coroutine.HookCount) != 0 && --co.HookCounter <= 0)
+        // The Jmp that closes a numeric or generic for belongs to the loop instruction before it (PUC has one instruction there).
+        var code = f.Closure.Proto.Code;
+        bool loopJump = pc > 0 && code[pc].Op == OpCode.Jmp && code[pc - 1].Op is OpCode.ForLoop or OpCode.TForLoop;
+        if ((mask & Coroutine.HookCount) != 0 && !loopJump && --co.HookCounter <= 0)
         {
             co.HookCounter = co.HookPeriod;
             FireHook(state, co, f, pc + 1, scratch, "count", -1);
@@ -72,20 +80,26 @@ internal static partial class Interpreter
     }
 
     /// <summary>Called before a Lua function returns, while its Frame is still on the stack.</summary>
-    private static void TraceReturn(LuaState state, Coroutine co, Frame f, int pc, int scratch)
+    private static void TraceReturn(LuaState state, Coroutine co, Frame f, int pc, int scratch, int first, int count)
     {
         if ((co.HookMask & Coroutine.HookReturn) == 0 || !co.AllowHook) return;
+        co.HookXferFirst = first;
+        co.HookXferCount = count;
+        co.HookXferBase = -1;
         FireHook(state, co, f, pc, Math.Max(co.CallTop, scratch), "return", -1);
     }
 
     /// <summary>Reports a call to, or return from, a host function made by the running Lua function.</summary>
-    private static void TraceBuiltin(LuaState state, Coroutine co, BuiltinFunction bf, int scratch, bool call, bool nested = false)
+    private static void TraceBuiltin(LuaState state, Coroutine co, BuiltinFunction bf, int scratch, bool call, int xferBase, int xferCount, bool nested = false)
     {
         byte want = call ? Coroutine.HookCall : Coroutine.HookReturn;
         if ((co.HookMask & want) == 0 || !co.AllowHook || co.Depth == 0) return;
         Frame f = co.Frames[co.Depth - 1]!;
         co.HookBuiltin = LuaValue.FromObject(bf);
         co.HookBuiltinNested = nested;
+        co.HookXferFirst = 1;
+        co.HookXferCount = xferCount;
+        co.HookXferBase = xferBase;
         FireHook(state, co, f, f.Pc, Math.Max(co.CallTop, scratch), call ? "call" : "return", -1);
     }
 
@@ -111,6 +125,7 @@ internal static partial class Interpreter
             co.AllowHook = true;
             co.HookFrameIndex = savedHookFrame;
             co.HookBuiltin = default;
+            co.HookXferCount = 0;
             co.OldPc = oldPc;
             co.CallTop = savedTop;
             f.Pc = savedPc;

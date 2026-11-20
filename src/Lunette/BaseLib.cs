@@ -83,7 +83,7 @@ internal static class BaseLib
     private static LuaTable CheckTable(ReadOnlySpan<LuaValue> args, int n, string fn)
     {
         if (n <= args.Length && args[n - 1].Ref is LuaTable t) return t;
-        string got = n <= args.Length ? args[n - 1].TypeName : "no value";
+        string got = n <= args.Length ? Vm.Meta.ArgTypeName(args[n - 1]) : "no value";
         throw ArgError(n, fn, $"table expected, got {got}");
     }
 

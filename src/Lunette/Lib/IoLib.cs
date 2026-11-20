@@ -247,7 +247,8 @@ internal sealed class IoLib
 
     private LuaValue[] FileGc(LuaState state, ReadOnlySpan<LuaValue> args)
     {
-        if (args.Length > 0 && args[0].Ref is LuaUserdata { Value: LuaFile f } && !f.IsClosed)
+        if (args.Length == 0 || args[0].Ref is not LuaUserdata { Value: LuaFile }) throw LuaErrors.TypeError(args, 0, "__gc", "FILE*");
+        if (args[0].Ref is LuaUserdata { Value: LuaFile f } && !f.IsClosed)
         {
             try
             {

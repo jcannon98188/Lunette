@@ -17,5 +17,5 @@ internal static class LuaErrors
 
     /// <summary>"bad argument #n to 'fn' (expected expected, got ...)" for a zero-based argument index.</summary>
     public static LuaException TypeError(ReadOnlySpan<LuaValue> args, int index, string fn, string expected) =>
-        ArgError(index + 1, fn, $"{expected} expected, got {(index < args.Length ? Vm.Meta.ObjTypeName(args[index]) : "no value")}");
+        ArgError(index + 1, fn, $"{expected} expected, got {(index >= args.Length ? "no value" : Vm.Meta.ArgTypeName(args[index]))}");
 }

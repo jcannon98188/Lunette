@@ -29,7 +29,7 @@ internal static partial class Interpreter
     /// Calls <paramref name="fn"/> with the first <paramref name="nargs"/> of a, b, c and returns its first result.
     /// Used for metamethods: runs a nested interpreter loop above the current frame's registers.
     /// </summary>
-    public static LuaValue Call1(LuaState state, LuaValue fn, LuaValue a, LuaValue b, LuaValue c, int nargs)
+    public static LuaValue Call1(LuaState state, LuaValue fn, LuaValue a, LuaValue b, LuaValue c, int nargs, bool fromHost = false)
     {
         var co = state.Running;
         int fa = co.CallTop;
@@ -39,7 +39,7 @@ internal static partial class Interpreter
         st[fa + 1] = a;
         st[fa + 2] = b;
         st[fa + 3] = c;
-        int n = CallAt(state, co, fa, nargs);
+        int n = CallAt(state, co, fa, nargs, fromHost);
         co.CallTop = fa;
         return n > 0 ? co.Stack[fa] : default;
     }
@@ -53,13 +53,13 @@ internal static partial class Interpreter
         var st = co.Stack;
         st[fa] = fn;
         args.CopyTo(new Span<LuaValue>(st, fa + 1, args.Length));
-        int n = CallAt(state, co, fa, args.Length);
+        int n = CallAt(state, co, fa, args.Length, true);
         co.CallTop = fa;
         return new ReadOnlySpan<LuaValue>(co.Stack, fa, n).ToArray();
     }
 
     /// <summary>Runs the function at stack index <paramref name="fa"/> to completion; its results land at <paramref name="fa"/>.</summary>
-    private static int CallAt(LuaState state, Coroutine co, int fa, int nargs)
+    private static int CallAt(LuaState state, Coroutine co, int fa, int nargs, bool fromHost = false)
     {
         if (state.NativeDepth >= MaxNativeDepth) throw new LuaException("C stack overflow");
         state.NativeDepth++;
@@ -74,12 +74,24 @@ internal static partial class Interpreter
                 f.Native = true;
                 return Run(state, co, f, stop) - fa;
             }
-            if (!co.Traced) return CallBuiltin(state, co, fa, nargs, -1, null, 0) - fa;
             var bf = (BuiltinFunction)co.Stack[fa].Ref!;
-            TraceBuiltin(state, co, bf, fa + 1 + nargs, true, true);
-            int end = CallBuiltin(state, co, fa, nargs, -1, null, 0);
-            TraceBuiltin(state, co, bf, end, false, true);
-            return end - fa;
+            LuaValue callee = co.Stack[fa];
+            try
+            {
+                if (!co.Traced) return CallBuiltin(state, co, fa, nargs, -1, null, 0) - fa;
+                TraceBuiltin(state, co, bf, fa + 1 + nargs, true, fa + 1, nargs, true);
+                int end = CallBuiltin(state, co, fa, nargs, -1, null, 0);
+                TraceBuiltin(state, co, bf, end, false, fa, end - fa, true);
+                return end - fa;
+            }
+            catch (LuaException ex) when (fromHost && ex.ArgN > 0 && ex.WantsPosition)
+            {
+                // Called from host code there is no call-site name and no Lua position: luaL_argerror uses the global name.
+                ErrorLib.QualifyArgError(state, callee, ex);
+                ex.ArgN = 0;
+                ex.WantsPosition = false;
+                throw;
+            }
         }
         finally
         {
@@ -451,7 +463,7 @@ internal static partial class Interpreter
                         goto newframe;
                     }
                     var bf = (BuiltinFunction)r[fa].Ref!;
-                    if (TMode.Traced) TraceBuiltin(state, co, bf, Math.Max(top, fa + nargs + 1), true);
+                    if (TMode.Traced) TraceBuiltin(state, co, bf, Math.Max(top, fa + nargs + 1), true, fa + 1, nargs);
                     if (bf.Kind != BuiltinKind.None)
                     {
                         Special sp = CallSpecial(state, co, bf.Kind, fa, nargs, wanted, stop, proto, pc - 1);
@@ -473,18 +485,23 @@ internal static partial class Interpreter
                         {
                             r = co.Stack;
                             if (wanted < 0) top = co.ResumeTop;
-                            if (TMode.Traced) TraceBuiltin(state, co, bf, top, false);
+                            if (TMode.Traced) TraceBuiltin(state, co, bf, top, false, fa, wanted < 0 ? top - fa : wanted);
                             r = co.Stack;
                             break;
                         }
                     }
-                    int end = CallBuiltin(state, co, fa, nargs, wanted, proto, pc - 1);
+                    // A traced call keeps every result so the return hook can see them (debug.getinfo "r"); they are trimmed afterwards.
+                    int end = CallBuiltin(state, co, fa, nargs, TMode.Traced ? -1 : wanted, proto, pc - 1);
                     r = co.Stack;
                     if (wanted < 0) top = end;
                     if (TMode.Traced)
                     {
-                        TraceBuiltin(state, co, bf, Math.Max(top, end), false);
+                        TraceBuiltin(state, co, bf, Math.Max(top, end), false, fa, end - fa);
                         r = co.Stack;
+                        if (wanted >= 0)
+                        {
+                            for (int j = end - fa; j < wanted; j++) r[fa + j] = default;
+                        }
                     }
                     else if (co.Traced)
                     {
@@ -518,7 +535,7 @@ internal static partial class Interpreter
                     // Builtins cannot be tail-called in place: run it and let the Return that follows pass on its results.
                     f.Pc = pc;
                     var tbf = (BuiltinFunction)r[fa].Ref!;
-                    if (TMode.Traced) TraceBuiltin(state, co, tbf, Math.Max(top, fa + nargs + 1), true);
+                    if (TMode.Traced) TraceBuiltin(state, co, tbf, Math.Max(top, fa + nargs + 1), true, fa + 1, nargs);
                     if (tbf.Kind != BuiltinKind.None)
                     {
                         Special sp = CallSpecial(state, co, tbf.Kind, fa, nargs, -1, stop, proto, pc - 1);
@@ -542,7 +559,7 @@ internal static partial class Interpreter
                         }
                     }
                     top = CallBuiltin(state, co, fa, nargs, -1, proto, pc - 1);
-                    if (TMode.Traced) TraceBuiltin(state, co, tbf, top, false);
+                    if (TMode.Traced) TraceBuiltin(state, co, tbf, top, false, fa, top - fa);
                     r = co.Stack;
                     break;
                 }
@@ -565,7 +582,7 @@ internal static partial class Interpreter
                     }
                     if (TMode.Traced)
                     {
-                        TraceReturn(state, co, f, pc, Math.Max(top, ra + n));
+                        TraceReturn(state, co, f, pc, Math.Max(top, ra + n), i.A + 1, n);
                         r = co.Stack;
                     }
                     if (f.Cont != Continuation.None)

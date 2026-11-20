@@ -58,6 +58,7 @@ internal static partial class Interpreter
         {
             error = AsLuaException(e).Value;
             co.Depth = depth;
+            co.FaultLine = 0;
             co.CallTop = callTop;
             state.NativeDepth = nativeDepth;
             return false;

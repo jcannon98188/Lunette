@@ -146,3 +146,19 @@ line     = 999
 end_line = 1051
 anchor   = "without debug info"
 note     = "Lunette has no bytecode format: string.dump is unsupported, so loading and inspecting a dumped chunk cannot be tested."
+
+[[waiver]]
+file     = "errors.lua"
+reason   = "no-bytecode"
+line     = 279
+end_line = 289
+anchor   = "local f = function (a)"
+note     = "Lunette has no bytecode format: string.dump is unsupported, so loading and inspecting a dumped chunk cannot be tested."
+
+[[waiver]]
+file     = "all.lua"
+reason   = "no-bytecode"
+line     = 150
+end_line = 151
+anchor   = "string.dump"
+note     = "Lunette has no bytecode format: string.dump is unsupported, so loading and inspecting a dumped chunk cannot be tested."

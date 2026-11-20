@@ -133,8 +133,12 @@ internal sealed class GcState
             ran++;
             bool ok;
             LuaValue error;
+            Coroutine running = _state.Running;
+            int savedFrame = running.FinalizerFrame;
+            running.FinalizerFrame = running.Depth; // debug.getinfo names this call "__gc"
             try { ok = Interpreter.TryCall1(_state, tm, LuaValue.FromObject(target), out error); }
             catch (LuaExitException) when (_closing) { continue; } // os.exit(_, true) while closing: the rest still run, as lua_close would
+            finally { running.FinalizerFrame = savedFrame; }
             if (!ok)
                 Warning("error in __gc (" + (error.Ref is byte[] s ? new LuaString(s).ToString() : "error object is not a string") + ")");
         }

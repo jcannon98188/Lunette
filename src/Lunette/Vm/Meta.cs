@@ -94,6 +94,9 @@ internal static class Meta
         return v.TypeName;
     }
 
+    /// <summary>The "got X" of an argument error (luaL_typeerror): __name when present, "light userdata" for upvalue ids.</summary>
+    public static string ArgTypeName(in LuaValue v) => v.Ref is UpVal ? "light userdata" : ObjTypeName(v);
+
     /// <summary>Resolves <c>t[key]</c>: returns false with the value, or true with the __index function to call.</summary>
     public static bool PrepareIndex(LuaState state, LuaValue t, LuaValue key, Proto? p, int pc, out LuaValue result, out MetaCall mc)
     {

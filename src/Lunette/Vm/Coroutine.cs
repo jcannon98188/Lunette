@@ -12,6 +12,9 @@ internal sealed class UpVal
 
     public LuaValue Get() => Owner is null ? Value : Owner.Stack[Index];
 
+    /// <summary>An upvalue id is what PUC calls a light userdata (debug.upvalueid), so it prints as one.</summary>
+    public override string ToString() => $"userdata: 0x{System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(this):x8}";
+
     public void Set(LuaValue v)
     {
         if (Owner is null) Value = v;
@@ -140,6 +143,17 @@ internal sealed class Coroutine
     public int HookFrameIndex = -1;
     /// <summary>The host function whose call or return event is being reported, or nil.</summary>
     public LuaValue HookBuiltin;
+    /// <summary>Frames index of the running <c>__gc</c> finalizer called from the collector, or -1.</summary>
+    public int FinalizerFrame = -1;
+    /// <summary>Frame count at which a pcall/xpcall is running a host function directly (no Frame of its own), or -1; for tracebacks.</summary>
+    public int HostProtectDepth = -1;
+    public bool HostProtectX;
+    /// <summary>
+    /// The values a call or return hook is transferring (debug.getinfo "r"): <see cref="HookXferCount"/> values starting at local index
+    /// <see cref="HookXferFirst"/>. For a host function they sit on the stack from <see cref="HookXferBase"/>; for a Lua function the index
+    /// names registers and the base is -1.
+    /// </summary>
+    public int HookXferFirst, HookXferCount, HookXferBase = -1;
 
     /// <summary>The error or assert builtin that is raising the error being unwound, so a handler's traceback lists it.</summary>
     public LuaValue RaisingBuiltin;

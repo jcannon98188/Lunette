@@ -44,6 +44,9 @@ internal sealed class BuiltinFunction(BuiltinBody body, BuiltinKind kind = Built
     /// <summary>True for a host closure that owns state (such as a <c>coroutine.wrap</c> function), which a weak table may drop; library functions are never collected.</summary>
     public bool Collectable { get; init; }
 
+    /// <summary>How many (unnamed, opaque) upvalues PUC gives the equivalent C closure; debug.getupvalue reports them with the empty name.</summary>
+    public byte NUpvalues { get; init; }
+
     public LuaValue[]? Invoke(LuaState state, ReadOnlySpan<LuaValue> args) => body(state, args);
 }
 

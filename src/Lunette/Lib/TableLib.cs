@@ -127,7 +127,7 @@ internal static class TableLib
         long e = args.Length > 2 && !args[2].IsNil ? CheckInt(args, 2, "unpack") : Len(state, t);
         if (i > e) return [];
         ulong n = (ulong)e - (ulong)i;
-        if (n >= 1_000_000UL) throw LuaErrors.Error("too many results to unpack");
+        if (n >= 1_000_000UL || (long)n + 1 + state.Running.CallTop > Coroutine.StackLimit) throw LuaErrors.Error("too many results to unpack");
         var res = new LuaValue[(int)n + 1];
         for (int k = 0; k < res.Length; k++) res[k] = Geti(state, t, i + k);
         return res;
@@ -179,7 +179,7 @@ internal static class TableLib
                 if (a.IsNumber && b.IsNumber) return Compare.NumberLessThan(a, b);
                 return Meta.Order(State, TagMethod.Lt, a, b, null, 0);
             }
-            return !Interpreter.Call1(State, Cmp, a, b, default, 2).IsFalsy;
+            return !Interpreter.Call1(State, Cmp, a, b, default, 2, true).IsFalsy;
         }
 
         public LuaValue Get(long i) => Geti(State, Table, i);

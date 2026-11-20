@@ -27,3 +27,6 @@ files.lua
 main.lua
 calls.lua
 coroutine.lua
+db.lua
+errors.lua
+locals.lua

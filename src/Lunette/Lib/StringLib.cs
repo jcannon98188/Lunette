@@ -480,7 +480,7 @@ internal static class StringLib
             }
             gm.Pos = src.Length + 1;
             return Rets.One(default);
-        })));
+        }) { NUpvalues = 3 })); // the subject, the pattern and the match state
     }
 
     private static LuaValue[] GSub(LuaState state, ReadOnlySpan<LuaValue> args)

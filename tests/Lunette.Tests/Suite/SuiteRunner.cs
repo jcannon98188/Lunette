@@ -76,6 +76,19 @@ public static class SuiteRunner
             CopyDirectory(suiteDir ?? SuiteDir, temp);
             // attrib.lua writes libs/P1/*.lua; upstream ships that directory empty, which a vendored copy cannot carry.
             Directory.CreateDirectory(Path.Combine(temp, "libs", "P1"));
+            // all.lua runs the other files itself, so they need their waivers (and whole-file waivers) applied too.
+            if (file == "all.lua")
+            {
+                foreach (string other in Directory.GetFiles(temp, "*.lua"))
+                {
+                    string name = Path.GetFileName(other);
+                    if (name == "all.lua") continue;
+                    string text = waivers.WholeFileWaiver(name) is null
+                        ? waivers.ApplyOverlays(name, File.ReadAllText(other, Encoding.Latin1))
+                        : "";
+                    File.WriteAllText(other, text, Encoding.Latin1);
+                }
+            }
             // Latin1 maps every byte to one char and back, so the suite's non-UTF-8 sources reach the engine byte for byte.
             string path = Path.Combine(temp, file);
             string source = waivers.ApplyOverlays(file, File.ReadAllText(path, Encoding.Latin1));

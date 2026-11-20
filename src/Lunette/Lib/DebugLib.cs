@@ -32,7 +32,7 @@ internal static class DebugLib
         Add(t, "gethook", GetHook);
         Add(t, "getmetatable", GetMetatable);
         Add(t, "setmetatable", SetMetatable);
-        Add(t, "getregistry", static (st, _) => [LuaValue.FromTable(st.Registry ??= new LuaTable())]);
+        Add(t, "getregistry", static (st, _) => [LuaValue.FromTable(Registry(st))]);
         Add(t, "getuservalue", GetUserValue);
         Add(t, "setuservalue", SetUserValue);
         Add(t, "debug", DebugPrompt);
@@ -46,6 +46,20 @@ internal static class DebugLib
 
     private static void Add(LuaTable t, string name, BuiltinBody body) =>
         t.Set(LuaValue.FromString(name), LuaValue.FromObject(new BuiltinFunction(body)));
+
+    /// <summary>The registry table. It carries a weak-keyed _HOOKKEY table as PUC does, although Lunette keeps hooks on the coroutine itself.</summary>
+    private static LuaTable Registry(LuaState st)
+    {
+        if (st.Registry is { } r) return r;
+        r = st.Registry = new LuaTable();
+        var hooks = new LuaTable();
+        var meta = new LuaTable();
+        meta.Set(Str("__mode"), Str("k"));
+        hooks.Metatable = meta;
+        st.Gc.OnSetMetatable(hooks, meta);
+        r.Set(Str("_HOOKKEY"), LuaValue.FromTable(hooks));
+        return r;
+    }
 
     private static LuaValue Str(string s) => LuaValue.FromString(s);
 
@@ -75,7 +89,16 @@ internal static class DebugLib
     private static LuaValue Lookup(LuaState state, string lib, string name)
     {
         if (lib.Length == 0) return state.GetGlobal(name);
-        return state.GetGlobal(lib).Ref is LuaTable t ? t.Get(Str(name)) : default;
+        return LibTable(state, lib) is { } t ? t.Get(Str(name)) : default;
+    }
+
+    /// <summary>A standard library table: the global, or (a suite may clear it, as all.lua does for debug) the one in package.loaded.</summary>
+    private static LuaTable? LibTable(LuaState state, string lib)
+    {
+        if (state.GetGlobal(lib).Ref is LuaTable t) return t;
+        return state.GetGlobal("package").Ref is LuaTable pkg && pkg.Get(Str("loaded")).Ref is LuaTable loaded
+            ? loaded.Get(Str(lib)).Ref as LuaTable
+            : null;
     }
 
     internal static List<Level> Levels(LuaState state, Coroutine co, LuaValue self, bool includeSelf)
@@ -91,6 +114,7 @@ internal static class DebugLib
         {
             if (raiseInline && i == co.RaisingDepth - 1) list.Add(new Level(-1, co.RaisingBuiltin));
             Frame fr = co.Frames[i]!;
+            if (i == co.HostProtectDepth - 1) list.Add(new Level(-1, Lookup(state, "", co.HostProtectX ? "xpcall" : "pcall")));
             // A protected call whose __close handlers are running has already unwound: its callee is gone, the handlers' caller is the pcall.
             if (!fr.Closing) list.Add(new Level(i, LuaValue.FromObject(fr.Closure)));
             if (inHook && i == co.HookFrameIndex && !co.HookBuiltin.IsNil) list.Add(new Level(-1, co.HookBuiltin));
@@ -137,6 +161,7 @@ internal static class DebugLib
         {
             Frame fr = co.Frames[l.Frame]!;
             if (fr.IsTail) return (null, null);
+            if (l.Frame == co.FinalizerFrame) return ("metamethod", "__gc");
             if (!co.AllowHook && l.Frame == co.HookFrameIndex) return ("hook", "?");
             if (fr.PcallKind != 0 || (fr.Native && fr.Cont == Continuation.None)) return (null, null);
             if (caller is null || lv[i + 1].Frame != l.Frame - 1) return (null, null);
@@ -248,7 +273,7 @@ internal static class DebugLib
                     Put(t, "currentline", LuaValue.FromInteger(fr is null ? -1 : CurrentLine(co, fr, levels![idx].Frame)));
                     break;
                 case 'u':
-                    Put(t, "nups", LuaValue.FromInteger((fnv.Ref as LuaClosure)?.Upvals.Length ?? 0));
+                    Put(t, "nups", LuaValue.FromInteger(fnv.Ref is LuaClosure uc ? uc.Upvals.Length : (fnv.Ref as BuiltinFunction)?.NUpvalues ?? 0));
                     Put(t, "nparams", LuaValue.FromInteger(p?.NumParams ?? 0));
                     Put(t, "isvararg", LuaValue.FromBoolean(p?.IsVararg ?? true));
                     break;
@@ -260,9 +285,12 @@ internal static class DebugLib
                     break;
                 }
                 case 'r':
-                    Put(t, "ftransfer", LuaValue.FromInteger(0));
-                    Put(t, "ntransfer", LuaValue.FromInteger(0));
+                {
+                    bool hooked = idx >= 0 && idx == HookedLevel(co, levels!) && co.HookXferCount > 0;
+                    Put(t, "ftransfer", LuaValue.FromInteger(hooked ? co.HookXferFirst : 0));
+                    Put(t, "ntransfer", LuaValue.FromInteger(hooked ? co.HookXferCount : 0));
                     break;
+                }
                 case 't':
                     Put(t, "istailcall", LuaValue.FromBoolean(fr is { IsTail: true }));
                     break;
@@ -330,6 +358,22 @@ internal static class DebugLib
         if (msg is not null) sb.Append(msg).Append('\n');
         sb.Append("stack traceback:");
         int last = lv.Count - 1;
+        // The CLI driver (a Lua chunk named "=lunette") stands where lua.c's C code does: its frames end the traceback at "[C]: in ?".
+        bool driverTail = false;
+        {
+            int o = last;
+            bool sawDriver = false;
+            for (; o >= 0; o--)
+            {
+                if (lv[o].Fn.Ref is LuaClosure { Proto.ChunkName: "=lunette" }) sawDriver = true;
+                else if (lv[o].Fn.Ref is not BuiltinFunction) break;
+            }
+            if (sawDriver && o >= 0)
+            {
+                last = o;
+                driverTail = true;
+            }
+        }
         int limit2show = last - level > Levels1 + Levels2 ? Levels1 : -1;
         while (level <= last)
         {
@@ -358,6 +402,7 @@ internal static class DebugLib
             else sb.Append('?');
             if (l.Frame >= 0 && co.Frames[l.Frame]!.IsTail) sb.Append("\n\t(...tail calls...)");
         }
+        if (driverTail) sb.Append("\n\t[C]: in ?");
         return sb.ToString();
     }
 
@@ -372,7 +417,7 @@ internal static class DebugLib
         }
         foreach (string lib in LibNames)
         {
-            if (state.GetGlobal(lib).Ref is not LuaTable t) continue;
+            if (LibTable(state, lib) is not { } t) continue;
             LuaValue key = default;
             while (t.Next(key, out LuaValue k, out LuaValue v))
             {
@@ -384,6 +429,15 @@ internal static class DebugLib
     }
 
     // ---- locals ----
+
+    /// <summary>The level of the function a running call or return hook reports (the one just below the hook function), or -1.</summary>
+    private static int HookedLevel(Coroutine co, List<Level> levels)
+    {
+        if (co.AllowHook || co.HookFrameIndex < 0) return -1;
+        for (int i = 0; i + 1 < levels.Count; i++)
+            if (levels[i].Frame == co.HookFrameIndex) return i + 1;
+        return -1;
+    }
 
     /// <summary>Finds the n-th local (or vararg, for n &lt; 0, or temporary) of a Lua level; returns its name and stack slot.</summary>
     private static string? LocalAt(Coroutine co, Level l, int n, out int slot)
@@ -411,6 +465,9 @@ internal static class DebugLib
         }
         int limit = fr.Base + p.MaxStack;
         if (pc < p.Code.Length && p.Code[pc].Op is OpCode.Call or OpCode.TailCall) limit = fr.Base + p.Code[pc].A;
+        // A return hook may report values (an open vararg, say) that sit above the function's declared registers.
+        if (co.HookXferCount > 0 && !co.AllowHook && l.Frame == co.HookFrameIndex - 1)
+            limit = Math.Max(limit, fr.Base + co.HookXferFirst + co.HookXferCount - 1);
         if (limit - fr.Base >= n)
         {
             slot = fr.Base + n - 1;
@@ -440,6 +497,17 @@ internal static class DebugLib
         long level = LibArgs.CheckInteger("getlocal", args, a);
         var levels = Levels(state, co, Lookup(state, "debug", "getlocal"), co == state.Running);
         if (level < 0 || level >= levels.Count) throw LuaErrors.ArgError(a + 1, "getlocal", "level out of range");
+        if (level == HookedLevel(co, levels) && co.HookXferBase >= 0 && levels[(int)level].Frame < 0)
+        {
+            // The function a call or return hook reports is a host function: its values are the transferred stack slots.
+            if (n < 1 || n > co.HookXferFirst + co.HookXferCount - 1) return [default];
+            return [Str("(C temporary)"), co.Stack[co.HookXferBase + n - 1]];
+        }
+        if (level == 0 && co == state.Running)
+        {
+            // Level 0 is getlocal itself: its own arguments are the C function's stack slots.
+            return n >= 1 && n <= args.Length ? [Str("(C temporary)"), args[n - 1]] : [default];
+        }
         string? name = LocalAt(co, levels[(int)level], n, out int slot);
         if (name is null) return [default];
         return [Str(name), co.Stack[slot]];
@@ -477,7 +545,8 @@ internal static class DebugLib
     {
         int n = (int)LibArgs.CheckInteger("getupvalue", args, 1);
         LuaClosure? cl = ClosureArg(args, 0, "getupvalue");
-        if (cl is null || n < 1 || n > cl.Upvals.Length) return [];
+        if (cl is null) return args[0].Ref is BuiltinFunction { NUpvalues: > 0 } bf && n >= 1 && n <= bf.NUpvalues ? [Str(""), default] : [];
+        if (n < 1 || n > cl.Upvals.Length) return [];
         return [Str(UpvalName(cl, n)), cl.Upvals[n - 1].Get()];
     }
 
@@ -523,7 +592,7 @@ internal static class DebugLib
     private static LuaValue[] GetUserValue(LuaState state, ReadOnlySpan<LuaValue> args)
     {
         long n = LibArgs.OptInteger("getuservalue", args, 1, 1);
-        if (args.Length == 0 || args[0].Ref is not LuaUserdata u) return [default];
+        if (args.Length == 0 || args[0].Ref is not LuaUserdata u || u.Value is LuaFile) return [default]; // files carry no user values
         return n == 1 ? [u.UserValue, LuaValue.FromBoolean(true)] : [default];
     }
 
@@ -532,7 +601,7 @@ internal static class DebugLib
         if (args.Length == 0 || args[0].Ref is not LuaUserdata u) throw LuaErrors.TypeError(args, 0, "setuservalue", "userdata");
         LibArgs.CheckAny("setuservalue", args, 1);
         long n = LibArgs.OptInteger("setuservalue", args, 2, 1);
-        if (n != 1) return [default];
+        if (n != 1 || u.Value is LuaFile) return [default];
         u.UserValue = args[1];
         return [args[0]];
     }

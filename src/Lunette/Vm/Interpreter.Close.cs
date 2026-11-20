@@ -30,6 +30,7 @@ internal static partial class Interpreter
             co.Tbc.RemoveAt(co.Tbc.Count - 1);
             LuaValue v = co.Stack[idx];
             LuaValue tm = Meta.GetTagMethod(state, v, TagMethod.Close);
+            if (tm.Ref is BuiltinFunction { Kind: BuiltinKind.Yield } yieldFn) tm = LuaValue.FromObject(state.Trampoline(yieldFn, "host")); // lets coroutine.yield itself be the handler
             if (tm.Ref is not LuaClosure cl)
             {
                 int saved = co.CallTop;
@@ -97,6 +98,7 @@ internal static partial class Interpreter
                 co.Tbc.RemoveAt(co.Tbc.Count - 1);
                 LuaValue v = co.Stack[idx];
                 LuaValue tm = Meta.GetTagMethod(state, v, TagMethod.Close);
+                if (tm.Ref is BuiltinFunction { Kind: BuiltinKind.Yield } yieldFn) tm = LuaValue.FromObject(state.Trampoline(yieldFn, "host"));
                 int fa = idx + 2;
                 if (tm.Ref is LuaClosure cl)
                 {

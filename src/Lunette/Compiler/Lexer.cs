@@ -46,6 +46,8 @@ internal sealed class Lexer(byte[] bytes, string chunkName, StringCache cache)
         }
     }
 
+    private int _tokStart;
+
     public string ChunkName { get; } = chunkName;
 
     public LuaException Error(string msg, int line) => new($"{DisplayName(ChunkName)}:{line}: {msg}");
@@ -56,6 +58,7 @@ internal sealed class Lexer(byte[] bytes, string chunkName, StringCache cache)
     {
         SkipTrivia();
         var t = new Token { Line = _line, Text = "" };
+        _tokStart = _pos;
         if (_pos >= src.Length) { t.Kind = Tok.Eof; t.Text = "<eof>"; return t; }
         char c = src[_pos];
         if (char.IsAsciiLetter(c) || c == '_')
@@ -130,7 +133,7 @@ internal sealed class Lexer(byte[] bytes, string chunkName, StringCache cache)
                 if (_pos < src.Length && src[_pos] == '.') { _pos++; t.Kind = Tok.Concat; t.Text = ".."; return t; }
                 t.Kind = Tok.Dot; break;
             case ';': t.Kind = Tok.Semi; break;
-            default: throw Error($"unexpected symbol near '{c}'", _line);
+            default: throw Error($"unexpected symbol near '{(c is >= ' ' and <= '~' ? c.ToString() : "<\\" + (int)c + ">")}'", _line);
         }
         t.Text = c.ToString();
         return t;
@@ -185,7 +188,7 @@ internal sealed class Lexer(byte[] bytes, string chunkName, StringCache cache)
         }
         if (isComment) return t;
         t.Kind = Tok.String;
-        t.Text = "string";
+        t.Text = src.Slice(_tokStart, _pos); // error messages quote the raw token text
         t.Str = InternBuffer();
         return t;
     }
@@ -320,7 +323,7 @@ internal sealed class Lexer(byte[] bytes, string chunkName, StringCache cache)
             }
         }
         t.Kind = Tok.String;
-        t.Text = "string";
+        t.Text = src.Slice(_tokStart, _pos);
         t.Str = InternBuffer();
         return t;
     }

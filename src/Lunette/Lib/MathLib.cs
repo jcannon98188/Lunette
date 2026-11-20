@@ -60,12 +60,12 @@ internal sealed class MathLib
         LuaErrors.ArgError(index + 1, fn, msg);
 
     private static LuaException TypeError(string fn, LuaValue[] args, int index, string expected) =>
-        ArgError(fn, index, $"{expected} expected, got {(index < args.Length ? args[index].TypeName : "no value")}");
+        ArgError(fn, index, $"{expected} expected, got {(index < args.Length ? Vm.Meta.ArgTypeName(args[index]) : "no value")}");
 
     private static LuaValue Number(string fn, ReadOnlySpan<LuaValue> args, int index)
     {
         if (index < args.Length && StringConv.TryToNumber(args[index], out LuaValue n)) return n;
-        throw ArgError(fn, index, $"number expected, got {(index < args.Length ? args[index].TypeName : "no value")}");
+        throw ArgError(fn, index, $"number expected, got {(index < args.Length ? Vm.Meta.ArgTypeName(args[index]) : "no value")}");
     }
 
     private static double Num(string fn, ReadOnlySpan<LuaValue> args, int index)

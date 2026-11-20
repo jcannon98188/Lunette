@@ -141,6 +141,7 @@ internal static partial class Interpreter
                 {
                     value = AsLuaException(e).Value;
                     co.Depth = depth;
+                    co.FaultLine = 0;
                 }
             }
             return LuaValue.FromString("error in error handling");

@@ -55,7 +55,7 @@ internal static class ErrorLib
     /// A library function called straight from pcall has no call-site name, so luaL_argerror falls back to the qualified
     /// global name: "bad argument #1 to 'string.rep'" rather than 'rep'.
     /// </summary>
-    private static void QualifyArgError(LuaState state, LuaValue fn, LuaException ex)
+    internal static void QualifyArgError(LuaState state, LuaValue fn, LuaException ex)
     {
         const string Head = "bad argument #";
         if (fn.Ref is not BuiltinFunction || !ex.WantsPosition || !ex.Value.IsString) return;
@@ -78,8 +78,15 @@ internal static class ErrorLib
         LuaValue handler = xpcall ? args[1] : default;
         int level = co.CallTop;
         int depth = co.Depth;
+        int savedHost = co.HostProtectDepth;
+        bool savedHostX = co.HostProtectX;
         try
         {
+            if (args[0].Ref is BuiltinFunction)
+            {
+                co.HostProtectDepth = depth;
+                co.HostProtectX = xpcall;
+            }
             LuaValue[] res = Interpreter.CallValues(state, args[0], args[fixedArgs..]);
             var ret = new LuaValue[res.Length + 1];
             ret[0] = LuaValue.FromBoolean(true);
@@ -93,9 +100,15 @@ internal static class ErrorLib
             LuaValue value = ex.Value;
             if (xpcall) value = Interpreter.RunHandler(state, co, handler, value);
             co.Depth = depth;
+            co.FaultLine = 0; // the fault line belongs to frames that are gone now
             co.Close(level);
             co.CallTop = level;
             return Rets.Two(LuaValue.FromBoolean(false), value);
+        }
+        finally
+        {
+            co.HostProtectDepth = savedHost;
+            co.HostProtectX = savedHostX;
         }
     }
 }

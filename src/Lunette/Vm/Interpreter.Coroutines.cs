@@ -194,7 +194,7 @@ internal static partial class Interpreter
         if (co.YieldFn is { } yf)
         {
             co.YieldFn = null;
-            if (co.Traced) TraceBuiltin(state, co, yf, top, false);
+            if (co.Traced) TraceBuiltin(state, co, yf, top, false, 0, 0);
         }
         return true;
     }
