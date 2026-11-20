@@ -14,6 +14,21 @@ public static class SuiteRunner
     public static readonly TimeSpan FileTimeout = TimeSpan.FromSeconds(60);
     private static readonly object CwdLock = new();
 
+    /// <summary>
+    /// The only sanctioned way for a test to change the process working directory: serialized against every other
+    /// such change (the suite runner's included) and restored afterwards. Tests must not use cwd-relative paths.
+    /// </summary>
+    public static void WithWorkingDirectory(string dir, Action body)
+    {
+        lock (CwdLock)
+        {
+            string previous = Environment.CurrentDirectory;
+            Environment.CurrentDirectory = dir;
+            try { body(); }
+            finally { Environment.CurrentDirectory = previous; }
+        }
+    }
+
     public static string RepoRoot { get; } = FindRepoRoot();
     public static string SuiteDir => Path.Combine(RepoRoot, "tests", "lua-suite");
     public static string WaiverPath => Path.Combine(RepoRoot, "tests", "suite", "waivers.toml");
