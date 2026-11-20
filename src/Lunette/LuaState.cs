@@ -7,6 +7,7 @@ namespace Lunette;
 public sealed class LuaState
 {
     internal readonly Dictionary<string, LuaValue> Globals = new();
+    internal readonly Coroutine Main = new();
 
     public LuaState()
     {
@@ -19,6 +20,14 @@ public sealed class LuaState
                 o.Write(args[i].ToString());
             }
             o.Write(o.NewLine);
+            return null;
+        }));
+        Globals["assert"] = LuaValue.FromObject(new BuiltinFunction(static (_, args) =>
+        {
+            if (args.Length == 0) throw new LuaException("bad argument #1 to 'assert' (value expected)");
+            if (args[0].IsFalsy)
+                throw new LuaException(args.Length > 1 ? args[1].ToString() : "assertion failed!");
+            return args.ToArray();
         }));
     }
 

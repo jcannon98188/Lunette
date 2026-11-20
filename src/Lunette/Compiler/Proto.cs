@@ -4,10 +4,12 @@ internal enum OpCode : byte
 {
     Move,      // R[A] = R[B]
     LoadK,     // R[A] = K[Bx]
-    LoadNil,   // R[A] = nil
+    LoadNil,   // R[A .. A+B] = nil
     LoadBool,  // R[A] = (B != 0)
     GetGlobal, // R[A] = G[Names[Bx]]
     SetGlobal, // G[Names[Bx]] = R[A]
+    GetUpval,  // R[A] = Upval[B]
+    SetUpval,  // Upval[B] = R[A]
     Add,       // R[A] = R[B] + R[C]
     Sub,
     Mul,
@@ -16,11 +18,23 @@ internal enum OpCode : byte
     Mod,
     Pow,
     Unm,       // R[A] = -R[B]
-    Call,      // R[A](R[A+1 .. A+B]) ; no results kept
-    Return,
+    Not,       // R[A] = not R[B]
+    Eq,        // R[A] = R[B] == R[C]
+    Lt,        // R[A] = R[B] < R[C]
+    Le,        // R[A] = R[B] <= R[C]
+    Test,      // if truthy(R[A]) == (C != 0) then run the next instruction (a Jmp) else skip it
+    Jmp,       // pc = Ax (absolute)
+    Call,      // R[A .. A+C-2] = R[A](R[A+1 .. A+B-1]) ; B == 0: args up to top ; C == 0: results set top
+    TailCall,  // return R[A](R[A+1 .. A+B-1])
+    Return,    // return R[A .. A+B-2] ; B == 0: up to top
+    ForPrep,   // prepare numeric loop at R[A..A+3]; if it runs skip the next instruction (a Jmp to the exit)
+    ForLoop,   // step numeric loop at R[A..A+3]; if it continues run the next instruction (a Jmp back), else skip it
+    Closure,   // R[A] = closure(Protos[Bx])
+    Close,     // close upvalues >= R[A]
+    Vararg,    // R[A .. A+C-2] = ... ; C == 0: all, sets top
 }
 
-/// <summary>One 32-bit instruction: op(8) A(8) B(8) C(8); Bx overlays B and C as 16 bits.</summary>
+/// <summary>One 32-bit instruction: op(8) A(8) B(8) C(8); Bx overlays B and C as 16 bits; Ax is the upper 24 bits.</summary>
 internal readonly record struct Instruction(uint Raw)
 {
     public OpCode Op => (OpCode)(Raw & 0xFF);
@@ -28,13 +42,19 @@ internal readonly record struct Instruction(uint Raw)
     public int B => (int)((Raw >> 16) & 0xFF);
     public int C => (int)((Raw >> 24) & 0xFF);
     public int Bx => (int)(Raw >> 16);
+    public int Ax => (int)(Raw >> 8);
 
     public static Instruction Abc(OpCode op, int a, int b, int c) =>
         new((uint)op | ((uint)a << 8) | ((uint)b << 16) | ((uint)c << 24));
 
     public static Instruction ABx(OpCode op, int a, int bx) =>
         new((uint)op | ((uint)a << 8) | ((uint)bx << 16));
+
+    public static Instruction JmpTo(int target) => new((uint)OpCode.Jmp | ((uint)target << 8));
 }
+
+/// <summary>Where a closure finds one captured variable: a register of the enclosing function, or one of its upvalues.</summary>
+internal readonly record struct UpvalDesc(bool InStack, int Index);
 
 /// <summary>The compiled bytecode form of one Lua function body.</summary>
 internal sealed class Proto
@@ -45,4 +65,8 @@ internal sealed class Proto
     public required int MaxStack { get; init; }
     public required int[] Lines { get; init; }
     public required string ChunkName { get; init; }
+    public required int NumParams { get; init; }
+    public required bool IsVararg { get; init; }
+    public required UpvalDesc[] Upvalues { get; init; }
+    public required Proto[] Protos { get; init; }
 }

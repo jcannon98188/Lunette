@@ -45,6 +45,25 @@ public readonly struct LuaValue
 
     internal static LuaValue FromObject(object o) => new(o, 0);
 
+    /// <summary>Primitive equality: no metamethods; an integer equals a float of the same mathematical value.</summary>
+    internal static bool RawEquals(LuaValue a, LuaValue b)
+    {
+        if (a.IsInteger)
+        {
+            if (b.IsInteger) return a.Bits == b.Bits;
+            return b.IsFloat && FloatEqualsInteger(b.AsFloat, a.Bits);
+        }
+        if (a.IsFloat)
+        {
+            if (b.IsFloat) return a.AsFloat == b.AsFloat;
+            return b.IsInteger && FloatEqualsInteger(a.AsFloat, b.Bits);
+        }
+        return ReferenceEquals(a.Ref, b.Ref);
+    }
+
+    private static bool FloatEqualsInteger(double f, long i) =>
+        f >= -9223372036854775808.0 && f < 9223372036854775808.0 && Math.Floor(f) == f && (long)f == i;
+
     internal string TypeName =>
         Ref switch
         {

@@ -6,6 +6,8 @@ internal enum Tok
 {
     Eof, Name, Integer, Float,
     Local, Nil, True, False,
+    If, Then, Else, Elseif, End, While, Do, Repeat, Until, For, Function, Return, Break, And, Or, Not,
+    Eq, Ne, Lt, Le, Gt, Ge, Ellipsis,
     Plus, Minus, Star, Slash, DSlash, Percent, Caret,
     LParen, RParen, Comma, Assign, Semi,
 }
@@ -44,6 +46,10 @@ internal sealed class Lexer(string src, string chunkName)
             t.Kind = t.Text switch
             {
                 "local" => Tok.Local, "nil" => Tok.Nil, "true" => Tok.True, "false" => Tok.False,
+                "if" => Tok.If, "then" => Tok.Then, "else" => Tok.Else, "elseif" => Tok.Elseif, "end" => Tok.End,
+                "while" => Tok.While, "do" => Tok.Do, "repeat" => Tok.Repeat, "until" => Tok.Until, "for" => Tok.For,
+                "function" => Tok.Function, "return" => Tok.Return, "break" => Tok.Break,
+                "and" => Tok.And, "or" => Tok.Or, "not" => Tok.Not,
                 _ => Tok.Name,
             };
             return t;
@@ -64,7 +70,21 @@ internal sealed class Lexer(string src, string chunkName)
             case '(': t.Kind = Tok.LParen; break;
             case ')': t.Kind = Tok.RParen; break;
             case ',': t.Kind = Tok.Comma; break;
-            case '=': t.Kind = Tok.Assign; break;
+            case '=':
+                if (_pos < src.Length && src[_pos] == '=') { _pos++; t.Kind = Tok.Eq; t.Text = "=="; return t; }
+                t.Kind = Tok.Assign; break;
+            case '~':
+                if (_pos < src.Length && src[_pos] == '=') { _pos++; t.Kind = Tok.Ne; t.Text = "~="; return t; }
+                throw Error("unexpected symbol near '~'", _line);
+            case '<':
+                if (_pos < src.Length && src[_pos] == '=') { _pos++; t.Kind = Tok.Le; t.Text = "<="; return t; }
+                t.Kind = Tok.Lt; break;
+            case '>':
+                if (_pos < src.Length && src[_pos] == '=') { _pos++; t.Kind = Tok.Ge; t.Text = ">="; return t; }
+                t.Kind = Tok.Gt; break;
+            case '.':
+                if (_pos + 1 < src.Length && src[_pos] == '.' && src[_pos + 1] == '.') { _pos += 2; t.Kind = Tok.Ellipsis; t.Text = "..."; return t; }
+                throw Error("unexpected symbol near '.'", _line);
             case ';': t.Kind = Tok.Semi; break;
             default: throw Error($"unexpected symbol near '{c}'", _line);
         }
