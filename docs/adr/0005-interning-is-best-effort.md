@@ -1,0 +1,3 @@
+# String interning is a best-effort optimisation, not an invariant
+
+Short strings go through a per-state bounded 4-way set-associative strong cache, and equality falls back to hash, length and bytes when pointers differ. PUC guarantees interning, but a weak intern table on the .NET GC is costly and fragile; making interning optional removes that lifetime problem. CI variants (capacity-1 cache, constant hash) prove correctness without interning. Source: [Short-string intern table lifetime and weakness](../../.tasklog/lua-engine-spec/tickets/13-short-string-intern-table-lifetime-and-weakness.md).
