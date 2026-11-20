@@ -193,6 +193,13 @@ public sealed partial class LuaState : IDisposable
     private void RunTopLevel(Proto proto)
     {
         ThrowIfAborted();
+        // Called from a host function that is itself running under Lua: Execute resets the main stack, which would destroy the
+        // caller's live frames (and it ignores the running coroutine), so run the chunk as an ordinary nested call.
+        if (_runDepth > 0)
+        {
+            Call(NewMainClosure(proto, LuaValue.FromTable(Globals)));
+            return;
+        }
         BeginHostRun();
         try { Interpreter.Execute(this, proto); }
         finally { EndRun(); }
