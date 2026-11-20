@@ -306,6 +306,7 @@ internal static class StringLib
                     {
                         LuaString s = Meta.ToStringValue(state, args[arg]);
                         ReadOnlySpan<byte> sb = s.Bytes;
+                        if (sb.Length >= BigAppend) state.CheckAlloc((long)b.Length + sb.Length);
                         if (!hasMods)
                         {
                             b.Append(sb);
@@ -328,6 +329,7 @@ internal static class StringLib
                         throw InvalidConversion(f, specStart, i);
                 }
             }
+            state.CheckAlloc(b.Length);
             return One(LuaValue.FromString(b.ToLuaString(state.Strings)));
         }
         finally
@@ -336,11 +338,15 @@ internal static class StringLib
         }
     }
 
+    /// <summary>An appended piece at least this long gets a memory-cap pre-check (<see cref="LuaState.CheckAlloc"/>) before it is copied.</summary>
+    private const int BigAppend = 4096;
+
     private static void AddQuoted(LuaState state, ref ByteBuilder b, LuaValue v, int argNumber)
     {
         if (v.Ref is byte[] raw)
         {
             ReadOnlySpan<byte> s = new LuaString(raw).Bytes;
+            if (s.Length >= BigAppend) state.CheckAlloc((long)b.Length + s.Length * 2L);
             b.Append((byte)'"');
             for (int i = 0; i < s.Length; i++)
             {
@@ -516,12 +522,14 @@ internal static class StringLib
                     n++;
                     changed |= AddValue(state, ref b, ms, pos, e, repl, isString ? replStr.Bytes : default, isString);
                     pos = lastMatch = e;
+                    if (b.Length >= BigAppend) state.CheckAlloc(b.Length);
                 }
                 else if (pos < src.Length) b.Append(src[pos++]);
                 else break;
                 if (anchor) break;
             }
             if (pos < src.Length) b.Append(src[pos..]);
+            if (changed) state.CheckAlloc(b.Length);
             return Rets.Two(!changed ? LuaValue.FromString(s) : LuaValue.FromString(b.ToLuaString(state.Strings)), LuaValue.FromInteger(n));
         }
         finally

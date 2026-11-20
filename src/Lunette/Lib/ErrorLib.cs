@@ -1,3 +1,4 @@
+using Lunette.Lib;
 using Lunette.Vm;
 
 namespace Lunette;
@@ -23,7 +24,7 @@ internal static class ErrorLib
         if (v.IsNil) return 1;
         if (v.IsInteger) return v.AsInteger;
         if (v.IsFloat && LuaNumber.TryToInteger(v, out long n)) return n;
-        throw LuaErrors.ArgError(2, "error", v.IsNumber ? "number has no integer representation" : $"number expected, got {v.TypeName}");
+        throw LibArgs.ArgError("error", 2, v.IsNumber ? "number has no integer representation" : $"number expected, got {v.TypeName}");
     }
 
     /// <summary>pcall needs a value; xpcall needs a function as its second argument.</summary>
@@ -31,9 +32,9 @@ internal static class ErrorLib
     {
         if (xpcall)
         {
-            if (args.Length < 2 || !args[1].IsFunction) throw LuaErrors.TypeError(args, 1, "xpcall", "function");
+            if (args.Length < 2 || !args[1].IsFunction) throw LibArgs.TypeError("xpcall", args, 1, "function");
         }
-        else if (args.Length == 0) throw LuaErrors.ArgError(1, "pcall", "value expected");
+        else if (args.Length == 0) throw LibArgs.ArgError("pcall", 1, "value expected");
     }
 
     private static LuaValue[]? Error(LuaState state, ReadOnlySpan<LuaValue> args)
@@ -45,7 +46,7 @@ internal static class ErrorLib
 
     private static LuaValue[]? Assert(LuaState state, ReadOnlySpan<LuaValue> args)
     {
-        if (args.Length == 0) throw LuaErrors.ArgError(1, "assert", "value expected");
+        if (args.Length == 0) throw LibArgs.ArgError("assert", 1, "value expected");
         if (!args[0].IsFalsy) return args.ToArray();
         LuaValue msg = args.Length > 1 ? args[1] : LuaValue.FromString("assertion failed!");
         throw new LuaException(Interpreter.ErrorValue(state.Running, msg, 1, true));

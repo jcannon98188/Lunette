@@ -54,6 +54,10 @@ public class OutputAndLimitsTests
     [InlineData("return string.rep('abc', 3e8, ',')")]
     [InlineData("return #table.concat(setmetatable({}, {__len = function() return 1e9 end, __index = function() return string.rep('x', 1000) end}))")]
     [InlineData("return table.unpack({}, 1, 900000)")]
+    [InlineData("local s = string.rep('x', 1e6) return #string.format('%s%s%s%s%s', s, s, s, s, s)")]
+    [InlineData("local s = string.rep('x', 1e6) return #string.format('%q%q%q%q%q', s, s, s, s, s)")]
+    [InlineData("local s = string.rep('x', 1e6) return #s:gsub('x', 'yyyyyy')")]
+    [InlineData("local s = string.rep('x', 1e6) return #s:gsub('x', function() return 'yyyyyy' end)")]
     public void A_huge_single_allocation_aborts_at_the_cap_before_allocating(string source)
     {
         var state = new LuaState(new LuaLimits { MemoryLimitBytes = 4_000_000, InstructionLimit = 10_000_000 });

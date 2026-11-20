@@ -1,3 +1,4 @@
+using static Lunette.Lib.LibArgs;
 using Lunette.Vm;
 
 namespace Lunette.Lib;
@@ -28,19 +29,19 @@ internal sealed class MathLib
         Add("floor", static (_, a) => Round("floor", a, Math.Floor));
         Add("fmod", Fmod);
         Add("modf", Modf);
-        Add("sqrt", static (_, a) => One(Math.Sqrt(Num("sqrt", a, 0))));
-        Add("exp", static (_, a) => One(Math.Exp(Num("exp", a, 0))));
-        Add("sin", static (_, a) => One(Math.Sin(Num("sin", a, 0))));
-        Add("cos", static (_, a) => One(Math.Cos(Num("cos", a, 0))));
-        Add("tan", static (_, a) => One(Math.Tan(Num("tan", a, 0))));
-        Add("asin", static (_, a) => One(Math.Asin(Num("asin", a, 0))));
-        Add("acos", static (_, a) => One(Math.Acos(Num("acos", a, 0))));
-        Add("atan", static (_, a) => One(Math.Atan2(Num("atan", a, 0), a.Length > 1 && !a[1].IsNil ? Num("atan", a, 1) : 1.0)));
+        Add("sqrt", static (_, a) => One(Math.Sqrt(CheckNumber("sqrt", a, 0))));
+        Add("exp", static (_, a) => One(Math.Exp(CheckNumber("exp", a, 0))));
+        Add("sin", static (_, a) => One(Math.Sin(CheckNumber("sin", a, 0))));
+        Add("cos", static (_, a) => One(Math.Cos(CheckNumber("cos", a, 0))));
+        Add("tan", static (_, a) => One(Math.Tan(CheckNumber("tan", a, 0))));
+        Add("asin", static (_, a) => One(Math.Asin(CheckNumber("asin", a, 0))));
+        Add("acos", static (_, a) => One(Math.Acos(CheckNumber("acos", a, 0))));
+        Add("atan", static (_, a) => One(Math.Atan2(CheckNumber("atan", a, 0), a.Length > 1 && !a[1].IsNil ? CheckNumber("atan", a, 1) : 1.0)));
         Add("log", Log);
-        Add("deg", static (_, a) => One(Num("deg", a, 0) * (180.0 / Math.PI)));
-        Add("rad", static (_, a) => One(Num("rad", a, 0) * (Math.PI / 180.0)));
+        Add("deg", static (_, a) => One(CheckNumber("deg", a, 0) * (180.0 / Math.PI)));
+        Add("rad", static (_, a) => One(CheckNumber("rad", a, 0) * (Math.PI / 180.0)));
         Add("tointeger", ToInteger);
-        Add("ult", static (_, a) => One(LuaValue.FromBoolean((ulong)Int("ult", a, 0) < (ulong)Int("ult", a, 1))));
+        Add("ult", static (_, a) => One(LuaValue.FromBoolean((ulong)CheckInteger("ult", a, 0) < (ulong)CheckInteger("ult", a, 1))));
         Add("max", static (_, a) => MinMax("max", a, true));
         Add("min", static (_, a) => MinMax("min", a, false));
         Add("random", (_, a) => Random(a));
@@ -56,36 +57,11 @@ internal sealed class MathLib
 
     // ---- argument checking (messages follow luaL_argerror / luaL_typeerror) ----
 
-    private static LuaException ArgError(string fn, int index, string msg) =>
-        LuaErrors.ArgError(index + 1, fn, msg);
-
-    private static LuaException TypeError(string fn, LuaValue[] args, int index, string expected) =>
-        ArgError(fn, index, $"{expected} expected, got {(index < args.Length ? Vm.Meta.ArgTypeName(args[index]) : "no value")}");
-
-    private static LuaValue Number(string fn, ReadOnlySpan<LuaValue> args, int index)
-    {
-        if (index < args.Length && StringConv.TryToNumber(args[index], out LuaValue n)) return n;
-        throw ArgError(fn, index, $"number expected, got {(index < args.Length ? Vm.Meta.ArgTypeName(args[index]) : "no value")}");
-    }
-
-    private static double Num(string fn, ReadOnlySpan<LuaValue> args, int index)
-    {
-        LuaValue v = Number(fn, args, index);
-        return v.IsInteger ? v.AsInteger : v.AsFloat;
-    }
-
-    private static long Int(string fn, ReadOnlySpan<LuaValue> args, int index)
-    {
-        LuaValue v = Number(fn, args, index);
-        if (LuaNumber.TryToInteger(v, out long n)) return n;
-        throw ArgError(fn, index, "number has no integer representation");
-    }
-
     // ---- functions ----
 
     private static LuaValue[] Abs(LuaState _, ReadOnlySpan<LuaValue> a)
     {
-        LuaValue v = Number("abs", a, 0);
+        LuaValue v = CheckNumberValue("abs", a, 0);
         if (v.IsInteger)
         {
             long n = v.AsInteger;
@@ -96,7 +72,7 @@ internal sealed class MathLib
 
     private static LuaValue[] Round(string fn, ReadOnlySpan<LuaValue> a, Func<double, double> op)
     {
-        LuaValue v = Number(fn, a, 0);
+        LuaValue v = CheckNumberValue(fn, a, 0);
         if (v.IsInteger) return One(v);
         double r = op(v.AsFloat);
         return One(LuaNumber.FloatToInteger(r, out long n) ? LuaValue.FromInteger(n) : LuaValue.FromFloat(r));
@@ -104,23 +80,23 @@ internal sealed class MathLib
 
     private static LuaValue[] Fmod(LuaState _, ReadOnlySpan<LuaValue> a)
     {
-        LuaValue x = Number("fmod", a, 0), y = Number("fmod", a, 1);
+        LuaValue x = CheckNumberValue("fmod", a, 0), y = CheckNumberValue("fmod", a, 1);
         if (x.IsInteger && y.IsInteger)
         {
             long d = y.AsInteger;
             if ((ulong)d + 1UL <= 1UL)
             {
-                if (d == 0) throw ArgError("fmod", 1, "zero");
+                if (d == 0) throw ArgError("fmod", 2, "zero");
                 return One(LuaValue.FromInteger(0)); // d == -1: avoid overflow of minint % -1
             }
             return One(LuaValue.FromInteger(x.AsInteger % d));
         }
-        return One(LuaNumber.FMod(Num("fmod", a, 0), Num("fmod", a, 1)));
+        return One(LuaNumber.FMod(CheckNumber("fmod", a, 0), CheckNumber("fmod", a, 1)));
     }
 
     private static LuaValue[] Modf(LuaState _, ReadOnlySpan<LuaValue> a)
     {
-        LuaValue v = Number("modf", a, 0);
+        LuaValue v = CheckNumberValue("modf", a, 0);
         if (v.IsInteger) return Rets.Two(v, LuaValue.FromFloat(0.0));
         double n = v.AsFloat;
         double ip = n < 0 ? Math.Ceiling(n) : Math.Floor(n);
@@ -130,9 +106,9 @@ internal sealed class MathLib
 
     private static LuaValue[] Log(LuaState _, ReadOnlySpan<LuaValue> a)
     {
-        double x = Num("log", a, 0);
+        double x = CheckNumber("log", a, 0);
         if (a.Length < 2 || a[1].IsNil) return One(Math.Log(x));
-        double b = Num("log", a, 1);
+        double b = CheckNumber("log", a, 1);
         if (b == 2.0) return One(Math.Log2(x));
         if (b == 10.0) return One(Math.Log10(x));
         return One(Math.Log(x) / Math.Log(b));
@@ -140,14 +116,14 @@ internal sealed class MathLib
 
     private static LuaValue[] ToInteger(LuaState _, ReadOnlySpan<LuaValue> a)
     {
-        if (a.Length == 0) throw ArgError("tointeger", 0, "value expected");
+        if (a.Length == 0) throw ArgError("tointeger", 1, "value expected");
         return One(StringConv.TryToNumber(a[0], out LuaValue v) && LuaNumber.TryToInteger(v, out long n)
             ? LuaValue.FromInteger(n) : LuaValue.Nil);
     }
 
     private static LuaValue[] MathType(LuaState state, ReadOnlySpan<LuaValue> a)
     {
-        if (a.Length == 0) throw ArgError("type", 0, "value expected");
+        if (a.Length == 0) throw ArgError("type", 1, "value expected");
         if (a[0].IsInteger) return One(LuaValue.FromString(state.Strings.FromUtf16("integer")));
         if (a[0].IsFloat) return One(LuaValue.FromString(state.Strings.FromUtf16("float")));
         return One(LuaValue.Nil);
@@ -168,11 +144,11 @@ internal sealed class MathLib
 
     private static LuaValue[] MinMax(string fn, ReadOnlySpan<LuaValue> a, bool max)
     {
-        if (a.Length == 0) throw ArgError(fn, 0, "value expected");
-        LuaValue best = Number(fn, a, 0);
+        if (a.Length == 0) throw ArgError(fn, 1, "value expected");
+        LuaValue best = CheckNumberValue(fn, a, 0);
         for (int i = 1; i < a.Length; i++)
         {
-            LuaValue v = Number(fn, a, i);
+            LuaValue v = CheckNumberValue(fn, a, i);
             if (max ? Compare.NumberLessThan(best, v) : Compare.NumberLessThan(v, best)) best = v;
         }
         return One(best);
@@ -228,17 +204,17 @@ internal sealed class MathLib
                 return One((rv >> 11) * (0.5 / (1UL << 52)));
             case 1:
                 low = 1;
-                up = Int("random", a, 0);
+                up = CheckInteger("random", a, 0);
                 if (up == 0) return One(LuaValue.FromInteger(unchecked((long)rv)));
                 break;
             case 2:
-                low = Int("random", a, 0);
-                up = Int("random", a, 1);
+                low = CheckInteger("random", a, 0);
+                up = CheckInteger("random", a, 1);
                 break;
             default:
                 throw LuaErrors.Error("wrong number of arguments");
         }
-        if (low > up) throw ArgError("random", 0, "interval is empty");
+        if (low > up) throw ArgError("random", 1, "interval is empty");
         return One(LuaValue.FromInteger(unchecked((long)(Project(rv, (ulong)up - (ulong)low) + (ulong)low))));
     }
 
@@ -256,8 +232,8 @@ internal sealed class MathLib
         }
         else
         {
-            n1 = Int("randomseed", a, 0);
-            n2 = a.Length > 1 && !a[1].IsNil ? Int("randomseed", a, 1) : 0;
+            n1 = CheckInteger("randomseed", a, 0);
+            n2 = a.Length > 1 && !a[1].IsNil ? CheckInteger("randomseed", a, 1) : 0;
         }
         SetSeed((ulong)n1, (ulong)n2);
         return Rets.Two(LuaValue.FromInteger(n1), LuaValue.FromInteger(n2));

@@ -1,3 +1,4 @@
+using static Lunette.Lib.LibArgs;
 using System.Text;
 using Lunette.Lib;
 using Lunette.Vm;
@@ -58,8 +59,6 @@ internal static class LoadLib
 
     private static LuaValue Str(LuaState state, string s) => LuaValue.FromString(state.Strings.FromUtf16(s));
 
-    private static LuaValue Arg(ReadOnlySpan<LuaValue> args, int i) => i < args.Length ? args[i] : default;
-
     // ---- load / loadfile / dofile ----
 
     /// <summary>Compiles <paramref name="source"/> after checking the mode; a failure is returned as a message, not thrown.</summary>
@@ -98,7 +97,7 @@ internal static class LoadLib
             string name = args.Length > 1 && !args[1].IsNil ? LibArgs.CheckString(state, "load", args, 1).ToString() : s.ToString();
             return Compile(state, s.Bytes.ToArray(), name, mode, env);
         }
-        if (!chunk.IsFunction) throw LuaErrors.TypeError(args, 0, "load", "function");
+        if (!chunk.IsFunction) throw LibArgs.TypeError("load", args, 0, "function");
         string rname = args.Length > 1 && !args[1].IsNil ? LibArgs.CheckString(state, "load", args, 1).ToString() : "=(load)";
         var buf = new List<byte>();
         while (true)

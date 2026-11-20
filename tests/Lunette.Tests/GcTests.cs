@@ -2,7 +2,11 @@ using Xunit;
 
 namespace Lunette.Tests;
 
-/// <summary>Collection for tests that read the process-wide heap size (<c>collectgarbage("count")</c>): they run alone, since another test's allocation would move the figure.</summary>
+/// <summary>
+/// Collection for tests that read the process-wide heap size (<c>collectgarbage("count")</c>): they run alone, since another test's
+/// allocation would move the figure. Members: GcTests, SuiteTests and AllLuaTests (the latter two run gc.lua, whose count windows,
+/// gc.lua:473 in particular, are the known unsharded-Linux flake when anything else runs beside them).
+/// </summary>
 [CollectionDefinition(Name, DisableParallelization = true)]
 public sealed class ProcessMemoryCollection
 {

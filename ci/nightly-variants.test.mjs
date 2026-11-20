@@ -30,3 +30,8 @@ test("ci.yml: ci-gate covers every job (including all-lua, which is blocking)", 
   assert.match(ci, /needs: \[[^\]]*\ball-lua\b[^\]]*\]/);
   assert.doesNotMatch(ci, /until then it runs and reports/);
 });
+
+test("ci.yml keeps the explicit waivers for LUA_SAFE_ACCESS and multi-name constant folding", () => {
+  assert.match(ci, /LUA_SAFE_ACCESS scheduled variant[^\n]*waived/);
+  assert.match(ci, /multi-name constant folding[^\n]*waived/);
+});

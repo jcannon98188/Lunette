@@ -31,7 +31,7 @@ public class DevDiagnosticsTests
         Assert.Equal(2, e.Line);
         Assert.Contains("boom", e.Message);
 
-        var frames = e.StackFrames;
+        var frames = e.TraceEntries;
         Assert.NotNull(frames);
         Assert.Equal("error", frames![0].FunctionName);
         Assert.True(frames[0].IsNative);
@@ -52,7 +52,7 @@ public class DevDiagnosticsTests
         LuaException e = Catch(state, "local t\n\nlocal x = t.field", "=mods/a.lua");
         Assert.Equal("mods/a.lua", e.Chunk);
         Assert.Equal(3, e.Line);
-        Assert.Equal(3, e.StackFrames![0].Line);
+        Assert.Equal(3, e.TraceEntries![0].Line);
     }
 
     [Fact]
@@ -62,7 +62,7 @@ public class DevDiagnosticsTests
         LuaException e = Assert.Throws<LuaException>(() => state.Load("local x = 1\nlocal = 2", "=mods/bad.lua"));
         Assert.Equal("mods/bad.lua", e.Chunk);
         Assert.Equal(2, e.Line);
-        Assert.Empty(e.StackFrames ?? []);
+        Assert.Empty(e.TraceEntries ?? []);
     }
 
     [Fact]
@@ -158,7 +158,7 @@ public class DevDiagnosticsTests
         Assert.Equal("=(console)", "=" + r.Error!.Chunk);
         Assert.Equal(1, r.Error.Line);
         Assert.Contains("nothing", r.Error.Message);
-        Assert.NotEmpty(r.Error.StackFrames!);
+        Assert.NotEmpty(r.Error.TraceEntries!);
         Assert.Equal(3, state.Evaluate("1 + 2").Values[0].AsInteger);
     }
 

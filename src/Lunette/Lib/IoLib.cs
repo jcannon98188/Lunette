@@ -104,7 +104,7 @@ internal sealed class IoLib
     private static LuaUserdata CheckUserdata(ReadOnlySpan<LuaValue> args, string fn)
     {
         if (args.Length > 0 && args[0].Ref is LuaUserdata { Value: LuaFile } u) return u;
-        throw LuaErrors.TypeError(args, 0, fn, "FILE*");
+        throw LibArgs.TypeError(fn, args, 0, "FILE*");
     }
 
     private static LuaFile ToFile(LuaUserdata u)
@@ -181,7 +181,7 @@ internal sealed class IoLib
     {
         string name = CheckName("open", args, 0, out LuaValue[]? bad);
         string mode = args.Length > 1 && !args[1].IsNil ? CheckString(state, "open", args, 1).ToString() : "r";
-        if (!ValidMode(mode)) throw LuaErrors.ArgError(2, "open", "invalid mode");
+        if (!ValidMode(mode)) throw LibArgs.ArgError("open", 2, "invalid mode");
         if (bad is not null) return bad;
         try { return [LuaValue.FromObject(Wrap(OpenFile(name, mode)))]; }
         catch (Exception e) when (IsFileError(e)) { return FileResult(e, LibArgs.CheckString(state, "open", args, 0).ToString()); }
@@ -204,7 +204,7 @@ internal sealed class IoLib
     {
         string command = CheckString(state, "popen", args, 0).ToString();
         string mode = args.Length > 1 && !args[1].IsNil ? CheckString(state, "popen", args, 1).ToString() : "r";
-        if (mode is not ("r" or "w")) throw LuaErrors.ArgError(2, "popen", "invalid mode");
+        if (mode is not ("r" or "w")) throw LibArgs.ArgError("popen", 2, "invalid mode");
         if ((_platform.Capabilities & PlatformCapabilities.Processes) == 0) throw LuaErrors.Error("'popen' not supported");
         try
         {
@@ -248,7 +248,7 @@ internal sealed class IoLib
 
     private LuaValue[] FileGc(LuaState state, ReadOnlySpan<LuaValue> args)
     {
-        if (args.Length == 0 || args[0].Ref is not LuaUserdata { Value: LuaFile }) throw LuaErrors.TypeError(args, 0, "__gc", "FILE*");
+        if (args.Length == 0 || args[0].Ref is not LuaUserdata { Value: LuaFile }) throw LibArgs.TypeError("__gc", args, 0, "FILE*");
         if (args[0].Ref is LuaUserdata { Value: LuaFile f } && !f.IsClosed)
         {
             try
@@ -326,7 +326,7 @@ internal sealed class IoLib
     private LuaValue[] LinesIterator(LuaFile file, ReadOnlySpan<LuaValue> args, int first, bool toClose)
     {
         int n = Math.Max(args.Length - first, 0);
-        if (n > MaxLinesArgs) throw LuaErrors.ArgError(MaxLinesArgs + 2, "lines", "too many arguments");
+        if (n > MaxLinesArgs) throw LibArgs.ArgError("lines", MaxLinesArgs + 2, "too many arguments");
         var formats = new LuaValue[n];
         for (int i = 0; i < n; i++) formats[i] = args[first + i];
         var iterator = new BuiltinFunction((st, _) =>
@@ -417,7 +417,7 @@ internal sealed class IoLib
                     case 'l': results[count++] = ReadLineValue(f, chop: true, out success); break;
                     case 'L': results[count++] = ReadLineValue(f, chop: false, out success); break;
                     case 'a': results[count++] = ReadAllValue(f); break;
-                    default: throw LuaErrors.ArgError(i + 1, fn, "invalid format");
+                    default: throw LibArgs.ArgError(fn, i + 1, "invalid format");
                 }
             }
             return count == results.Length ? results : results[..count];
@@ -459,7 +459,7 @@ internal sealed class IoLib
     {
         string v = i < args.Length && !args[i].IsNil ? CheckString(state, fn, args, i).ToString() : dflt;
         int idx = Array.IndexOf(options, v);
-        if (idx < 0) throw LuaErrors.ArgError(i + 1, fn, $"invalid option '{v}'");
+        if (idx < 0) throw LibArgs.ArgError(fn, i + 1, $"invalid option '{v}'");
         return idx;
     }
 

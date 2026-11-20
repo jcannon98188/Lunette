@@ -13,7 +13,7 @@ internal static class GcLib
         // The collector is not reentrant: inside a finalizer every option answers with fail (nil).
         if (option is not ("collect" or "stop" or "restart" or "count" or "step" or "isrunning"
                            or "incremental" or "generational" or "setpause" or "setstepmul"))
-            throw LuaErrors.ArgError(1, "collectgarbage", $"invalid option '{option}'");
+            throw LibArgs.ArgError("collectgarbage", 1, $"invalid option '{option}'");
         if (gc.InCollector) return Rets.One(default);
 
         switch (option)

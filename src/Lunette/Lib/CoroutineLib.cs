@@ -1,3 +1,5 @@
+using Lunette.Lib;
+using static Lunette.Lib.LibArgs;
 using Lunette.Vm;
 
 namespace Lunette;
@@ -23,17 +25,15 @@ internal static class CoroutineLib
     private static void Add(LuaTable t, string name, BuiltinBody body) =>
         t.Set(LuaValue.FromString(name), LuaValue.FromObject(new BuiltinFunction(body)));
 
-    private static LuaValue Arg(ReadOnlySpan<LuaValue> args, int i) => i < args.Length ? args[i] : default;
-
     private static Coroutine CheckCo(ReadOnlySpan<LuaValue> args, string fn)
     {
         if (args.Length > 0 && args[0].Ref is Coroutine co) return co;
-        throw LuaErrors.TypeError(args, 0, fn, "coroutine");
+        throw LibArgs.TypeError(fn, args, 0, "coroutine");
     }
 
     private static Coroutine NewCoroutine(LuaState state, ReadOnlySpan<LuaValue> args, string fn)
     {
-        if (args.Length == 0 || !args[0].IsFunction) throw LuaErrors.TypeError(args, 0, fn, "function");
+        if (args.Length == 0 || !args[0].IsFunction) throw LibArgs.TypeError(fn, args, 0, "function");
         LuaValue body = args[0];
         if (body.Ref is BuiltinFunction)
         {

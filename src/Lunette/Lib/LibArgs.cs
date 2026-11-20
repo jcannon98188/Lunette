@@ -1,12 +1,24 @@
 namespace Lunette.Lib;
 
-/// <summary>Argument checking for library functions, with luaL_argerror / luaL_typeerror message shapes.</summary>
+/// <summary>
+/// Argument checking for library functions, with luaL_argerror / luaL_typeerror message shapes.
+/// Index convention: <c>i</c> is a zero-based index into <c>args</c>; <c>n</c> in <see cref="ArgError"/> is the one-based
+/// argument number printed in the message.
+/// </summary>
 internal static class LibArgs
 {
     public static LuaValue Arg(ReadOnlySpan<LuaValue> args, int i) => i < args.Length ? args[i] : default;
 
-    public static LuaException ArgError(string fn, int index1, string msg) =>
-        LuaErrors.ArgError(index1, fn, msg);
+    /// <summary>"bad argument #n to 'fn' (msg)" with a one-based argument number.</summary>
+    public static LuaException ArgError(string fn, int n, string msg)
+    {
+        LuaException e = LuaErrors.Error($"bad argument #{n} to '{fn}' ({msg})");
+        e.ArgN = n;
+        e.ArgMsg = msg;
+        return e;
+    }
+
+    /// <summary>"bad argument #n to 'fn' (expected expected, got ...)" for the zero-based argument index <paramref name="i"/>.</summary>
 
     public static LuaException TypeError(string fn, ReadOnlySpan<LuaValue> args, int i, string expected) =>
         ArgError(fn, i + 1, $"{expected} expected, got {(i < args.Length ? Vm.Meta.ArgTypeName(args[i]) : "no value")}");
@@ -57,6 +69,12 @@ internal static class LibArgs
     {
         if (i < args.Length && StringConv.TryToNumber(args[i], out LuaValue n)) return n;
         throw TypeError(fn, args, i, "number");
+    }
+
+    public static LuaTable CheckTable(string fn, ReadOnlySpan<LuaValue> args, int i)
+    {
+        if (i < args.Length && args[i].Ref is LuaTable t) return t;
+        throw TypeError(fn, args, i, "table");
     }
 
     public static void CheckAny(string fn, ReadOnlySpan<LuaValue> args, int i)

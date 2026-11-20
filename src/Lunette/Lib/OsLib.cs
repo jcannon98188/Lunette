@@ -70,7 +70,7 @@ internal sealed class OsLib
         string[] categories = ["all", "collate", "ctype", "monetary", "numeric", "time"];
         string? locale = args.Length > 0 && !args[0].IsNil ? CheckString(state, "setlocale", args, 0).ToString() : null;
         string cat = args.Length > 1 && !args[1].IsNil ? CheckString(state, "setlocale", args, 1).ToString() : "all";
-        if (Array.IndexOf(categories, cat) < 0) throw LuaErrors.ArgError(2, "setlocale", $"invalid option '{cat}'");
+        if (Array.IndexOf(categories, cat) < 0) throw LibArgs.ArgError("setlocale", 2, $"invalid option '{cat}'");
         return locale is null or "" or "C" or "POSIX" ? [Str("C")] : [default];
     }
 
@@ -163,7 +163,7 @@ internal sealed class OsLib
     private LuaValue[] Time(LuaState state, ReadOnlySpan<LuaValue> args)
     {
         if (args.Length == 0 || args[0].IsNil) return [LuaValue.FromInteger(_platform.UtcNow.ToUnixTimeSeconds())];
-        if (args[0].Ref is not LuaTable t) throw LuaErrors.TypeError(args, 0, "time", "table");
+        if (args[0].Ref is not LuaTable t) throw LibArgs.TypeError("time", args, 0, "table");
         int year = GetField(t, "year", -1, 1900);
         int month = GetField(t, "month", -1, 1);
         int day = GetField(t, "day", -1, 0);
@@ -226,7 +226,7 @@ internal sealed class OsLib
             if (conv < 0)
             {
                 string rest = LuaString.Create(f[i..]).ToString();
-                throw LuaErrors.ArgError(1, "date", $"invalid conversion specifier '%{rest}'");
+                throw LibArgs.ArgError("date", 1, $"invalid conversion specifier '%{rest}'");
             }
             LuaTime.AppendConversion(ref b, (char)conv, bt);
             i += length - 1;

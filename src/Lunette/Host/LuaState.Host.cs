@@ -1,3 +1,4 @@
+using Lunette.Lib;
 using Lunette.Compiler;
 using Lunette.Vm;
 
@@ -274,7 +275,7 @@ public sealed partial class LuaState
     public void Register(string name, Func<string, string> function) =>
         Register(name, (ref CallContext ctx) =>
         {
-            if (ctx.Args.Length == 0 || !ctx.Args[0].TryGetString(out string? s)) throw LuaErrors.TypeError(ctx.Args, 0, name, "string");
+            if (ctx.Args.Length == 0 || !ctx.Args[0].TryGetString(out string? s)) throw LibArgs.TypeError(name, ctx.Args, 0, "string");
             ctx.Push(function(s));
             return 1;
         });
@@ -282,7 +283,7 @@ public sealed partial class LuaState
     private static double NumberArg(ReadOnlySpan<LuaValue> args, int i, string name)
     {
         if (i < args.Length && args[i].TryGetNumber(out double d)) return d;
-        throw LuaErrors.TypeError(args, i, name, "number");
+        throw LibArgs.TypeError(name, args, i, "number");
     }
 
     /// <summary>Reads a global variable (nil when unset).</summary>

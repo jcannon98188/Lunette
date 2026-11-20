@@ -22,6 +22,12 @@ public sealed class AllLuaFactAttribute : FactAttribute
 /// as the per-file run; whole-file waivers become empty stubs, and all.lua's dump/undump round trip of each file is removed
 /// because Lunette has no bytecode format (<c>no-bytecode</c>).
 /// </summary>
+/// <remarks>
+/// In <see cref="ProcessMemoryCollection"/> with the other GC-sensitive tests: gc.lua asserts on <c>collectgarbage("count")</c> windows
+/// (gc.lua:473 among them), which on the unsharded Linux run flaked when other test classes ran beside the driver. A per-state count
+/// that does not make gc.lua time out was tried and reverted, so the count stays the process-wide heap and the test runs alone.
+/// </remarks>
+[Collection(ProcessMemoryCollection.Name)]
 public class AllLuaTests(ITestOutputHelper log)
 {
     private const string DumpRoundTrip = "  local b = string.dump(f, strip)\n  f = assert(load(b))\n";

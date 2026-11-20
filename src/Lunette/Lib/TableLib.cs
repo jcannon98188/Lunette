@@ -1,3 +1,4 @@
+using static Lunette.Lib.LibArgs;
 using Lunette.Lib;
 using Lunette.Vm;
 
@@ -58,13 +59,7 @@ internal static class TableLib
                 && ((what & CanLen) == 0 || !mt.GetTagMethod(TagMethod.Len).IsNil))
                 return v;
         }
-        throw LuaErrors.TypeError(args, i, fn, "table");
-    }
-
-    private static long CheckInt(ReadOnlySpan<LuaValue> args, int i, string fn)
-    {
-        try { return LibArgs.CheckInteger(fn, args, i); }
-        catch (LuaException e) { throw LuaErrors.Error(e.Message); }
+        throw LibArgs.TypeError(fn, args, i, "table");
     }
 
     private static LuaValue[]? Insert(LuaState state, ReadOnlySpan<LuaValue> args)
@@ -78,8 +73,8 @@ internal static class TableLib
                 pos = e;
                 break;
             case 3:
-                pos = CheckInt(args, 1, "insert");
-                if ((ulong)pos - 1UL >= (ulong)e) throw LuaErrors.ArgError(2, "insert", "position out of bounds");
+                pos = CheckInteger("insert", args, 1);
+                if ((ulong)pos - 1UL >= (ulong)e) throw LibArgs.ArgError("insert", 2, "position out of bounds");
                 for (long i = e; i > pos; i--) Seti(state, t, i, Geti(state, t, i - 1));
                 break;
             default:
@@ -93,9 +88,9 @@ internal static class TableLib
     {
         LuaValue t = CheckTab(state, args, 0, "remove", CanRead | CanWrite | CanLen);
         long size = Len(state, t);
-        long pos = args.Length > 1 && !args[1].IsNil ? CheckInt(args, 1, "remove") : size;
+        long pos = args.Length > 1 && !args[1].IsNil ? CheckInteger("remove", args, 1) : size;
         if (pos != size && (ulong)pos - 1UL > (ulong)size)
-            throw LuaErrors.ArgError(2, "remove", "position out of bounds");
+            throw LibArgs.ArgError("remove", 2, "position out of bounds");
         LuaValue removed = Geti(state, t, pos);
         for (; pos < size; pos++) Seti(state, t, pos, Geti(state, t, pos + 1));
         Seti(state, t, pos, default);
@@ -106,8 +101,8 @@ internal static class TableLib
     {
         LuaValue t = CheckTab(state, args, 0, "concat", CanRead | CanLen);
         LuaString sep = args.Length > 1 && !args[1].IsNil ? LibArgs.CheckString(state, "concat", args, 1) : LuaString.Empty;
-        long i = args.Length > 2 && !args[2].IsNil ? CheckInt(args, 2, "concat") : 1;
-        long last = args.Length > 3 && !args[3].IsNil ? CheckInt(args, 3, "concat") : Len(state, t);
+        long i = args.Length > 2 && !args[2].IsNil ? CheckInteger("concat", args, 2) : 1;
+        long last = args.Length > 3 && !args[3].IsNil ? CheckInteger("concat", args, 3) : Len(state, t);
         using var b = new ByteBuilder(64);
         for (; i <= last; i++)
         {
@@ -128,8 +123,8 @@ internal static class TableLib
     private static LuaValue[] Unpack(LuaState state, ReadOnlySpan<LuaValue> args)
     {
         LuaValue t = args.Length > 0 ? args[0] : default;
-        long i = args.Length > 1 && !args[1].IsNil ? CheckInt(args, 1, "unpack") : 1;
-        long e = args.Length > 2 && !args[2].IsNil ? CheckInt(args, 2, "unpack") : Len(state, t);
+        long i = args.Length > 1 && !args[1].IsNil ? CheckInteger("unpack", args, 1) : 1;
+        long e = args.Length > 2 && !args[2].IsNil ? CheckInteger("unpack", args, 2) : Len(state, t);
         if (i > e) return [];
         ulong n = (ulong)e - (ulong)i;
         if (n >= 1_000_000UL || (long)n + 1 + state.Running.CallTop > Coroutine.StackLimit) throw LuaErrors.Error("too many results to unpack");
@@ -150,16 +145,16 @@ internal static class TableLib
     private static LuaValue[] Move(LuaState state, ReadOnlySpan<LuaValue> args)
     {
         LuaValue a1 = CheckTab(state, args, 0, "move", CanRead);
-        long f = CheckInt(args, 1, "move");
-        long e = CheckInt(args, 2, "move");
-        long t = CheckInt(args, 3, "move");
+        long f = CheckInteger("move", args, 1);
+        long e = CheckInteger("move", args, 2);
+        long t = CheckInteger("move", args, 3);
         int tt = args.Length > 4 && !args[4].IsNil ? 4 : 0;
         LuaValue a2 = CheckTab(state, args, tt, "move", CanWrite);
         if (e >= f)
         {
-            if (!(f > 0 || e < long.MaxValue + f)) throw LuaErrors.ArgError(3, "move", "too many elements to move");
+            if (!(f > 0 || e < long.MaxValue + f)) throw LibArgs.ArgError("move", 3, "too many elements to move");
             long n = e - f + 1;
-            if (t > long.MaxValue - n + 1) throw LuaErrors.ArgError(4, "move", "destination wrap around");
+            if (t > long.MaxValue - n + 1) throw LibArgs.ArgError("move", 4, "destination wrap around");
             if (t > e || t <= f || (tt != 0 && !Meta.Equal(state, a1, a2)))
                 for (long i = 0; i < n; i++) Seti(state, a2, t + i, Geti(state, a1, f + i));
             else
@@ -264,9 +259,9 @@ internal static class TableLib
         long n = Len(state, t);
         if (n > 1)
         {
-            if (n >= int.MaxValue) throw LuaErrors.ArgError(1, "sort", "array too big");
+            if (n >= int.MaxValue) throw LibArgs.ArgError("sort", 1, "array too big");
             LuaValue cmp = args.Length > 1 ? args[1] : default;
-            if (!cmp.IsNil && !cmp.IsFunction) throw LuaErrors.TypeError(args, 1, "sort", "function");
+            if (!cmp.IsNil && !cmp.IsFunction) throw LibArgs.TypeError("sort", args, 1, "function");
             new Sorter { State = state, Table = t, Cmp = cmp }.AuxSort(1, n, 0);
         }
         return null;

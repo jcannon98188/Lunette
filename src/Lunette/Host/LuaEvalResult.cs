@@ -12,7 +12,7 @@ public sealed class LuaEvalResult
     /// <summary>The values returned by the snippet (empty for a statement and on failure).</summary>
     public LuaValue[] Values { get; }
 
-    /// <summary>The compile or runtime error, with chunk, line and <see cref="LuaException.StackFrames"/>; null on success.</summary>
+    /// <summary>The compile or runtime error, with chunk, line and <see cref="LuaException.TraceEntries"/>; null on success.</summary>
     public LuaException? Error { get; }
 
     public bool Succeeded => Error is null;

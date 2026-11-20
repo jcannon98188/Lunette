@@ -187,8 +187,7 @@ internal static class DebugLib
         OpCode op = p.Code[pc].Op;
         TagMethod? ev = op switch
         {
-            OpCode.Add or OpCode.Sub or OpCode.Mul or OpCode.Div or OpCode.IDiv or OpCode.Mod or OpCode.Pow
-                or OpCode.BAnd or OpCode.BOr or OpCode.BXor or OpCode.Shl or OpCode.Shr => Meta.ArithEvent(op),
+            _ when Meta.IsBinaryArith(op) => Meta.ArithEvent(op),
             OpCode.Unm => TagMethod.Unm,
             OpCode.BNot => TagMethod.BNot,
             OpCode.Eq => TagMethod.Eq,
@@ -229,9 +228,9 @@ internal static class DebugLib
             a = 1;
         }
         string what = a + 1 < args.Length && !args[a + 1].IsNil ? LibArgs.CheckString(state, "getinfo", args, a + 1).ToString() : "flnSrtu";
-        if (what.Contains('>')) throw LuaErrors.ArgError(a + 2, "getinfo", "invalid option '>'");
+        if (what.Contains('>')) throw LibArgs.ArgError("getinfo", a + 2, "invalid option '>'");
         foreach (char ch in what)
-            if ("SlnrutLf".IndexOf(ch) < 0) throw LuaErrors.ArgError(a + 2, "getinfo", "invalid option");
+            if ("SlnrutLf".IndexOf(ch) < 0) throw LibArgs.ArgError("getinfo", a + 2, "invalid option");
 
         LuaValue fnv;
         List<Level>? levels = null;
@@ -336,10 +335,10 @@ internal static class DebugLib
         Format(state, co, Levels(state, co, default, false), null, 0);
 
     /// <summary>The structured form of <see cref="CaptureTraceback"/>: every level, innermost first, without the skipping of deep stacks.</summary>
-    internal static LuaStackFrame[] CaptureFrames(LuaState state, Coroutine co)
+    internal static LuaTraceEntry[] CaptureFrames(LuaState state, Coroutine co)
     {
         List<Level> lv = Levels(state, co, default, false);
-        var frames = new LuaStackFrame[lv.Count];
+        var frames = new LuaTraceEntry[lv.Count];
         for (int i = 0; i < frames.Length; i++)
         {
             Level l = lv[i];
@@ -347,8 +346,8 @@ internal static class DebugLib
             string? global = l.Fn.IsNil ? null : GlobalFuncName(state, l.Fn);
             (_, string? name) = NameOf(co, lv, i);
             frames[i] = p is null
-                ? new LuaStackFrame(global ?? name, "[C]", 0, true)
-                : new LuaStackFrame(global ?? name, ChunkId(p.ChunkName), CurrentLine(co, co.Frames[l.Frame]!, l.Frame), false);
+                ? new LuaTraceEntry(global ?? name, "[C]", 0, true)
+                : new LuaTraceEntry(global ?? name, ChunkId(p.ChunkName), CurrentLine(co, co.Frames[l.Frame]!, l.Frame), false);
         }
         return frames;
     }
@@ -497,7 +496,7 @@ internal static class DebugLib
         }
         long level = LibArgs.CheckInteger("getlocal", args, a);
         var levels = Levels(state, co, Lookup(state, "debug", "getlocal"), co == state.Running);
-        if (level < 0 || level >= levels.Count) throw LuaErrors.ArgError(a + 1, "getlocal", "level out of range");
+        if (level < 0 || level >= levels.Count) throw LibArgs.ArgError("getlocal", a + 1, "level out of range");
         if (level == HookedLevel(co, levels) && co.HookXferBase >= 0 && levels[(int)level].Frame < 0)
         {
             // The function a call or return hook reports is a host function: its values are the transferred stack slots.
@@ -527,7 +526,7 @@ internal static class DebugLib
         int n = (int)LibArgs.CheckInteger("setlocal", args, a + 1);
         LibArgs.CheckAny("setlocal", args, a + 2);
         var levels = Levels(state, co, Lookup(state, "debug", "setlocal"), co == state.Running);
-        if (level < 0 || level >= levels.Count) throw LuaErrors.ArgError(a + 1, "setlocal", "level out of range");
+        if (level < 0 || level >= levels.Count) throw LibArgs.ArgError("setlocal", a + 1, "level out of range");
         string? name = LocalAt(co, levels[(int)level], n, out int slot);
         if (name is null) return [default];
         co.Stack[slot] = args[a + 2];
@@ -538,7 +537,7 @@ internal static class DebugLib
 
     private static LuaClosure? ClosureArg(ReadOnlySpan<LuaValue> args, int i, string fn)
     {
-        if (i >= args.Length || !args[i].IsFunction) throw LuaErrors.TypeError(args, i, fn, "function");
+        if (i >= args.Length || !args[i].IsFunction) throw LibArgs.TypeError(fn, args, i, "function");
         return args[i].Ref as LuaClosure;
     }
 
@@ -578,10 +577,10 @@ internal static class DebugLib
         int n2 = (int)LibArgs.CheckInteger("upvaluejoin", args, 3);
         LuaClosure? c1 = ClosureArg(args, 0, "upvaluejoin");
         LuaClosure? c2 = ClosureArg(args, 2, "upvaluejoin");
-        if (c1 is null) throw LuaErrors.ArgError(1, "upvaluejoin", "Lua function expected");
-        if (c2 is null) throw LuaErrors.ArgError(3, "upvaluejoin", "Lua function expected");
-        if (n1 < 1 || n1 > c1.Upvals.Length) throw LuaErrors.ArgError(2, "upvaluejoin", "invalid upvalue index");
-        if (n2 < 1 || n2 > c2.Upvals.Length) throw LuaErrors.ArgError(4, "upvaluejoin", "invalid upvalue index");
+        if (c1 is null) throw LibArgs.ArgError("upvaluejoin", 1, "Lua function expected");
+        if (c2 is null) throw LibArgs.ArgError("upvaluejoin", 3, "Lua function expected");
+        if (n1 < 1 || n1 > c1.Upvals.Length) throw LibArgs.ArgError("upvaluejoin", 2, "invalid upvalue index");
+        if (n2 < 1 || n2 > c2.Upvals.Length) throw LibArgs.ArgError("upvaluejoin", 4, "invalid upvalue index");
         c1.Upvals[n1 - 1] = c2.Upvals[n2 - 1];
         return [];
     }
@@ -599,7 +598,7 @@ internal static class DebugLib
 
     private static LuaValue[] SetUserValue(LuaState state, ReadOnlySpan<LuaValue> args)
     {
-        if (args.Length == 0 || args[0].Ref is not LuaUserdata u) throw LuaErrors.TypeError(args, 0, "setuservalue", "userdata");
+        if (args.Length == 0 || args[0].Ref is not LuaUserdata u) throw LibArgs.TypeError("setuservalue", args, 0, "userdata");
         LibArgs.CheckAny("setuservalue", args, 1);
         long n = LibArgs.OptInteger("setuservalue", args, 2, 1);
         if (n != 1 || u.Value is LuaFile) return [default];
@@ -622,7 +621,7 @@ internal static class DebugLib
             return null;
         }
         string smask = LibArgs.CheckString(state, "sethook", args, a + 1).ToString();
-        if (!args[a].IsFunction) throw LuaErrors.TypeError(args, a, "sethook", "function");
+        if (!args[a].IsFunction) throw LibArgs.TypeError("sethook", args, a, "function");
         long count = LibArgs.OptInteger("sethook", args, a + 2, 0);
         byte mask = 0;
         if (smask.Contains('c')) mask |= Coroutine.HookCall;
@@ -668,7 +667,7 @@ internal static class DebugLib
     private static LuaValue[] SetMetatable(LuaState state, ReadOnlySpan<LuaValue> args)
     {
         LibArgs.CheckAny("setmetatable", args, 0);
-        if (args.Length < 2 || !(args[1].IsNil || args[1].Ref is LuaTable)) throw LuaErrors.ArgError(2, "setmetatable", "nil or table expected");
+        if (args.Length < 2 || !(args[1].IsNil || args[1].Ref is LuaTable)) throw LibArgs.ArgError("setmetatable", 2, "nil or table expected");
         var mt = args[1].Ref as LuaTable;
         LuaValue v = args[0];
         if (v.Ref is LuaTable t)

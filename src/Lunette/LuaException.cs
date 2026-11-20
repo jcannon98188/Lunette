@@ -47,7 +47,7 @@ public sealed class LuaException : Exception
     /// The structured Lua stack captured where an uncaught error was raised, innermost first (null when the error was caught and
     /// rethrown by the host before reaching the VM, empty for a compile error).
     /// </summary>
-    public IReadOnlyList<LuaStackFrame>? StackFrames { get; internal set; }
+    public IReadOnlyList<LuaTraceEntry>? TraceEntries { get; internal set; }
 
     /// <summary>The chunk (display name) where the error was raised, or null when it has no source position.</summary>
     public string? Chunk => Locate().Chunk;
@@ -57,8 +57,8 @@ public sealed class LuaException : Exception
 
     private (string? Chunk, int Line) Locate()
     {
-        if (StackFrames is not null)
-            foreach (LuaStackFrame f in StackFrames)
+        if (TraceEntries is not null)
+            foreach (LuaTraceEntry f in TraceEntries)
                 if (!f.IsNative) return (f.Source, f.Line);
         // Compile errors (and errors without frames) carry their position as the message prefix "chunk:line:".
         string m = _message;

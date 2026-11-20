@@ -113,18 +113,7 @@ internal static class VarInfo
             case OpCode.LoadBool:
             case OpCode.GetGlobal:
             case OpCode.GetUpval:
-            case OpCode.Add:
-            case OpCode.Sub:
-            case OpCode.Mul:
-            case OpCode.Div:
-            case OpCode.IDiv:
-            case OpCode.Mod:
-            case OpCode.Pow:
-            case OpCode.BAnd:
-            case OpCode.BOr:
-            case OpCode.BXor:
-            case OpCode.Shl:
-            case OpCode.Shr:
+            case >= OpCode.Add and <= OpCode.Shr:
             case OpCode.BNot:
             case OpCode.Unm:
             case OpCode.Not:

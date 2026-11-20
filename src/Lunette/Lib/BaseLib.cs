@@ -1,3 +1,4 @@
+using static Lunette.Lib.LibArgs;
 using Lunette.Vm;
 
 namespace Lunette;
@@ -17,13 +18,13 @@ internal static class BaseLib
         state.Define("pairs", LuaValue.FromObject(new BuiltinFunction((st, args) => Pairs(st, args, next), BuiltinKind.Pairs)));
         Add(state, "ipairs", (_, args) =>
         {
-            if (args.Length == 0) throw ArgError(1, "ipairs", "value expected");
+            if (args.Length == 0) throw ArgError("ipairs", 1, "value expected");
             return Rets.Three(LuaValue.FromObject(ipairsAux), args[0], LuaValue.FromInteger(0));
         });
-        Add(state, "rawget", (_, args) => Rets.One(CheckTable(args, 1, "rawget").Get(Arg(args, 1))));
+        Add(state, "rawget", (_, args) => Rets.One(CheckTable("rawget", args, 0).Get(Arg(args, 1))));
         Add(state, "rawset", (_, args) =>
         {
-            var t = CheckTable(args, 1, "rawset");
+            var t = CheckTable("rawset", args, 0);
             Meta.RawSet(t, Arg(args, 1), Arg(args, 2), null, 0);
             return Rets.One(args[0]);
         });
@@ -33,7 +34,7 @@ internal static class BaseLib
             LuaValue v = Arg(args, 0);
             if (v.Ref is LuaTable t) return Rets.One(LuaValue.FromInteger(t.Length()));
             if (v.Ref is byte[] s) return Rets.One(LuaValue.FromInteger(new LuaString(s).Length));
-            throw ArgError(1, "rawlen", $"table or string expected, got {(args.Length > 0 ? v.TypeName : "no value")}");
+            throw ArgError("rawlen", 1, $"table or string expected, got {(args.Length > 0 ? v.TypeName : "no value")}");
         });
         Add(state, "setmetatable", SetMetatable);
         Add(state, "getmetatable", (st, args) =>
@@ -45,7 +46,7 @@ internal static class BaseLib
         });
         Add(state, "tostring", (st, args) =>
         {
-            if (args.Length == 0) throw ArgError(1, "tostring", "value expected");
+            if (args.Length == 0) throw ArgError("tostring", 1, "value expected");
             return Rets.One(LuaValue.FromString(Meta.ToStringValue(st, args[0])));
         });
         Add(state, "tonumber", ToNumber);
@@ -56,12 +57,12 @@ internal static class BaseLib
     {
         if (args.Length > 0 && args[0].Ref is byte[] raw && new LuaString(raw).Length == 1 && new LuaString(raw)[0] == (byte)'#')
             return Rets.One(LuaValue.FromInteger(args.Length - 1));
-        long n = Lib.LibArgs.CheckInteger("select", args, 0);
+        long n = CheckInteger("select", args, 0);
         int count = args.Length - 1;
         if (n < 0) n = count + n;
         else if (n > count) n = count + 1;
         else n--;
-        if (n < 0) throw ArgError(1, "select", "index out of range");
+        if (n < 0) throw ArgError("select", 1, "index out of range");
         if (n < 0 || n >= count) return [];
         var rest = args[(int)(n + 1)..];
         return rest.Length switch
@@ -76,27 +77,16 @@ internal static class BaseLib
     private static void Add(LuaState state, string name, BuiltinBody body) =>
         state.Define(name, LuaValue.FromObject(new BuiltinFunction(body)));
 
-    private static LuaValue Arg(ReadOnlySpan<LuaValue> args, int i) => i < args.Length ? args[i] : default;
-
-    private static LuaException ArgError(int n, string fn, string msg) => LuaErrors.ArgError(n, fn, msg);
-
-    private static LuaTable CheckTable(ReadOnlySpan<LuaValue> args, int n, string fn)
-    {
-        if (n <= args.Length && args[n - 1].Ref is LuaTable t) return t;
-        string got = n <= args.Length ? Vm.Meta.ArgTypeName(args[n - 1]) : "no value";
-        throw ArgError(n, fn, $"table expected, got {got}");
-    }
-
     private static LuaValue[] ToNumber(LuaState state, ReadOnlySpan<LuaValue> args)
     {
         if (args.Length < 2 || args[1].IsNil)
         {
-            if (args.Length == 0) throw ArgError(1, "tonumber", "value expected");
+            if (args.Length == 0) throw ArgError("tonumber", 1, "value expected");
             return Rets.One(StringConv.TryToNumber(args[0], out LuaValue n) ? n : default);
         }
-        long b = Lib.LibArgs.CheckInteger("tonumber", args, 1);
-        if (args[0].Ref is not byte[] raw) throw Lib.LibArgs.TypeError("tonumber", args, 0, "string");
-        if (b < 2 || b > 36) throw ArgError(2, "tonumber", "base out of range");
+        long b = CheckInteger("tonumber", args, 1);
+        if (args[0].Ref is not byte[] raw) throw TypeError("tonumber", args, 0, "string");
+        if (b < 2 || b > 36) throw ArgError("tonumber", 2, "base out of range");
         ReadOnlySpan<byte> s = new LuaString(raw).Bytes;
         int i = 0;
         while (i < s.Length && (s[i] == (byte)' ' || (uint)(s[i] - 9) < 5)) i++;
@@ -119,20 +109,20 @@ internal static class BaseLib
 
     private static LuaValue[] Type(LuaState state, ReadOnlySpan<LuaValue> args)
     {
-        if (args.Length == 0) throw ArgError(1, "type", "value expected");
+        if (args.Length == 0) throw ArgError("type", 1, "value expected");
         return Rets.One(LuaValue.FromString(state.Strings.FromUtf16(args[0].TypeName)));
     }
 
     private static LuaValue[] Next(LuaState state, ReadOnlySpan<LuaValue> args)
     {
-        var t = CheckTable(args, 1, "next");
+        var t = CheckTable("next", args, 0);
         if (t.Next(Arg(args, 1), out var k, out var v)) return Rets.Two(k, v);
         return Rets.One(default);
     }
 
     private static LuaValue[] Pairs(LuaState state, ReadOnlySpan<LuaValue> args, BuiltinFunction next)
     {
-        if (args.Length == 0) throw ArgError(1, "pairs", "value expected");
+        if (args.Length == 0) throw ArgError("pairs", 1, "value expected");
         var mt = Meta.GetMetatable(state, args[0]);
         LuaValue tm = mt is null ? default : mt.Get(PairsKey);
         if (tm.IsNil) return Rets.Three(LuaValue.FromObject(next), args[0], default);
@@ -149,9 +139,9 @@ internal static class BaseLib
 
     private static LuaValue[] SetMetatable(LuaState state, ReadOnlySpan<LuaValue> args)
     {
-        var t = CheckTable(args, 1, "setmetatable");
+        var t = CheckTable("setmetatable", args, 0);
         LuaValue m = Arg(args, 1);
-        if (!(m.IsNil || m.Ref is LuaTable)) throw ArgError(2, "setmetatable", "nil or table expected");
+        if (!(m.IsNil || m.Ref is LuaTable)) throw ArgError("setmetatable", 2, "nil or table expected");
         if (t.Metatable is not null && !t.Metatable.Get(ProtectedKey).IsNil)
             throw LuaErrors.Error("cannot change a protected metatable");
         t.Metatable = m.Ref as LuaTable;

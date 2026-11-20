@@ -137,4 +137,65 @@ public class BudgetAbortTests
         var e = Aborts(state, "local keep = {} for i = 1, 1e9 do keep[i % 8] = coroutine.create(function() return i end) end");
         Assert.Equal(LuaAbortKind.MemoryLimit, e.Kind);
     }
+
+    // ---- ticket 23 item 3: the memory count covers frames, stacks and userdata ----
+
+    [Fact]
+    public void Memory_counts_call_frames_and_the_stack_they_grow()
+    {
+        var state = new LuaState(new LuaLimits { MemoryLimitBytes = 300_000 });
+        var e = Aborts(state, "local function f(n) local a, b, c = n, n, n return 1 + f(n + 1) end pcall(f, 1) escaped = true");
+        Assert.Equal(LuaAbortKind.MemoryLimit, e.Kind);
+        Assert.True(state.GetGlobal("escaped").IsNil);
+    }
+
+    [Fact]
+    public void Memory_counts_a_stack_grown_by_a_vararg_call_and_by_coroutine_stacks()
+    {
+        var state = new LuaState(new LuaLimits { MemoryLimitBytes = 1_000_000 });
+        Assert.Equal(LuaAbortKind.MemoryLimit, Aborts(state, "local t = {} for i = 1, 20000 do t[i] = i end local function f(...) return select('#', ...) end for i = 1, 1e9 do f(table.unpack(t)) end").Kind);
+        state = new LuaState(new LuaLimits { MemoryLimitBytes = 1_000_000 });
+        Assert.Equal(LuaAbortKind.MemoryLimit, Aborts(state, "local keep = {} for i = 1, 1e9 do local co = coroutine.wrap(function(...) coroutine.yield(...) end) co(1, 2, 3) keep[i % 8] = co end").Kind);
+    }
+
+    [Fact]
+    public void Memory_counts_userdata_the_host_creates()
+    {
+        var state = new LuaState(new LuaLimits { MemoryLimitBytes = 1_000_000 });
+        state.Register("mk", (ref CallContext ctx) =>
+        {
+            ctx.Push(LuaValue.FromUserdata(ctx.State.CreateUserdata(new object())));
+            return 1;
+        });
+        var e = Aborts(state, "local keep = {} for i = 1, 1e9 do keep[i % 8] = mk() end escaped = true");
+        Assert.Equal(LuaAbortKind.MemoryLimit, e.Kind);
+        Assert.True(state.GetGlobal("escaped").IsNil);
+    }
+
+    // ---- an abort inside an xpcall message handler and inside coroutine.close ----
+
+    [Fact]
+    public void An_abort_inside_an_xpcall_message_handler_reaches_the_host()
+    {
+        var state = Budgeted();
+        var e = Aborts(state, "xpcall(function() error('boom') end, function(m) while true do end end) escaped = true");
+        Assert.Equal(LuaAbortKind.InstructionBudget, e.Kind);
+        Assert.True(state.GetGlobal("escaped").IsNil);
+        state = new LuaState(new LuaLimits { MemoryLimitBytes = 1_000_000 });
+        e = Aborts(state, "xpcall(error, function(m) local t = {} for i = 1, 1e9 do t[i] = i end end, 'boom') escaped = true");
+        Assert.Equal(LuaAbortKind.MemoryLimit, e.Kind);
+        Assert.True(state.GetGlobal("escaped").IsNil);
+    }
+
+    [Fact]
+    public void An_abort_inside_coroutine_close_is_not_swallowed()
+    {
+        const string suspended = "local co = coroutine.create(function() local x <close> = setmetatable({}, {__close = function() while true do end end}) coroutine.yield() end) coroutine.resume(co) ";
+        var state = Budgeted();
+        Aborts(state, suspended + "coroutine.close(co) escaped = true");
+        Assert.True(state.GetGlobal("escaped").IsNil);
+        state = Budgeted();
+        Aborts(state, suspended + "pcall(coroutine.close, co) escaped = true");
+        Assert.True(state.GetGlobal("escaped").IsNil);
+    }
 }

@@ -180,6 +180,10 @@ internal static class Meta
 
     // ---- operators ----
 
+    /// <summary>True for the binary arithmetic and bitwise opcodes (Add through Shr), the ones <see cref="ArithEvent"/> maps.</summary>
+    public static bool IsBinaryArith(OpCode op) => op is >= OpCode.Add and <= OpCode.Shr;
+
+    /// <summary>The metamethod event of a binary arithmetic or bitwise opcode; any other opcode is a caller bug.</summary>
     public static TagMethod ArithEvent(OpCode op) => op switch
     {
         OpCode.Add => TagMethod.Add,
@@ -194,8 +198,14 @@ internal static class Meta
         OpCode.BXor => TagMethod.BXor,
         OpCode.Shl => TagMethod.Shl,
         OpCode.Shr => TagMethod.Shr,
-        _ => TagMethod.Unm,
+        _ => throw UnmappedOperator(op),
     };
+
+    private static InvalidOperationException UnmappedOperator<T>(T op) where T : struct, Enum
+    {
+        System.Diagnostics.Debug.Fail($"no operator mapping for {op}");
+        return new InvalidOperationException($"no operator mapping for {op}");
+    }
 
     /// <summary>Binary arithmetic where an operand is not a number: try the metamethods, else raise the error.</summary>
     public static LuaValue Arith(LuaState state, TagMethod ev, LuaValue a, LuaValue b, Proto? p, int pc) =>
@@ -232,7 +242,8 @@ internal static class Meta
             TagMethod.Pow => "pow",
             TagMethod.Div => "div",
             TagMethod.IDiv => "idiv",
-            _ => "unm",
+            TagMethod.Unm => "unm",
+            _ => throw UnmappedOperator(ev),
         };
         return new LuaException($"{At(p, pc)}attempt to {op} a '{a.TypeName}' with a '{b.TypeName}'");
     }
@@ -245,7 +256,8 @@ internal static class Meta
         TagMethod.Mod => OpCode.Mod,
         TagMethod.Pow => OpCode.Pow,
         TagMethod.Div => OpCode.Div,
-        _ => OpCode.IDiv,
+        TagMethod.IDiv => OpCode.IDiv,
+        _ => throw UnmappedOperator(ev),
     };
 
     private static string OperationName(TagMethod ev) =>

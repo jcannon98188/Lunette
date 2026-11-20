@@ -1,12 +1,12 @@
 namespace Lunette;
 
 /// <summary>
-/// One level of the Lua call stack as captured where an uncaught error was raised (<see cref="LuaException.StackFrames"/>).
+/// One level of the Lua call stack as captured where an uncaught error was raised (<see cref="LuaException.TraceEntries"/>).
 /// Innermost first. A dev-mode console reads these directly; the <c>debug</c> library does not have to be exposed to scripts.
 /// </summary>
-public sealed class LuaStackFrame
+public sealed class LuaTraceEntry
 {
-    internal LuaStackFrame(string? functionName, string source, int line, bool isNative)
+    internal LuaTraceEntry(string? functionName, string source, int line, bool isNative)
     {
         FunctionName = functionName;
         Source = source;

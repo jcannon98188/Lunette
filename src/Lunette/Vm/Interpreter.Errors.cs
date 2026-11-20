@@ -1,3 +1,4 @@
+using Lunette.Lib;
 using Lunette.Compiler;
 
 namespace Lunette.Vm;
@@ -180,7 +181,7 @@ internal static partial class Interpreter
             }
             case BuiltinKind.Assert:
             {
-                if (nargs == 0) throw LuaErrors.ArgError(1, "assert", "value expected");
+                if (nargs == 0) throw LibArgs.ArgError("assert", 1, "value expected");
                 if (!st[fa + 1].IsFalsy)
                 {
                     Array.Copy(st, fa + 1, st, fa, nargs);
