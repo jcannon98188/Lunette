@@ -303,3 +303,24 @@ Kept:
 No new `Lunette.Unsafe` helpers (`Regs.At`/`Regs.Copy` only), so the safe twin needed nothing new.
 
 Not done: a fused step for `pairs` over tables with `__pairs`/`__index` iterators or for closures (they take the ordinary call path); the remaining cost per iteration is `LuaTable.Step`'s key lookup (hash part) and the 16-byte value copies.
+
+## Host-to-Lua calls (ticket 49): embedder per-frame pattern
+
+Benchmark: `bench/Lunette.Benchmarks/HostCallBenchmarks.cs` (`dotnet run -c Release --project bench/Lunette.Benchmarks -- --filter "*HostCall*"`) calls a Lua function repeatedly from C#;
+`bench/embed-puc.c` does the same from C with `lua_call` against PUC 5.4.9 (`cc -O2 -I<lua-src> bench/embed-puc.c <lua-src>/liblua.a -lm -ldl`). Same function shapes in both.
+Caveat: Lunette numbers are from Windows (i9-9900KF, BenchmarkDotNet in-process), PUC from WSL Ubuntu on the same machine, so the ratio is indicative only.
+
+| shape | PUC ns/call | Lunette ns/call | ratio | Lunette alloc/call |
+|---|---:|---:|---:|---:|
+| 0 args, first result (`Call(f)`) | 14.5 | 41.5 | 2.9x | 0 |
+| 3 args, first result (`Call(f, a, b, c)`) | 18.5 | 52.6 | 2.8x | 0 |
+| 3 args via span, 1 result (`Call(f, span)` -> `LuaValue[]`) | 18.5 | 62.0 | 3.4x | 40 B |
+| 3 args via span, 3 results | 26.9 | 74.4 | 2.8x | 72 B |
+
+The `.ToArray()` at the end of `Interpreter.CallValues` is the result array the public `Call(LuaFunction, ReadOnlySpan<LuaValue>)` signature promises: 40 B for one result, 72 B for three (array header
+plus 16 bytes per value). It is worth about 9 to 12 ns per call (62.0 vs 52.6 ns for the same call through the allocation-free overload, which also includes the argument span copy), and Gen0 only
+rises to 0.005 to 0.009 collections per 1000 calls. Embedders who care already have the allocation-free `Call(f, a, b, c, d)` overloads (first result, zero bytes).
+
+Decision: no engine change. Removing the array would need a new public API (for example results written into a caller span), not a different implementation of the existing one, and the saving is a
+small share of a call whose cost is dominated elsewhere: the 2.8x gap against `lua_call` is the fixed entry path (`CallAt` try/finally and native-depth bookkeeping, `Precall`, `Run`'s try and the
+`RunLoop` prologue), the same cost that shows up in the callback path of `gsub`. If that gap matters, shrinking the host-call entry (not the result array) is the lever; no ticket was opened.
