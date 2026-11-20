@@ -115,7 +115,7 @@ internal sealed class MathLib
             }
             return One(LuaValue.FromInteger(x.AsInteger % d));
         }
-        return One(Num("fmod", a, 0) % Num("fmod", a, 1));
+        return One(LuaNumber.FMod(Num("fmod", a, 0), Num("fmod", a, 1)));
     }
 
     private static LuaValue[] Modf(LuaState _, ReadOnlySpan<LuaValue> a)
@@ -237,7 +237,7 @@ internal sealed class MathLib
             default:
                 throw LuaErrors.Error("wrong number of arguments");
         }
-        if (low > up) throw ArgError("random", a.Length - 1, "interval is empty");
+        if (low > up) throw ArgError("random", 0, "interval is empty");
         return One(LuaValue.FromInteger(unchecked((long)(Project(rv, (ulong)up - (ulong)low) + (ulong)low))));
     }
 
@@ -255,8 +255,7 @@ internal sealed class MathLib
         }
         else
         {
-            LuaValue v = Number("randomseed", a, 0);
-            n1 = LuaNumber.TryToInteger(v, out long iv) ? iv : BitConverter.DoubleToInt64Bits(v.AsFloat);
+            n1 = Int("randomseed", a, 0);
             n2 = a.Length > 1 && !a[1].IsNil ? Int("randomseed", a, 1) : 0;
         }
         SetSeed((ulong)n1, (ulong)n2);

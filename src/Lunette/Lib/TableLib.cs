@@ -113,7 +113,7 @@ internal static class TableLib
             LuaValue v = Geti(state, t, i);
             if (v.Ref is byte[] s) b.Append(new LuaString(s).Bytes);
             else if (v.IsNumber) b.Append(StringConv.NumberToString(state, v).Bytes);
-            else throw LuaErrors.Error($"invalid value (at index {i}) in table for 'concat'");
+            else throw LuaErrors.Error($"invalid value ({v.TypeName}) at index {i} in table for 'concat'");
             if (i != last) b.Append(sep.Bytes);
             if (i == long.MaxValue) break;
         }

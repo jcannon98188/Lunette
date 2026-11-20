@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   fresh-seeds:
@@ -39,3 +40,18 @@ jobs:
           path: ${{ github.workspace }}/diff-failures
           if-no-files-found: ignore
           retention-days: 14
+      # Open the tracking issue, or comment on it if one is already open.
+      - name: Open or update tracking issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Nightly differential run failing"
+          body="Run ${RUN_URL} failed (seeds ${LUNETTE_DIFF_SEEDS}). Download the differential-failing-seeds artifact, minimise, and commit to tests/differential/corpus."
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi

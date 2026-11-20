@@ -24,7 +24,7 @@ public class MathGlobalTests
     [InlineData("return 'a' | 0", "attempt to perform bitwise operation on a string value")]
     // 5.4 core does not coerce strings for bitwise ops (the suite's bwcoercion.lua adds it back via metamethods).
     [InlineData("return '3' | 0", "attempt to perform bitwise operation on a string value")]
-    [InlineData("return 'a' + 1", "attempt to perform arithmetic on a string value")]
+    [InlineData("return 'a' + 1", "attempt to add a 'string' with a 'number'")]
     [InlineData("select(0)", "bad argument #1 to 'select' (index out of range)")]
     public void Errors(string src, string fragment) =>
         Assert.Contains(fragment, Assert.Throws<LuaException>(() => Run(src)).Message);

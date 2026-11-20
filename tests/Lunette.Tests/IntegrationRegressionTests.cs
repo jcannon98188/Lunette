@@ -82,7 +82,7 @@ public class IntegrationRegressionTests
     [Fact]
     public void String_format_rejects_flags_a_conversion_does_not_take()
     {
-        Assert.Contains("invalid conversion '%010c' to 'format'", Run("print(pcall(string.format, '%010c', 65))"));
+        Assert.Contains("invalid conversion specification: '%010c'", Run("print(pcall(string.format, '%010c', 65))"));
     }
 
     [Fact]

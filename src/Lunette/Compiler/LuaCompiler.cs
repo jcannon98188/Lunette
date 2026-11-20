@@ -185,6 +185,17 @@ internal sealed class LuaCompiler
         Advance();
     }
 
+    /// <summary>lparser.c check_match: closes a construct opened at <paramref name="line"/>; names the opener when it is on another line.</summary>
+    private void ExpectMatch(Tok kind, string what, string who, int line)
+    {
+        if (_tok.Kind != kind)
+        {
+            if (line == _tok.Line) throw Err($"'{what}' expected");
+            throw Err($"'{what}' expected (to close '{who}' at line {line})");
+        }
+        Advance();
+    }
+
     private string ExpectName()
     {
         if (_tok.Kind != Tok.Name) throw Err("<name> expected");
@@ -537,9 +548,10 @@ internal sealed class LuaCompiler
                 return;
             case Tok.Do:
             {
+                int doLine = _tok.Line;
                 Advance();
                 ScopedBlock();
-                Expect(Tok.End, "end");
+                ExpectMatch(Tok.End, "end", "do", doLine);
                 return;
             }
             case Tok.Break:
@@ -564,7 +576,7 @@ internal sealed class LuaCompiler
     {
         int line = _tok.Line;
         Advance();
-        if (_fs.Loops.Count == 0) throw _lex.Error($"break outside a loop at line {line}", line);
+        if (_fs.Loops.Count == 0) throw _lex.Error($"break outside loop at line {line}", line);
         var loop = _fs.Loops[^1];
         Emit(Instruction.Abc(OpCode.Close, loop.BaseReg, 0, 0), line);
         loop.Breaks.Add(EmitJmp(line));
@@ -596,7 +608,6 @@ internal sealed class LuaCompiler
             else Emit(Instruction.Abc(OpCode.Return, first, n + 1, 0), line);
         }
         if (_tok.Kind == Tok.Semi) Advance();
-        if (!BlockFollow()) throw Err("<eof> expected");
         _fs.Free = first;
     }
 
@@ -855,6 +866,7 @@ internal sealed class LuaCompiler
     private void IfStatement()
     {
         var endJumps = new List<int>();
+        int ifLine = _tok.Line;
         while (true)
         {
             int line = _tok.Line;
@@ -872,7 +884,7 @@ internal sealed class LuaCompiler
             }
             break;
         }
-        Expect(Tok.End, "end");
+        ExpectMatch(Tok.End, "end", "if", ifLine);
         foreach (int j in endJumps) PatchJmp(j, Here);
     }
 
@@ -898,7 +910,7 @@ internal sealed class LuaCompiler
         var loop = new LoopInfo(_fs.Free);
         _fs.Loops.Add(loop);
         ScopedBlock();
-        Expect(Tok.End, "end");
+        ExpectMatch(Tok.End, "end", "while", line);
         _fs.Loops.RemoveAt(_fs.Loops.Count - 1);
         PatchJmp(EmitJmp(line), top);
         PatchJmp(exit, Here);
@@ -916,7 +928,7 @@ internal sealed class LuaCompiler
         int free = _fs.Free;
         EnterBlock();
         Block();
-        Expect(Tok.Until, "until");
+        ExpectMatch(Tok.Until, "until", "repeat", line);
         int t = Alloc();
         Expr(t, 0);
         bool captured = false;
@@ -967,7 +979,7 @@ internal sealed class LuaCompiler
         EnterBlock();
         Block();
         LeaveBlock();
-        Expect(Tok.End, "end");
+        ExpectMatch(Tok.End, "end", "for", line);
         _fs.Loops.RemoveAt(_fs.Loops.Count - 1);
         LeaveScope(nlocals, free);
         Emit(Instruction.Abc(OpCode.ForLoop, a, 0, 0), line);
@@ -1005,7 +1017,7 @@ internal sealed class LuaCompiler
         EnterBlock();
         Block();
         LeaveBlock();
-        Expect(Tok.End, "end");
+        ExpectMatch(Tok.End, "end", "for", line);
         LeaveBlock();
         _fs.Loops.RemoveAt(_fs.Loops.Count - 1);
         LeaveScope(nlocals, free);
@@ -1055,7 +1067,7 @@ internal sealed class LuaCompiler
         Block();
         int endLine = _tok.Line;
         child.LastLineDefined = endLine;
-        Expect(Tok.End, "end");
+        ExpectMatch(Tok.End, "end", "function", line);
         LeaveBlock();
         Emit(Instruction.Abc(OpCode.Return, 0, 1, 0), endLine);
         _fs = child.Parent!;

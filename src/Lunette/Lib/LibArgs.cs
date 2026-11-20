@@ -6,7 +6,7 @@ internal static class LibArgs
     public static LuaValue Arg(ReadOnlySpan<LuaValue> args, int i) => i < args.Length ? args[i] : default;
 
     public static LuaException ArgError(string fn, int index1, string msg) =>
-        new($"bad argument #{index1} to '{fn}' ({msg})");
+        LuaErrors.ArgError(index1, fn, msg);
 
     public static LuaException TypeError(string fn, ReadOnlySpan<LuaValue> args, int i, string expected) =>
         ArgError(fn, i + 1, $"{expected} expected, got {(i < args.Length ? Vm.Meta.ObjTypeName(args[i]) : "no value")}");

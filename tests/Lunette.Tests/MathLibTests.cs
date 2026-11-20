@@ -149,7 +149,7 @@ public class MathLibTests
         long any = long.Parse(Call(a, "random", I(0)));
         _ = any;
         var ex = Assert.Throws<LuaException>(() => Call(a, "random", I(3), I(2)));
-        Assert.Equal("bad argument #2 to 'random' (interval is empty)", ex.Message);
+        Assert.Equal("bad argument #1 to 'random' (interval is empty)", ex.Message);
         ex = Assert.Throws<LuaException>(() => Call(a, "random", I(1), I(2), I(3)));
         Assert.Equal("wrong number of arguments", ex.Message);
     }
