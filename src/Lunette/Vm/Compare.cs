@@ -22,6 +22,13 @@ internal static class Compare
         throw Error(a, b, p, pc);
     }
 
+    /// <summary>a &lt; b for two number values (integer or float), exactly; false when either is NaN.</summary>
+    public static bool NumberLessThan(LuaValue a, LuaValue b)
+    {
+        if (a.IsInteger) return b.IsInteger ? a.AsInteger < b.AsInteger : IntLtFloat(a.AsInteger, b.AsFloat);
+        return b.IsFloat ? a.AsFloat < b.AsFloat : FloatLtInt(a.AsFloat, b.AsInteger);
+    }
+
     public static bool LessEqual(LuaValue a, LuaValue b, Proto p, int pc)
     {
         if (a.IsInteger)

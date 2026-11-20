@@ -162,6 +162,34 @@ internal static class Interpreter
                     }
                     break;
                 }
+                case OpCode.BAnd:
+                case OpCode.BOr:
+                case OpCode.BXor:
+                case OpCode.Shl:
+                case OpCode.Shr:
+                {
+                    LuaValue lhs = r[bs + i.B], rhs = r[bs + i.C];
+                    if (lhs.IsNumber && rhs.IsNumber) r[bs + i.A] = Arith.Bitwise(i.Op, lhs, rhs, proto, pc - 1);
+                    else
+                    {
+                        LuaValue res = Meta.Arith(state, Meta.ArithEvent(i.Op), lhs, rhs, proto, pc - 1);
+                        r = co.Stack;
+                        r[bs + i.A] = res;
+                    }
+                    break;
+                }
+                case OpCode.BNot:
+                {
+                    LuaValue v = r[bs + i.B];
+                    if (v.IsNumber) r[bs + i.A] = Arith.BitwiseNot(v, proto, pc - 1);
+                    else
+                    {
+                        LuaValue res = Meta.Unary(state, TagMethod.BNot, v, proto, pc - 1);
+                        r = co.Stack;
+                        r[bs + i.A] = res;
+                    }
+                    break;
+                }
                 case OpCode.Unm:
                 {
                     LuaValue v = r[bs + i.B];

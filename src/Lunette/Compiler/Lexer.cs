@@ -9,6 +9,7 @@ internal enum Tok
     If, Then, Else, Elseif, End, While, Do, Repeat, Until, For, Function, Return, Break, And, Or, Not, In,
     Eq, Ne, Lt, Le, Gt, Ge, Ellipsis,
     Plus, Minus, Star, Slash, DSlash, Percent, Caret,
+    Amp, Pipe, Tilde, Shl, Shr,
     LParen, RParen, Comma, Assign, Semi,
     String, Hash, LBrace, RBrace, LBracket, RBracket, Dot, Colon,
 }
@@ -85,12 +86,16 @@ internal sealed class Lexer(string src, string chunkName)
                 t.Kind = Tok.Assign; break;
             case '~':
                 if (_pos < src.Length && src[_pos] == '=') { _pos++; t.Kind = Tok.Ne; t.Text = "~="; return t; }
-                throw Error("unexpected symbol near '~'", _line);
+                t.Kind = Tok.Tilde; break;
+            case '&': t.Kind = Tok.Amp; break;
+            case '|': t.Kind = Tok.Pipe; break;
             case '<':
                 if (_pos < src.Length && src[_pos] == '=') { _pos++; t.Kind = Tok.Le; t.Text = "<="; return t; }
+                if (_pos < src.Length && src[_pos] == '<') { _pos++; t.Kind = Tok.Shl; t.Text = "<<"; return t; }
                 t.Kind = Tok.Lt; break;
             case '>':
                 if (_pos < src.Length && src[_pos] == '=') { _pos++; t.Kind = Tok.Ge; t.Text = ">="; return t; }
+                if (_pos < src.Length && src[_pos] == '>') { _pos++; t.Kind = Tok.Shr; t.Text = ">>"; return t; }
                 t.Kind = Tok.Gt; break;
             case '.':
                 if (_pos + 1 < src.Length && src[_pos] == '.' && src[_pos + 1] == '.') { _pos += 2; t.Kind = Tok.Ellipsis; t.Text = "..."; return t; }
@@ -141,43 +146,24 @@ internal sealed class Lexer(string src, string chunkName)
 
     private Token Number(Token t)
     {
+        // Like PUC read_numeral: take the longest run of digits, dots, exponent marks (with sign) and letters,
+        // then let the numeric parser decide whether it is well formed.
         int s = _pos;
-        if (src[_pos] == '0' && _pos + 1 < src.Length && src[_pos + 1] is 'x' or 'X')
+        bool hex = src[_pos] == '0' && _pos + 1 < src.Length && src[_pos + 1] is 'x' or 'X';
+        if (hex) _pos += 2;
+        while (_pos < src.Length)
         {
-            _pos += 2;
-            int hs = _pos;
-            while (_pos < src.Length && char.IsAsciiHexDigit(src[_pos])) _pos++;
-            if (hs == _pos) throw Error("malformed number near '" + src[s.._pos] + "'", _line);
-            ulong v = 0;
-            for (int i = hs; i < _pos; i++) v = unchecked(v * 16 + (ulong)Convert.ToInt32(src[i].ToString(), 16));
-            t.Kind = Tok.Integer; t.Int = unchecked((long)v); t.Text = src[s.._pos];
-            return t;
-        }
-        bool isFloat = false;
-        while (_pos < src.Length && char.IsAsciiDigit(src[_pos])) _pos++;
-        if (_pos < src.Length && src[_pos] == '.')
-        {
-            isFloat = true; _pos++;
-            while (_pos < src.Length && char.IsAsciiDigit(src[_pos])) _pos++;
-        }
-        if (_pos < src.Length && src[_pos] is 'e' or 'E')
-        {
-            isFloat = true; _pos++;
-            if (_pos < src.Length && src[_pos] is '+' or '-') _pos++;
-            int es = _pos;
-            while (_pos < src.Length && char.IsAsciiDigit(src[_pos])) _pos++;
-            if (es == _pos) throw Error("malformed number near '" + src[s.._pos] + "'", _line);
+            char c = src[_pos];
+            bool isExp = hex ? c is 'p' or 'P' : c is 'e' or 'E';
+            if (isExp && _pos + 1 < src.Length && src[_pos + 1] is '+' or '-') _pos += 2;
+            else if (char.IsAsciiHexDigit(c) || c == '.' || char.IsAsciiLetter(c) || c == '_') _pos++;
+            else break;
         }
         string text = src[s.._pos];
         t.Text = text;
-        if (!isFloat && long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out long iv))
-        {
-            t.Kind = Tok.Integer; t.Int = iv;
-        }
-        else
-        {
-            t.Kind = Tok.Float; t.Float = double.Parse(text, NumberStyles.Float, CultureInfo.InvariantCulture);
-        }
+        if (!LuaNumber.TryParse(text, out LuaValue v)) throw Error("malformed number near '" + text + "'", _line);
+        if (v.IsInteger) { t.Kind = Tok.Integer; t.Int = v.AsInteger; }
+        else { t.Kind = Tok.Float; t.Float = v.AsFloat; }
         return t;
     }
 

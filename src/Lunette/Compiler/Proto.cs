@@ -17,7 +17,13 @@ internal enum OpCode : byte
     IDiv,
     Mod,
     Pow,
-    Unm,       // R[A] = -R[B]
+    BAnd,      // R[A] = R[B] & R[C]
+    BOr,
+    BXor,
+    Shl,
+    Shr,
+    BNot,      // R[A] = ~R[B]
+    Unm,      // R[A] = -R[B]
     Not,       // R[A] = not R[B]
     Eq,        // R[A] = R[B] == R[C]
     Lt,        // R[A] = R[B] < R[C]

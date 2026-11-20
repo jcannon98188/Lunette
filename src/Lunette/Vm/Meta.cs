@@ -98,6 +98,11 @@ internal static class Meta
         OpCode.IDiv => TagMethod.IDiv,
         OpCode.Mod => TagMethod.Mod,
         OpCode.Pow => TagMethod.Pow,
+        OpCode.BAnd => TagMethod.BAnd,
+        OpCode.BOr => TagMethod.BOr,
+        OpCode.BXor => TagMethod.BXor,
+        OpCode.Shl => TagMethod.Shl,
+        OpCode.Shr => TagMethod.Shr,
         _ => TagMethod.Unm,
     };
 
@@ -109,15 +114,20 @@ internal static class Meta
         if (tm.IsNil)
         {
             LuaValue bad = a.IsNumber ? b : a;
-            throw new LuaException($"{At(p, pc)}attempt to perform arithmetic on a {bad.TypeName} value");
+            throw new LuaException($"{At(p, pc)}attempt to perform {OperationName(ev)} on a {bad.TypeName} value");
         }
         return Interpreter.Call1(state, tm, a, b, default, 2);
     }
 
-    public static LuaValue Unm(LuaState state, LuaValue a, Proto? p, int pc)
+    private static string OperationName(TagMethod ev) =>
+        ev is >= TagMethod.BAnd and <= TagMethod.Shr or TagMethod.BNot ? "bitwise operation" : "arithmetic";
+
+    public static LuaValue Unm(LuaState state, LuaValue a, Proto? p, int pc) => Unary(state, TagMethod.Unm, a, p, pc);
+
+    public static LuaValue Unary(LuaState state, TagMethod ev, LuaValue a, Proto? p, int pc)
     {
-        LuaValue tm = GetTagMethod(a, TagMethod.Unm);
-        if (tm.IsNil) throw new LuaException($"{At(p, pc)}attempt to perform arithmetic on a {a.TypeName} value");
+        LuaValue tm = GetTagMethod(a, ev);
+        if (tm.IsNil) throw new LuaException($"{At(p, pc)}attempt to perform {OperationName(ev)} on a {a.TypeName} value");
         return Interpreter.Call1(state, tm, a, a, default, 2);
     }
 
