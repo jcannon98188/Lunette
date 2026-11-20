@@ -82,6 +82,9 @@ internal sealed class Coroutine
     public bool Started;
     /// <summary>Set by a yield: the dispatch loop returned so the resumer can take <see cref="YieldValues"/>.</summary>
     public bool Yielded;
+    /// <summary>A full collection requested by <c>collectgarbage</c>; the loop returned so <see cref="Interpreter"/> runs it, and where its result goes.</summary>
+    public bool CollectPending;
+    public int CollectFa, CollectNargs, CollectWanted;
     public LuaValue[] YieldValues = [];
     /// <summary>Where the results of the pending yield call go once resumed, how many are wanted, and whether a pcall status (true) leads them.</summary>
     public int YieldFa;

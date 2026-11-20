@@ -147,6 +147,7 @@ internal static class BaseLib
         if (t.Metatable is not null && !t.Metatable.Get(ProtectedKey).IsNil)
             throw LuaErrors.Error("cannot change a protected metatable");
         t.Metatable = m.Ref as LuaTable;
+        state.Gc.OnSetMetatable(t, t.Metatable);
         return [args[0]];
     }
 }

@@ -5,8 +5,12 @@ using Lunette.Vm;
 namespace Lunette;
 
 /// <summary>The single-threaded embedding root: owns globals and the output sink.</summary>
-public sealed class LuaState
+public sealed class LuaState : IDisposable
 {
+    /// <summary>Collector bookkeeping: <c>__gc</c>, weak tables and the <c>collectgarbage</c> options.</summary>
+    internal Gc.GcState Gc { get; }
+    /// <summary>Back-edges left before the interpreter's next collector safepoint.</summary>
+    internal int GcTick = Lunette.Gc.GcState.SafepointInterval;
     internal readonly Dictionary<string, LuaValue> Globals = new();
     /// <summary>Best-effort intern cache for short strings (ADR 0005).</summary>
     internal readonly StringCache Strings;
@@ -29,6 +33,7 @@ public sealed class LuaState
     internal LuaState(int internCapacity)
     {
         Strings = new StringCache(internCapacity);
+        Gc = new Gc.GcState(this);
         Main.IsMain = true;
         Main.Status = CoStatus.Running;
         Running = Main;
@@ -49,7 +54,11 @@ public sealed class LuaState
         MathLib.Register(this);
         ErrorLib.Register(this);
         CoroutineLib.Register(this);
+        GcLib.Register(this);
     }
+
+    /// <summary>Closes the state: runs every remaining <c>__gc</c> in reverse marking order (errors are swallowed).</summary>
+    public void Dispose() => Gc.Close();
 
     public TextWriter Output { get; set; } = Console.Out;
 

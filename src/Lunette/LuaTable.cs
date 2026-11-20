@@ -42,7 +42,7 @@ internal static class TagMethods
 /// chained scatter with Brent's variation. Matching the sizing rule makes <c>#t</c> on tables with holes
 /// identical to the reference binary. Hash-part iteration order is not specified.
 /// </summary>
-internal sealed class LuaTable
+internal sealed partial class LuaTable
 {
     private const int MaxABits = 31;
 

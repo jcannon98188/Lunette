@@ -20,6 +20,8 @@ internal static partial class Interpreter
         NewFrame,
         /// <summary>The coroutine yielded: the loop must return to the resumer.</summary>
         Yield,
+        /// <summary>A full collection was requested: the loop must return so it runs with no dispatch-loop temporaries on the stack.</summary>
+        Collect,
     }
 
     /// <summary>How many times a failing xpcall handler is retried on its own error before "error in error handling".</summary>
@@ -172,6 +174,8 @@ internal static partial class Interpreter
             }
             case BuiltinKind.Yield:
                 return DoYield(state, co, st.AsSpan(fa + 1, nargs), fa, wanted, false);
+            case BuiltinKind.Collect:
+                return RequestCollect(state, co, st.AsSpan(fa + 1, nargs), fa, nargs, wanted);
             default:
                 return Special.None;
         }

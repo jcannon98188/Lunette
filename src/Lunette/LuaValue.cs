@@ -55,6 +55,9 @@ public readonly struct LuaValue
     internal bool IsString => Ref is byte[];
     internal LuaString AsString => new((byte[])Ref!);
     internal bool IsTable => Ref is LuaTable;
+
+    /// <summary>An object the collector may reclaim (and a weak table may drop): not nil, a number, a boolean, a string or a builtin.</summary>
+    internal bool IsCollectable => Ref is not null and not byte[] and not BuiltinFunction && !IsNumber && !IsBoolean;
     internal bool IsFunction => Ref is LuaFunction;
     internal int AsBooleanBit => ReferenceEquals(Ref, TrueTag) ? 1 : 0;
 

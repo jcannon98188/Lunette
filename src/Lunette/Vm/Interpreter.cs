@@ -107,7 +107,11 @@ internal static partial class Interpreter
         {
             try
             {
-                return RunLoop(state, co, f, stop, top);
+                int result = RunLoop(state, co, f, stop, top);
+                if (!co.CollectPending) return result;
+                top = RunCollect(state, co);
+                f = co.Frames[co.Depth - 1]!;
+                continue;
             }
             catch (Exception e) when (IsLuaError(e))
             {
@@ -321,6 +325,12 @@ internal static partial class Interpreter
                     if (!r[bs + i.A].IsFalsy != (i.C != 0)) pc++;
                     break;
                 case OpCode.Jmp:
+                    if (i.Ax < pc && --state.GcTick < 0)
+                    {
+                        f.Pc = pc;
+                        state.Gc.Safepoint();
+                        r = co.Stack;
+                    }
                     pc = i.Ax;
                     break;
                 case OpCode.Call:
@@ -349,7 +359,7 @@ internal static partial class Interpreter
                             top = co.ResumeTop;
                             goto newframe;
                         }
-                        if (sp == Special.Yield) return top;
+                        if (sp is Special.Yield or Special.Collect) return top;
                         if (sp == Special.Done)
                         {
                             r = co.Stack;
@@ -390,7 +400,7 @@ internal static partial class Interpreter
                             top = co.ResumeTop;
                             goto newframe;
                         }
-                        if (sp == Special.Yield) return top;
+                        if (sp is Special.Yield or Special.Collect) return top;
                         if (sp == Special.Done)
                         {
                             r = co.Stack;
