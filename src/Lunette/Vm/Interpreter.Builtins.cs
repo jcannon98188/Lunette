@@ -92,4 +92,48 @@ internal static partial class Interpreter
         for (int j = 1; j < wanted; j++) st[fa + j] = default;
         return Special.Done;
     }
+
+    /// <summary>
+    /// The generic-for step for <c>next</c> and the <c>ipairs</c> iterator (ticket 48): the loop state is at <paramref name="ra"/>..ra+2 and the loop variables
+    /// start at ra+4. Writes the variables in place and returns true, or returns false having changed nothing (wrong types, a missing key, an
+    /// <c>__index</c> to consult) so the ordinary instruction sequence runs and reports exactly what it always did. Only the untraced loop calls it.
+    /// </summary>
+    private static bool TForFused(Coroutine co, BuiltinKind kind, int ra, int nvars)
+    {
+        var st = co.Stack;
+        if (st[ra + 1].Ref is not LuaTable t) return false;
+        if (kind == BuiltinKind.Next)
+        {
+            int step = t.Step(st[ra + 2], out LuaValue nk, out LuaValue nv);
+            if (step < 0) return false;
+            if (step == 0)
+            {
+                st[ra + 4] = default;
+                return true;
+            }
+            st[ra + 4] = nk;
+            if (nvars > 1)
+            {
+                st[ra + 5] = nv;
+                for (int j = 2; j < nvars; j++) st[ra + 4 + j] = default;
+            }
+            return true;
+        }
+        if (!st[ra + 2].IsInteger) return false;
+        long idx = unchecked(st[ra + 2].AsInteger + 1);
+        ref readonly LuaValue iv = ref t.GetIntRef(idx);
+        if (iv.IsNil)
+        {
+            if (!t.NoIndex) return false;
+            st[ra + 4] = default;
+            return true;
+        }
+        st[ra + 4] = LuaValue.FromInteger(idx);
+        if (nvars > 1)
+        {
+            st[ra + 5] = iv;
+            for (int j = 2; j < nvars; j++) st[ra + 4 + j] = default;
+        }
+        return true;
+    }
 }

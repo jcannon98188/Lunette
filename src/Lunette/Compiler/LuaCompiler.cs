@@ -1271,7 +1271,7 @@ internal sealed class LuaCompiler
         _fs.Loops.RemoveAt(_fs.Loops.Count - 1);
         LeaveScope(nlocals, free);
         PatchJmp(toCall, Here);
-        Emit(Instruction.Abc(OpCode.Move, a + 4, a, 0), inLine);
+        Emit(Instruction.Abc(OpCode.TForMove, a + 4, a, 0), inLine);
         Emit(Instruction.Abc(OpCode.Move, a + 5, a + 1, 0), inLine);
         Emit(Instruction.Abc(OpCode.Move, a + 6, a + 2, 0), inLine);
         Emit(Instruction.Abc(OpCode.Call, a + 4, 3, names.Count + 1), inLine);

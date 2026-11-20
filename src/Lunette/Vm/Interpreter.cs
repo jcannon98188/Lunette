@@ -217,6 +217,21 @@ internal static partial class Interpreter
             Instruction i = code[pc++];
             switch (i.Op)
             {
+                case OpCode.TForMove:
+                    if (!TMode.Traced && Regs.At(r, bs + i.B).Ref is BuiltinFunction { Kind: BuiltinKind.Next or BuiltinKind.IpairsAux } ib && TForFused(co, ib.Kind, bs + i.B, code[pc + 2].C - 1))
+                    {
+                        // Fused step: the Move, Move, Call and TForLoop that follow were run in place; code[pc + 4] is the loop's back Jmp, pc + 5 the Close
+                        if (!Regs.At(r, bs + i.A).IsNil)
+                        {
+                            Regs.Copy(ref Regs.At(r, bs + i.B + 2), in Regs.At(r, bs + i.A));
+                            i = code[pc + 4];
+                            pc += 5;
+                            goto case OpCode.Jmp;
+                        }
+                        pc += 5;
+                        break;
+                    }
+                    goto case OpCode.Move;
                 case OpCode.Move:
                     Regs.Copy(ref Regs.At(r, bs + i.A), in Regs.At(r, bs + i.B));
                     break;
