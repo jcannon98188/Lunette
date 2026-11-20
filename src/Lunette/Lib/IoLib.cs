@@ -25,6 +25,7 @@ internal sealed class IoLib
 
     public static void Register(LuaState state)
     {
+        if (!state.Wants("io")) return;
         var io = new IoLib(state);
         io.Install();
     }

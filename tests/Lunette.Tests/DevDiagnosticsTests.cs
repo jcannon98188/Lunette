@@ -111,6 +111,44 @@ public class DevDiagnosticsTests
     }
 
     [Fact]
+    public void A_module_loader_can_run_lua_through_DoString_and_Evaluate_while_require_is_running()
+    {
+        using var state = new LuaState(new LuaStateOptions().Allow("_G", "print", "pcall", "error", "require")
+            .AddModule("boot", s =>
+            {
+                s.DoString("booted = 20 + 1");
+                LuaEvalResult inner = s.Evaluate("booted * 2");
+                Assert.True(inner.Succeeded);
+                var t = new LuaTable();
+                t.Set(LuaValue.FromString("answer"), inner.Values[0]);
+                return LuaValue.FromTable(t);
+            }));
+        LuaEvalResult r = state.Evaluate("return require('boot').answer, booted");
+        Assert.True(r.Succeeded, r.Error?.Message);
+        Assert.Equal(42, r.Values[0].AsInteger);
+        Assert.Equal(21, r.Values[1].AsInteger);
+    }
+
+    [Fact]
+    public void A_host_function_called_from_a_required_chunk_can_call_DoString()
+    {
+        LuaState? holder = null;
+        var options = new LuaStateOptions().Allow("_G", "require")
+            .AddModule("mod", s =>
+            {
+                // A Lua chunk running under require calls a host function that re-enters the state.
+                LuaFunction chunk = s.Load("hostrun() hostrun() return viaHost", "=mods/nested.lua");
+                return s.Call(chunk);
+            });
+        using var state = new LuaState(options);
+        holder = state;
+        state.Register("hostrun", (ref CallContext _) => { holder.DoString("viaHost = (viaHost or 0) + 1"); return 0; });
+        LuaEvalResult r = state.Evaluate("return require('mod')");
+        Assert.True(r.Succeeded, r.Error?.Message);
+        Assert.Equal(2, r.Values[0].AsInteger);
+    }
+
+    [Fact]
     public void Evaluate_returns_a_structured_error_instead_of_throwing_and_the_state_stays_usable()
     {
         using var state = NewState();

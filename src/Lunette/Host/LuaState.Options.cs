@@ -11,29 +11,21 @@ public sealed partial class LuaState
     /// A state whose globals are exactly <paramref name="options"/>' allowlist plus its replacements, whose <c>require</c> sees
     /// only host-registered modules, and whose <c>math.random</c> is seeded by the host rather than the clock.
     /// </summary>
-    public LuaState(LuaStateOptions options) : this()
+    public LuaState(LuaStateOptions options) : this(DefaultInternCapacity(), Checked(options).Platform, options)
     {
-        ArgumentNullException.ThrowIfNull(options);
-        MathLib.Register(this, options.Seed);
-        Prune(options);
-        if (!options.IsAllowed("string")) StringMetatable = null;
         if (options.IsAllowed("require")) SetGlobal("require", LuaValue.FromObject(new BuiltinFunction(HostRequire(options))));
         foreach (var (name, function) in options.Replacements) Install(name, LuaValue.FromFunction(CreateFunction(function)));
         if (options.Limits is not null) SetLimits(options.Limits);
     }
 
-    /// <summary>Removes every global that is not allowlisted.</summary>
-    private void Prune(LuaStateOptions options)
+    private static LuaStateOptions Checked(LuaStateOptions options)
     {
-        var doomed = new List<LuaValue>();
-        LuaValue key = default;
-        while (Globals.Next(key, out LuaValue next, out _))
-        {
-            key = next;
-            if (!(key.Ref is byte[] raw && options.IsAllowed(new LuaString(raw).ToString()))) doomed.Add(key);
-        }
-        foreach (LuaValue k in doomed) Globals.Set(k, default);
+        ArgumentNullException.ThrowIfNull(options);
+        return options;
     }
+
+    /// <summary>True for a state built from <see cref="LuaStateOptions"/>.</summary>
+    internal bool IsSandboxed => _construction is not null;
 
     private void Install(string name, LuaValue value)
     {

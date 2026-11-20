@@ -11,10 +11,10 @@ internal static class ErrorLib
 {
     public static void Register(LuaState state)
     {
-        state.SetGlobal("error", LuaValue.FromObject(new BuiltinFunction(Error, BuiltinKind.Error)));
-        state.SetGlobal("assert", LuaValue.FromObject(new BuiltinFunction(Assert, BuiltinKind.Assert)));
-        state.SetGlobal("pcall", LuaValue.FromObject(new BuiltinFunction((st, args) => Protected(st, args, false), BuiltinKind.Pcall)));
-        state.SetGlobal("xpcall", LuaValue.FromObject(new BuiltinFunction((st, args) => Protected(st, args, true), BuiltinKind.Xpcall)));
+        state.Define("error", LuaValue.FromObject(new BuiltinFunction(Error, BuiltinKind.Error)));
+        state.Define("assert", LuaValue.FromObject(new BuiltinFunction(Assert, BuiltinKind.Assert)));
+        state.Define("pcall", LuaValue.FromObject(new BuiltinFunction((st, args) => Protected(st, args, false), BuiltinKind.Pcall)));
+        state.Define("xpcall", LuaValue.FromObject(new BuiltinFunction((st, args) => Protected(st, args, true), BuiltinKind.Xpcall)));
     }
 
     /// <summary>The optional level argument of error: nil means 1.</summary>

@@ -10,6 +10,7 @@ internal static class TableLib
 
     public static void Register(LuaState state)
     {
+        if (!state.Wants("table")) return;
         var t = new LuaTable(0, 8);
         Add(t, "insert", Insert);
         Add(t, "remove", Remove);
@@ -111,7 +112,11 @@ internal static class TableLib
         for (; i <= last; i++)
         {
             LuaValue v = Geti(state, t, i);
-            if (v.Ref is byte[] s) b.Append(new LuaString(s).Bytes);
+            if (v.Ref is byte[] s)
+            {
+                state.CheckAlloc((long)b.Length + s.Length);
+                b.Append(new LuaString(s).Bytes);
+            }
             else if (v.IsNumber) b.Append(StringConv.NumberToString(state, v).Bytes);
             else throw LuaErrors.Error($"invalid value ({v.TypeName}) at index {i} in table for 'concat'");
             if (i != last) b.Append(sep.Bytes);
@@ -128,6 +133,7 @@ internal static class TableLib
         if (i > e) return [];
         ulong n = (ulong)e - (ulong)i;
         if (n >= 1_000_000UL || (long)n + 1 + state.Running.CallTop > Coroutine.StackLimit) throw LuaErrors.Error("too many results to unpack");
+        state.CheckAlloc(((long)n + 1) * 16);
         var res = new LuaValue[(int)n + 1];
         for (int k = 0; k < res.Length; k++) res[k] = Geti(state, t, i + k);
         return res;

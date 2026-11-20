@@ -18,11 +18,13 @@ internal static class LoadLib
 
     public static void Register(LuaState state)
     {
-        state.SetGlobal("load", LuaValue.FromObject(new BuiltinFunction(Load)));
-        state.SetGlobal("loadfile", LuaValue.FromObject(new BuiltinFunction(LoadFile)));
-        state.SetGlobal("dofile", LuaValue.FromObject(new BuiltinFunction(DoFile, BuiltinKind.DoFile)));
-        state.SetGlobal("require", LuaValue.FromObject(new BuiltinFunction(Require)));
-        state.SetGlobal("warn", LuaValue.FromObject(new BuiltinFunction(Warn)));
+        state.Define("load", LuaValue.FromObject(new BuiltinFunction(Load)));
+        state.Define("loadfile", LuaValue.FromObject(new BuiltinFunction(LoadFile)));
+        state.Define("dofile", LuaValue.FromObject(new BuiltinFunction(DoFile, BuiltinKind.DoFile)));
+        state.Define("require", LuaValue.FromObject(new BuiltinFunction(Require)));
+        state.Define("warn", LuaValue.FromObject(new BuiltinFunction(Warn)));
+
+        if (state.IsSandboxed) return; // no package table, no searchers: require is host-seeded (LuaStateOptions)
 
         var package = new LuaTable(0, 8);
         var loaded = new LuaTable(0, 16);

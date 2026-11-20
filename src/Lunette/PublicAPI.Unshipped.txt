@@ -189,6 +189,8 @@ Lunette.LuaStateOptions.Allow(params string![]! names) -> Lunette.LuaStateOption
 Lunette.LuaStateOptions.Limits.get -> Lunette.LuaLimits?
 Lunette.LuaStateOptions.Limits.init -> void
 Lunette.LuaStateOptions.LuaStateOptions() -> void
+Lunette.LuaStateOptions.Platform.get -> Lunette.ILuaPlatform?
+Lunette.LuaStateOptions.Platform.init -> void
 Lunette.LuaStateOptions.Replace(string! name, Lunette.HostFunction! function) -> Lunette.LuaStateOptions!
 Lunette.LuaStateOptions.SeedRandom(long seed, long seed2 = 0) -> Lunette.LuaStateOptions!
 Lunette.LuaStackFrame
@@ -205,3 +207,5 @@ Lunette.LuaException.Chunk.get -> string?
 Lunette.LuaException.Line.get -> int
 Lunette.LuaException.StackFrames.get -> System.Collections.Generic.IReadOnlyList<Lunette.LuaStackFrame!>?
 Lunette.LuaState.Evaluate(string! snippet, string! chunkName = "=(console)") -> Lunette.LuaEvalResult!
+Lunette.LuaState.OutputStream.get -> System.IO.Stream?
+Lunette.LuaState.OutputStream.set -> void

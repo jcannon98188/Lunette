@@ -100,4 +100,27 @@ internal sealed class Proto
     /// <summary>Source line of the function keyword (0 for a main chunk) and of its closing end; debug.getinfo reports them.</summary>
     public int LineDefined { get; init; }
     public int LastLineDefined { get; init; }
+
+    private System.Collections.Concurrent.ConcurrentDictionary<int, int>? _liveAt;
+
+    /// <summary>
+    /// Registers that can hold a live value at <paramref name="pc"/>, the target of a backward jump (a statement boundary): the
+    /// named locals in scope plus the hidden control registers of every <c>for</c> loop whose body contains <paramref name="pc"/>.
+    /// Every register above is a dead temporary. The bounds are inclusive, so the answer errs towards keeping a register.
+    /// </summary>
+    public int LiveRegisters(int pc)
+    {
+        _liveAt ??= new();
+        if (_liveAt.TryGetValue(pc, out int cached)) return cached;
+        int top = NumParams;
+        foreach (LocVar lv in LocVars)
+            if (lv.StartPc <= pc && pc <= lv.EndPc && lv.Reg + 1 > top) top = lv.Reg + 1;
+        for (int i = 0; i + 1 < Code.Length; i++)
+        {
+            Instruction ins = Code[i];
+            if (ins.Op is OpCode.ForLoop or OpCode.TForLoop && Code[i + 1].Ax <= pc && pc <= i && ins.A + 4 > top) top = ins.A + 4;
+        }
+        _liveAt[pc] = top;
+        return top;
+    }
 }

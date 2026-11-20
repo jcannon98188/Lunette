@@ -156,6 +156,7 @@ internal sealed class MathLib
     /// <summary>Installs a fresh <c>math</c> table (with its own random state) as the global <c>math</c>.</summary>
     public static void Register(LuaState state, (ulong, ulong)? hostSeed = null)
     {
+        if (!state.Wants("math")) return;
         var lib = new MathLib(hostSeed);
         var table = new LuaTable();
         foreach (var (name, value) in lib.Members)

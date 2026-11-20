@@ -13,8 +13,8 @@ internal static class BaseLib
         var next = new BuiltinFunction(Next);
         var ipairsAux = new BuiltinFunction(IpairsAux);
         Add(state, "type", Type);
-        state.SetGlobal("next", LuaValue.FromObject(next));
-        state.SetGlobal("pairs", LuaValue.FromObject(new BuiltinFunction((st, args) => Pairs(st, args, next), BuiltinKind.Pairs)));
+        state.Define("next", LuaValue.FromObject(next));
+        state.Define("pairs", LuaValue.FromObject(new BuiltinFunction((st, args) => Pairs(st, args, next), BuiltinKind.Pairs)));
         Add(state, "ipairs", (_, args) =>
         {
             if (args.Length == 0) throw ArgError(1, "ipairs", "value expected");
@@ -74,7 +74,7 @@ internal static class BaseLib
     }
 
     private static void Add(LuaState state, string name, BuiltinBody body) =>
-        state.SetGlobal(name, LuaValue.FromObject(new BuiltinFunction(body)));
+        state.Define(name, LuaValue.FromObject(new BuiltinFunction(body)));
 
     private static LuaValue Arg(ReadOnlySpan<LuaValue> args, int i) => i < args.Length ? args[i] : default;
 

@@ -30,3 +30,6 @@ coroutine.lua
 db.lua
 errors.lua
 locals.lua
+gc.lua
+closure.lua
+gengc.lua
