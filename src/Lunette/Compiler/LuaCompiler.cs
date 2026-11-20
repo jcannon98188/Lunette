@@ -61,8 +61,12 @@ internal sealed class LuaCompiler
         return c.Finish(c._fs);
     }
 
-    private Proto Finish(FuncState fs) => new()
+    private Proto Finish(FuncState fs)
     {
+        var upvals = new UpvalDesc[fs.Upvals.Count];
+        for (int i = 0; i < upvals.Length; i++) upvals[i] = fs.Upvals[i].Desc;
+        return new Proto
+        {
         Code = fs.Code.ToArray(),
         Constants = fs.Consts.ToArray(),
         Names = fs.Names.ToArray(),
@@ -71,9 +75,10 @@ internal sealed class LuaCompiler
         ChunkName = _chunkName,
         NumParams = fs.NumParams,
         IsVararg = fs.IsVararg,
-        Upvalues = fs.Upvals.Select(u => u.Desc).ToArray(),
+        Upvalues = upvals,
         Protos = fs.Protos.ToArray(),
-    };
+        };
+    }
 
     // ---- token helpers ----
 
