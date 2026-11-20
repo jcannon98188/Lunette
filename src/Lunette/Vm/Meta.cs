@@ -180,11 +180,17 @@ internal static class Meta
 
     // ---- operators ----
 
-    /// <summary>True for the binary arithmetic and bitwise opcodes (Add through Shr), the ones <see cref="ArithEvent"/> maps.</summary>
-    public static bool IsBinaryArith(OpCode op) => op is >= OpCode.Add and <= OpCode.Shr;
+    /// <summary>True for the binary arithmetic and bitwise opcodes (Add through Shr) and the constant-operand forms (AddK through PowK), the ones <see cref="ArithEvent"/> maps.</summary>
+    public static bool IsBinaryArith(OpCode op) => op is (>= OpCode.Add and <= OpCode.Shr) or (>= OpCode.AddK and <= OpCode.PowK);
+
+    /// <summary>True for AddK through PowK: the right operand is the constant K[C] rather than R[C].</summary>
+    public static bool IsArithK(OpCode op) => op is >= OpCode.AddK and <= OpCode.PowK;
+
+    /// <summary>The register form of a constant-operand arithmetic opcode (AddK is Add); other opcodes are returned as they are.</summary>
+    public static OpCode BaseArith(OpCode op) => IsArithK(op) ? op - OpCode.AddK + OpCode.Add : op;
 
     /// <summary>The metamethod event of a binary arithmetic or bitwise opcode; any other opcode is a caller bug.</summary>
-    public static TagMethod ArithEvent(OpCode op) => op switch
+    public static TagMethod ArithEvent(OpCode op) => BaseArith(op) switch
     {
         OpCode.Add => TagMethod.Add,
         OpCode.Sub => TagMethod.Sub,

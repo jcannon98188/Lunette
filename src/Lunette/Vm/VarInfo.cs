@@ -28,6 +28,7 @@ internal static class VarInfo
     {
         if (p is null) return "";
         var i = p.Code[pc];
+        if (!left && Meta.IsArithK(i.Op)) return ""; // the right operand is a numeric constant, never a variable
         return Describe(p, pc, left ? i.B : i.C);
     }
 
@@ -114,6 +115,7 @@ internal static class VarInfo
             case OpCode.GetGlobal:
             case OpCode.GetUpval:
             case >= OpCode.Add and <= OpCode.Shr:
+            case >= OpCode.AddK and <= OpCode.PowK:
             case OpCode.BNot:
             case OpCode.Unm:
             case OpCode.Not:

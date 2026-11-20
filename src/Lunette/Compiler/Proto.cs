@@ -49,6 +49,21 @@ internal enum OpCode : byte
     Tbc,       // mark R[A] to be closed (Names[Bx] is the variable's name for the error message); nil and false are ignored
     Extra,     // operand word of the preceding instruction (Ax)
     LoadKX,    // R[A] = Constants[Ax of the Extra that follows] (constant indexes beyond what LoadK's Bx reaches)
+    AddK,      // R[A] = R[B] + K[C] (K[C] is a number; C <= 255). SubK..PowK likewise, in the order of Add..Pow
+    SubK,
+    MulK,
+    DivK,
+    IDivK,
+    ModK,
+    PowK,
+    JEq,       // if (R[B] == R[C]) == (A != 0) then run the next instruction (a Jmp) else skip it
+    JLt,       // ... R[B] < R[C]
+    JLe,       // ... R[B] <= R[C]
+    JEqK,      // ... R[B] == K[C]
+    JLtK,      // ... R[B] < K[C] (K[C] is a number)
+    JLeK,      // ... R[B] <= K[C]
+    JGtK,      // ... K[C] < R[B]  (the source said R[B] > K[C])
+    JGeK,      // ... K[C] <= R[B]
 }
 
 /// <summary>One 32-bit instruction: op(8) A(8) B(8) C(8); Bx overlays B and C as 16 bits; Ax is the upper 24 bits.</summary>

@@ -67,6 +67,8 @@ internal enum Continuation : byte
     Bool,
     /// <summary>Drop the results.</summary>
     Discard,
+    /// <summary>A fused compare-and-jump (JEq, JLt, ...): the Jmp that follows runs when the result's truthiness equals ContDest (0 or 1), else it is skipped.</summary>
+    Cond,
     /// <summary>A <c>__close</c> handler run by a Return or Close instruction: when it returns, that instruction runs again for the next variable.</summary>
     Close,
     /// <summary>A <c>__close</c> handler run while a protected call unwinds an error: when it returns, the unwinding goes on.</summary>
