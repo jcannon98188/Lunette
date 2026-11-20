@@ -8,7 +8,7 @@
     "pcall-ok": { "bytesPerIteration": 0 },
     "pcall-error": { "bytesPerIteration": 0 },
     "string-sub": { "resultLength": 51, "excessBytes": 0 },
-    "string-format-d": { "resultLength": 6, "excessBytes": 0 },
+    "string-format-d": { "bytesPerIteration": 0 },
     "string-rep": { "resultLength": 60, "excessBytes": 0 },
     "string-gsub": { "resultLength": 60, "excessBytes": 0 },
     "string-byte": { "bytesPerIteration": 0 },

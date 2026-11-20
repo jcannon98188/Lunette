@@ -24,7 +24,25 @@ internal readonly struct LuaString : IEquatable<LuaString>
 
     private static readonly uint Seed = (uint)Random.Shared.Next();
 
+    /// <summary>The 256 one-byte strings, shared by every state (strings are immutable and state-independent), each with its hash already stored.</summary>
+    private static readonly byte[][] Singles = BuildSingles();
+
     private readonly byte[] _a;
+
+    private static byte[][] BuildSingles()
+    {
+        var all = new byte[256][];
+        Span<byte> one = stackalloc byte[1];
+        for (int i = 0; i < all.Length; i++)
+        {
+            one[0] = (byte)i;
+            all[i] = CreateHashed(one, ComputeHash(one))._a;
+        }
+        return all;
+    }
+
+    /// <summary>The shared one-byte string for <paramref name="value"/>.</summary>
+    public static LuaString SingleByte(byte value) => new(Singles[value]);
 
     internal LuaString(byte[] backing) => _a = backing;
 
@@ -51,6 +69,18 @@ internal readonly struct LuaString : IEquatable<LuaString>
         data.CopyTo(s.WritableBytes);
         return s;
     }
+
+    /// <summary>Creates a string whose header already carries <paramref name="hash"/> (the value <see cref="ComputeHash"/> gives for <paramref name="data"/>), so the first table lookup does not hash again.</summary>
+    internal static LuaString CreateHashed(ReadOnlySpan<byte> data, int hash)
+    {
+        var s = Allocate(data.Length);
+        data.CopyTo(s.WritableBytes);
+        BinaryPrimitives.WriteInt32LittleEndian(new Span<byte>(s._a, HashOffset, 4), hash);
+        return s;
+    }
+
+    /// <summary>The hash stored in the header, or 0 when it has not been computed yet.</summary>
+    internal int CachedHash => BinaryPrimitives.ReadInt32LittleEndian(new ReadOnlySpan<byte>(_a, HashOffset, 4));
 
     /// <summary>Encodes a .NET string as UTF-8 (the host boundary default).</summary>
     public static LuaString FromUtf16(ReadOnlySpan<char> text)
