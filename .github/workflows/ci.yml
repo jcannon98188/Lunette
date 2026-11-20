@@ -30,6 +30,15 @@ jobs:
         with:
           global-json-file: global.json
       - run: dotnet test -c Release
+      # String-engine variants (ADR 0005): correctness must not depend on interning or on hash quality.
+      - name: Tests with constant hash
+        run: dotnet test -c Release --no-build tests/Lunette.Tests
+        env:
+          LUNETTE_CONSTANT_HASH: "1"
+      - name: Tests with capacity-1 intern cache
+        run: dotnet test -c Release --no-build tests/Lunette.Tests
+        env:
+          LUNETTE_INTERN_CAPACITY: "1"
 
   # Analyzer failures are part of ci-gate: the build above already fails on LD001-LD005, banned APIs and
   # AOT analyzers (warnings and analyzer diagnostics are errors); this job proves that, and ratchets suppressions.

@@ -177,10 +177,10 @@ internal static partial class Interpreter
     /// </summary>
     internal static LuaValue ErrorValue(Coroutine co, LuaValue msg, long level, bool fromNative)
     {
-        if (msg.Ref is string s && level > 0)
+        if (msg.Ref is byte[] raw && level > 0)
         {
             string where = WhereLevel(co, level, fromNative);
-            if (where.Length > 0) return LuaValue.FromString(where + " " + s);
+            if (where.Length > 0) return LuaValue.FromString(where + " " + new LuaString(raw).ToString());
         }
         return msg;
     }

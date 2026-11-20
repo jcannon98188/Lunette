@@ -17,7 +17,7 @@ public sealed class LuaException : Exception
     internal LuaException(LuaValue value)
     {
         Value = value;
-        _message = value.Ref is string s ? s : value.IsNumber ? value.ToString() : $"(error object is a {value.TypeName} value)";
+        _message = value.Ref is byte[] s ? new LuaString(s).ToString() : value.IsNumber ? value.ToString() : $"(error object is a {value.TypeName} value)";
     }
 
     internal LuaException(string message, Exception inner) : base(message, inner)

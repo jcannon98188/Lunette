@@ -44,6 +44,7 @@ internal enum OpCode : byte
     SetList,   // R[A][Ax+1 .. Ax+B] = R[A+1 .. A+B] (Ax from the Extra that follows); B == 0: up to top
     Self,      // R[A+1] = R[B]; R[A] = R[B][R[C]]
     Len,       // R[A] = #R[B]
+    Concat,    // R[A] = R[B] .. R[C]
     TForLoop,  // generic for at R[A..A+3], loop variables from R[A+4]: if R[A+4] is not nil, R[A+2] = R[A+4] and run the next instruction (a Jmp back), else skip it
     Tbc,       // mark R[A] to be closed (Names[Bx] is the variable's name for the error message); nil and false are ignored
     Extra,     // operand word of the preceding instruction (Ax)

@@ -8,11 +8,12 @@ internal static class Meta
     /// <summary>Longest __index/__newindex chain followed before assuming a loop (PUC's MAXTAGLOOP).</summary>
     private const int MaxTagLoop = 2000;
 
-    public static LuaTable? GetMetatable(LuaValue v) => v.Ref is LuaTable t ? t.Metatable : null;
+    public static LuaTable? GetMetatable(LuaState state, LuaValue v) =>
+        v.Ref is LuaTable t ? t.Metatable : v.Ref is byte[] ? state.StringMetatable : null;
 
-    public static LuaValue GetTagMethod(LuaValue v, TagMethod e)
+    public static LuaValue GetTagMethod(LuaState state, LuaValue v, TagMethod e)
     {
-        var mt = GetMetatable(v);
+        var mt = GetMetatable(state, v);
         return mt is null ? default : mt.GetTagMethod(e);
     }
 
@@ -48,7 +49,7 @@ internal static class Meta
             }
             else
             {
-                tm = GetTagMethod(t, TagMethod.Index);
+                tm = GetTagMethod(state, t, TagMethod.Index);
                 if (tm.IsNil) throw IndexError(t, p, pc, loop == 0);
             }
             if (tm.IsFunction) return Interpreter.Call1(state, tm, t, key, default, 2);
@@ -82,7 +83,7 @@ internal static class Meta
             }
             else
             {
-                tm = GetTagMethod(t, TagMethod.NewIndex);
+                tm = GetTagMethod(state, t, TagMethod.NewIndex);
                 if (tm.IsNil) throw IndexError(t, p, pc, loop == 0);
             }
             if (tm.IsFunction)
@@ -117,8 +118,8 @@ internal static class Meta
     /// <summary>Binary arithmetic where an operand is not a number: try the metamethods, else raise the error.</summary>
     public static LuaValue Arith(LuaState state, TagMethod ev, LuaValue a, LuaValue b, Proto? p, int pc)
     {
-        LuaValue tm = GetTagMethod(a, ev);
-        if (tm.IsNil) tm = GetTagMethod(b, ev);
+        LuaValue tm = GetTagMethod(state, a, ev);
+        if (tm.IsNil) tm = GetTagMethod(state, b, ev);
         if (tm.IsNil)
         {
             bool left = !a.IsNumber;
@@ -135,7 +136,7 @@ internal static class Meta
 
     public static LuaValue Unary(LuaState state, TagMethod ev, LuaValue a, Proto? p, int pc)
     {
-        LuaValue tm = GetTagMethod(a, ev);
+        LuaValue tm = GetTagMethod(state, a, ev);
         if (tm.IsNil) throw new LuaException($"{At(p, pc)}attempt to perform {OperationName(ev)} on a {a.TypeName} value{VarInfo.DescribeOperand(p, pc, true)}");
         return Interpreter.Call1(state, tm, a, a, default, 2);
     }
@@ -150,7 +151,7 @@ internal static class Meta
             if (tm.IsNil) return LuaValue.FromInteger(t.Length());
             return Interpreter.Call1(state, tm, v, v, default, 2);
         }
-        if (v.Ref is string s) return LuaValue.FromInteger(s.Length);
+        if (v.Ref is byte[] s) return LuaValue.FromInteger(new LuaString(s).Length);
         throw new LuaException($"{At(p, pc)}attempt to get length of a {v.TypeName} value{VarInfo.DescribeOperand(p, pc, true)}");
     }
 
@@ -167,31 +168,54 @@ internal static class Meta
     /// <summary>Order comparison where an operand is not a number: __lt / __le, else the comparison error.</summary>
     public static bool Order(LuaState state, TagMethod ev, LuaValue a, LuaValue b, Proto? p, int pc)
     {
-        LuaValue tm = GetTagMethod(a, ev);
-        if (tm.IsNil) tm = GetTagMethod(b, ev);
+        if (a.Ref is byte[] sa && b.Ref is byte[] sb)
+        {
+            int cmp = new LuaString(sa).CompareTo(new LuaString(sb));
+            return ev == TagMethod.Lt ? cmp < 0 : cmp <= 0;
+        }
+        LuaValue tm = GetTagMethod(state, a, ev);
+        if (tm.IsNil) tm = GetTagMethod(state, b, ev);
         if (tm.IsNil) throw Compare.Error(a, b, p, pc);
         return !Interpreter.Call1(state, tm, a, b, default, 2).IsFalsy;
     }
 
+    // ---- concatenation ----
+
+    public static LuaValue Concat(LuaState state, LuaValue a, LuaValue b, Proto? p, int pc)
+    {
+        if ((a.IsString || a.IsNumber) && (b.IsString || b.IsNumber)) return StringConv.Concat(state, a, b);
+        LuaValue tm = GetTagMethod(state, a, TagMethod.Concat);
+        if (tm.IsNil) tm = GetTagMethod(state, b, TagMethod.Concat);
+        if (tm.IsNil)
+        {
+            LuaValue bad = a.IsString || a.IsNumber ? b : a;
+            throw new LuaException($"{At(p, pc)}attempt to concatenate a {bad.TypeName} value");
+        }
+        return Interpreter.Call1(state, tm, a, b, default, 2);
+    }
+
     // ---- tostring ----
 
-    public static string ToStringValue(LuaState state, LuaValue v)
+    public static LuaString ToStringValue(LuaState state, LuaValue v)
     {
-        var mt = GetMetatable(v);
+        var mt = GetMetatable(state, v);
         if (mt is not null)
         {
             LuaValue tm = mt.Get(ToStringKey);
             if (!tm.IsNil)
             {
                 LuaValue r = Interpreter.Call1(state, tm, v, default, default, 1);
-                if (r.Ref is string s) return s;
-                if (r.IsNumber) return r.ToString();
+                if (r.Ref is byte[] s) return new LuaString(s);
+                if (r.IsNumber) return StringConv.NumberToString(state, r);
                 throw new LuaException("'__tostring' must return a string");
             }
             LuaValue name = mt.Get(NameKey);
-            if (name.Ref is string n) return $"{n}: 0x{System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(v.Ref):x8}";
+            if (name.Ref is byte[] n)
+                return state.Strings.FromUtf16($"{new LuaString(n)}: 0x{System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(v.Ref):x8}");
         }
-        return v.ToString();
+        if (v.Ref is byte[] self) return new LuaString(self);
+        if (v.IsNumber) return StringConv.NumberToString(state, v);
+        return state.Strings.FromUtf16(v.ToString());
     }
 
     private static readonly LuaValue ToStringKey = LuaValue.FromString("__tostring");

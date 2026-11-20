@@ -62,9 +62,9 @@ internal static class VarInfo
                 name = KeyName(p, setreg, i.C);
                 return "method";
             case OpCode.LoadK:
-                if (p.Constants[i.Bx].Ref is string s)
+                if (p.Constants[i.Bx].Ref is byte[] s)
                 {
-                    name = s;
+                    name = new LuaString(s).ToString();
                     return "constant";
                 }
                 return null;
@@ -76,7 +76,7 @@ internal static class VarInfo
     private static string KeyName(Proto p, int pc, int reg)
     {
         int set = FindSetReg(p, pc, reg);
-        if (set >= 0 && p.Code[set].Op == OpCode.LoadK && p.Constants[p.Code[set].Bx].Ref is string s) return s;
+        if (set >= 0 && p.Code[set].Op == OpCode.LoadK && p.Constants[p.Code[set].Bx].Ref is byte[] s) return new LuaString(s).ToString();
         return "?";
     }
 

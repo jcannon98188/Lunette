@@ -106,6 +106,7 @@ internal sealed class LuaTable
         }
         if (key.IsFloat) return HashMod(HashFloat(key.AsFloat), size);
         if (key.IsBoolean) return (key.AsBooleanBit & (size - 1));
+        if (key.Ref is byte[] str) return HashMod((uint)new LuaString(str).Hash, size);
         return HashMod((uint)key.Ref!.GetHashCode(), size);
     }
 
@@ -124,7 +125,8 @@ internal sealed class LuaTable
     }
 
     private static bool KeysEqual(in LuaValue a, in LuaValue b) =>
-        a.Bits == b.Bits && (ReferenceEquals(a.Ref, b.Ref) || (a.Ref is not null && a.Ref.Equals(b.Ref)));
+        a.Bits == b.Bits && (ReferenceEquals(a.Ref, b.Ref)
+            || (a.Ref is byte[] x && b.Ref is byte[] y && new LuaString(x).Equals(new LuaString(y))));
 
     /// <summary>Turns a float key with an integer value into an integer key.</summary>
     private static LuaValue Normalize(LuaValue key)

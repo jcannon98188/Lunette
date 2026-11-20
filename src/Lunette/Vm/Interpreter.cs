@@ -83,7 +83,7 @@ internal static partial class Interpreter
     {
         for (int guard = 0; co.Stack[fa].Ref is not (LuaClosure or BuiltinFunction); guard++)
         {
-            LuaValue tm = Meta.GetTagMethod(co.Stack[fa], TagMethod.Call);
+            LuaValue tm = co.Stack[fa].Ref is LuaTable { Metatable: { } callMt } ? callMt.GetTagMethod(TagMethod.Call) : default;
             if (tm.IsNil || guard > 100)
                 throw new LuaException($"{(p is null ? "" : Where(p, pc) + " ")}attempt to call a {co.Stack[fa].TypeName} value{VarInfo.DescribeCallee(p, pc)}");
             co.EnsureStack(fa + nargs + 2, p, pc);
@@ -495,6 +495,13 @@ internal static partial class Interpreter
                         r = co.Stack;
                         r[bs + i.A] = res;
                     }
+                    break;
+                }
+                case OpCode.Concat:
+                {
+                    LuaValue res = Meta.Concat(state, r[bs + i.B], r[bs + i.C], proto, pc - 1);
+                    r = co.Stack;
+                    r[bs + i.A] = res;
                     break;
                 }
                 case OpCode.TForLoop:

@@ -1,4 +1,5 @@
 using Lunette.Compiler;
+using Lunette.Lib;
 using Lunette.Vm;
 
 namespace Lunette;
@@ -7,35 +8,57 @@ namespace Lunette;
 public sealed class LuaState
 {
     internal readonly Dictionary<string, LuaValue> Globals = new();
+    /// <summary>Best-effort intern cache for short strings (ADR 0005).</summary>
+    internal readonly StringCache Strings;
+    /// <summary>The metatable shared by all string values; its __index is the string library table.</summary>
+    internal LuaTable? StringMetatable;
     internal readonly Coroutine Main = new();
     /// <summary>The coroutine currently executing.</summary>
     internal Coroutine Running => Main;
     /// <summary>Depth of nested native-to-Lua calls in progress.</summary>
     internal int NativeDepth;
 
-    public LuaState()
+    public LuaState() : this(DefaultInternCapacity())
     {
+    }
+
+    /// <summary>CI variant hook: LUNETTE_INTERN_CAPACITY=1 proves the engine is correct without interning.</summary>
+    private static int DefaultInternCapacity() =>
+        int.TryParse(Environment.GetEnvironmentVariable("LUNETTE_INTERN_CAPACITY"), out int n) && n > 0 ? n : StringCache.DefaultCapacity;
+
+    internal LuaState(int internCapacity)
+    {
+        Strings = new StringCache(internCapacity);
         Globals["print"] = LuaValue.FromObject(new BuiltinFunction(static (state, args) =>
         {
             var o = state.Output;
             for (int i = 0; i < args.Length; i++)
             {
                 if (i > 0) o.Write('\t');
-                o.Write(Meta.ToStringValue(state, args[i]));
+                o.Write(Meta.ToStringValue(state, args[i]).ToString());
             }
             o.Write(o.NewLine);
             return null;
         }));
         BaseLib.Register(this);
+        StringLib.Register(this);
+        Utf8Lib.Register(this);
         ErrorLib.Register(this);
     }
 
     public TextWriter Output { get; set; } = Console.Out;
 
-    /// <summary>Compiles and runs a chunk of Lua source.</summary>
+    /// <summary>Compiles and runs a chunk of Lua source (encoded as UTF-8).</summary>
     public void DoString(string source, string chunkName = "=(load)")
     {
-        Proto proto = LuaCompiler.Compile(source, chunkName);
+        Proto proto = LuaCompiler.Compile(source, chunkName, Strings);
+        Interpreter.Execute(this, proto);
+    }
+
+    /// <summary>Compiles and runs a chunk of Lua source given as raw bytes.</summary>
+    public void DoBytes(byte[] source, string chunkName = "=(load)")
+    {
+        Proto proto = LuaCompiler.Compile(source, chunkName, Strings);
         Interpreter.Execute(this, proto);
     }
 }
