@@ -11,7 +11,7 @@ public sealed record SuiteResult(string File, SuiteStatus Status, double Seconds
 /// <summary>Locates the vendored suite and runs one file at a time in a fresh <see cref="LuaState"/>.</summary>
 public static class SuiteRunner
 {
-    public static readonly TimeSpan FileTimeout = TimeSpan.FromMinutes(5);
+    public static readonly TimeSpan FileTimeout = TimeSpan.FromSeconds(60);
     private static readonly object CwdLock = new();
 
     public static string RepoRoot { get; } = FindRepoRoot();
@@ -71,8 +71,12 @@ public static class SuiteRunner
             string? error = null;
             var worker = new Thread(() =>
             {
-                try { new LuaState { Output = output }.DoBytes(Encoding.Latin1.GetBytes(source), "@" + file); }
+                var state = new LuaState { Output = output };
+                try { state.DoBytes(Encoding.Latin1.GetBytes(source), "@" + file); }
                 catch (Exception e) { error = e.Message; }
+                // Closing the state runs the end-of-state __gc finalizers (gc.lua relies on them); their errors are not the file's.
+                try { state.Dispose(); }
+                catch (Exception) { }
             }, 256 * 1024 * 1024) { IsBackground = true };
 
             string? previous = null;
