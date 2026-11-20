@@ -10,9 +10,17 @@ updated: 2026-11-20
 
 ## Question
 
-Implement requirements of `simgame-embedding/02` (read it via get_item; source of truth). Deny-by-default state creation with an explicit allowlist of libraries/base functions (absent, not removed later); dofile/loadfile/load/collectgarbage/coroutine individually withheld or replaced by the host; host-seeded `require` resolving only host-registered names and never touching the filesystem or `package`; host-seeded or replaceable math.random/math.randomseed with no clock seeding.
+### What to build
 
-Acceptance criteria:
+Requirements from the SimGame embedder, which gives each mod pack its own state with deny-by-default globals:
+
+1. **Deny by default.** A state can be created with only an explicit allowlist of standard libraries and base functions; anything not listed is absent, not merely removable afterwards.
+2. **Gated functions.** `dofile`, `loadfile`, `load` (text and binary chunks), `collectgarbage` and `coroutine` can each be withheld or replaced by the host independently.
+3. **Host-seeded `require`.** `require` resolves only names the host registers (SimGame registers closed `simgame.<area>` modules per granted capability); it never touches the filesystem or `package`.
+4. **Replaceable `math.random`.** The host seeds the generator per state, or replaces `math.random`/`math.randomseed`, so streams are deterministic and loggable; no clock seeding.
+
+### Acceptance criteria
+
 - [ ] State created from an allowlist exposes nothing else
 - [ ] Each gated function can be withheld or replaced independently
 - [ ] require resolves only host-registered modules, no filesystem/package access
