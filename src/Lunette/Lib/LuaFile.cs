@@ -277,10 +277,19 @@ internal sealed class TextWriterStream(LuaState state) : Stream
     public override long Length => throw new NotSupportedException();
     public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
 
-    public override void Flush() => state.Output.Flush();
+    public override void Flush()
+    {
+        if (state.OutputStream is { } raw) raw.Flush();
+        else state.Output.Flush();
+    }
 
     public override void Write(ReadOnlySpan<byte> data)
     {
+        if (state.OutputStream is { } raw)
+        {
+            raw.Write(data);
+            return;
+        }
         byte[] input = data.ToArray();
         int start = 0;
         if (_carryLen > 0)

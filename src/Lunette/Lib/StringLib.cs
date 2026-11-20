@@ -89,6 +89,7 @@ internal static class StringLib
         long total = (long)s.Length * n + (long)sep.Length * (n - 1);
         if (total > int.MaxValue - 64 || ((long)s.Length + sep.Length) > 0 && n > (int.MaxValue - 64) / ((long)s.Length + sep.Length) + 1)
             throw LuaErrors.Error("resulting string too large");
+        state.CheckAlloc(total);
         LuaString r = LuaString.Allocate((int)total);
         Span<byte> d = r.WritableBytes;
         int pos = 0;

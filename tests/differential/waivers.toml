@@ -3,17 +3,4 @@
 # Same schema and reason codes as tests/suite/waivers.toml, whole-file only. A waived program that starts to
 # agree fails the run until its entry is removed, so this list can only shrink.
 #
-# [[waiver]]
-# file   = "corpus/x.lua"   # "corpus/<file>", "gen/seed-<n>" or "suite/<file>"
-# reason = "bug-wontfix"    # host-C-API | no-bytecode | gc-accounting | os-env | bug-wontfix
-# ticket = "lua-engine-build/NN"
-# expires = "2027-01-01"
-# note = "..."
 #
-
-[[waiver]]
-file    = "corpus/known-non-ascii-output.lua"
-reason  = "bug-wontfix"
-ticket  = "lua-engine-build/28"
-expires = "2027-06-01"
-note    = "The CLI writes Lua strings through a UTF-8 console writer, so bytes above 127 are mangled; the reference writes bytes verbatim."

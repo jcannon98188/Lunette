@@ -18,7 +18,11 @@ public static class Program
             ? path
             : "lunette";
         int code = 1;
-        var worker = new Thread(() => code = Run(args, Console.Out, Console.Error, progName), InterpreterStackBytes);
+        // Raw bytes, not Console.Out: Lua strings are bytes and must reach stdout unchanged. A terminal gets every write at once;
+        // a pipe or file is buffered and flushed at exit.
+        Stream raw = Console.OpenStandardOutput();
+        Stream stdout = Console.IsOutputRedirected ? new BufferedStream(raw, 16 * 1024) : raw;
+        var worker = new Thread(() => code = Run(args, stdout, Console.Error, progName), InterpreterStackBytes);
         worker.Start();
         worker.Join();
         return code;
@@ -37,7 +41,14 @@ public static class Program
         "  -         stop handling options and execute stdin";
 
     /// <summary>Runs the <c>lua</c>-compatible driver: <c>lunette [options] [script [args]]</c>.</summary>
-    public static int Run(string[] args, TextWriter stdout, TextWriter stderr, string progName = "lunette")
+    public static int Run(string[] args, TextWriter stdout, TextWriter stderr, string progName = "lunette") =>
+        Run(args, stdout, null, stderr, progName);
+
+    /// <summary>Like <see cref="Run(string[], TextWriter, TextWriter, string)"/>, but <c>print</c> and <c>io.stdout</c> write their bytes verbatim to <paramref name="stdout"/>.</summary>
+    public static int Run(string[] args, Stream stdout, TextWriter stderr, string progName = "lunette") =>
+        Run(args, null, stdout, stderr, progName);
+
+    private static int Run(string[] args, TextWriter? stdoutText, Stream? stdoutBytes, TextWriter stderr, string progName)
     {
         // Pass 1: find the script and validate options, like lua.c's collectargs.
         bool hasI = false, hasV = false, hasE = false, noEnv = false;
@@ -85,7 +96,8 @@ public static class Program
         bool stdinTty = !Console.IsInputRedirected;
         var options = new Driver.Options(progName, hasI, hasV, hasE, noEnv, stdinTty, actions, script, scriptIsStdin);
 
-        var state = new LuaState(new CliPlatform(stderr)) { Output = stdout };
+        var state = new LuaState(new CliPlatform(stderr)) { OutputStream = stdoutBytes };
+        if (stdoutText is not null) state.Output = stdoutText;
         state.SetCommandLineArgs([progName, .. args], hasScript ? scriptIndex + 1 : 0);
         // Ctrl-C as in lua.c: the first SIGINT raises one "interrupted" error in the script; a second takes the default action.
         int sigints = 0;
@@ -115,9 +127,11 @@ public static class Program
         }
         finally
         {
-            stdout.Flush();
+            stdoutText?.Flush();
+            stdoutBytes?.Flush();
             if (close) state.Dispose();
-            stdout.Flush();
+            stdoutText?.Flush();
+            stdoutBytes?.Flush();
         }
     }
 

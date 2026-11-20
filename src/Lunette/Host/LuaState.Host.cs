@@ -129,6 +129,16 @@ public sealed partial class LuaState
         Ticks = _sliceSize;
     }
 
+    /// <summary>
+    /// Pre-check for a library function about to allocate <paramref name="bytes"/> in one go: aborts with
+    /// <see cref="LuaAbortKind.MemoryLimit"/> if that would pass the memory cap, before anything is allocated.
+    /// </summary>
+    internal void CheckAlloc(long bytes)
+    {
+        if (_limits.MemoryLimitBytes > 0 && GC.GetAllocatedBytesForCurrentThread() - _allocBaseline + bytes > _limits.MemoryLimitBytes)
+            Abort(LuaAbortKind.MemoryLimit);
+    }
+
     /// <summary>Marks the state aborted and throws the uncatchable exception; later polls fail again so nothing can run on.</summary>
     [System.Diagnostics.CodeAnalysis.DoesNotReturn]
     private void Abort(LuaAbortKind kind)

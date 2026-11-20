@@ -86,6 +86,16 @@ public sealed partial class LuaState : IDisposable
         SetGlobal("_VERSION", LuaValue.FromString("Lua 5.4"));
         SetGlobal("print", LuaValue.FromObject(new BuiltinFunction(static (state, args) =>
         {
+            if (state.OutputStream is { } raw)
+            {
+                for (int i = 0; i < args.Length; i++)
+                {
+                    if (i > 0) raw.WriteByte((byte)'\t');
+                    raw.Write(Meta.ToStringValue(state, args[i]).Bytes);
+                }
+                raw.WriteByte((byte)'\n');
+                return null;
+            }
             var o = state.Output;
             for (int i = 0; i < args.Length; i++)
             {
@@ -139,7 +149,9 @@ public sealed partial class LuaState : IDisposable
     }
 
     /// <summary>
-    /// Closes the state: runs every remaining <c>__gc</c> in reverse marking order (errors are swallowed). An aborted state
+    /// Closes the state like <c>lua_close</c>: first closes the to-be-closed variables still pending on the main thread (only
+    /// left over when a run ended with <c>os.exit</c>; a cleanly finished state has none, and suspended coroutines are not touched),
+    /// then runs every remaining <c>__gc</c> in reverse marking order (errors are swallowed). An aborted state
     /// (<see cref="IsAborted"/>) runs no Lua code; it just drops every reference it holds. Safe to call repeatedly.
     /// </summary>
     public void Dispose()
@@ -155,7 +167,11 @@ public sealed partial class LuaState : IDisposable
         }
     }
 
+    /// <summary>Text sink for <c>print</c> and <c>io.stdout</c>. Lua strings are bytes, so bytes that are not valid UTF-8 become U+FFFD here; set <see cref="OutputStream"/> to keep them.</summary>
     public TextWriter Output { get; set; } = Console.Out;
+
+    /// <summary>When set, <c>print</c> and <c>io.stdout</c> write their bytes here verbatim (no decoding) and <see cref="Output"/> is not used.</summary>
+    public Stream? OutputStream { get; set; }
 
     /// <summary>Compiles and runs a chunk of Lua source (encoded as UTF-8).</summary>
     public void DoString(string source, string chunkName = "=(load)")
