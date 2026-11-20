@@ -65,6 +65,8 @@ A pure-managed C# (.NET 11) Lua 5.4 engine and minimal CLI, built to the lua-eng
 - [Bench: coverage gaps (coroutines, closures, metatables/OOP, varargs, pcall/error, GC latency, strings, table lib, startup, footprint)](tickets/50-bench-coverage-gaps-coroutines-closures-metatables-oop-varar.md): Benchmark coverage set and gap analysis (0d9ddbc)
 - [Perf: fuse generic-for iterator sequence (Move x3 + Call + TForLoop)](tickets/48-perf-fuse-generic-for-iterator-sequence-move-x3-call-tforloo.md): Generic-for fusion for next/ipairs (8da5fcc)
 - [Host debug hook API: LuaState.SetHook with C# delegate and GetInfo for debug adapters](tickets/51-host-debug-hook-api-luastate-sethook-with-c-delegate-and-get.md): Host debug hook API (1b8db4c)
+- [Perf: VM runtime and string error raising 2.5-8x PUC (message building)](tickets/53-perf-vm-runtime-and-string-error-raising-2-5-8x-puc-message.md): Error raising without .NET throws (202df0d)
+- [Perf: warm-up and GC pause tail (first-chunk JIT cost, gen0 p99)](tickets/54-perf-warm-up-and-gc-pause-tail-first-chunk-jit-cost-gen0-p99.md): Non-concurrent GC for CLI, AOT recommendation (de7fc97)
 
 ## Not yet specified
 

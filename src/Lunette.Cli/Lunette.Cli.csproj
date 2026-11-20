@@ -5,7 +5,15 @@
     <RootNamespace>Lunette.Cli</RootNamespace>
     <!-- Native AOT + trimming gate (ADR/ticket 18): the CLI must publish with no ILC/trim warnings (warnings are errors). -->
     <PublishAot>true</PublishAot>
+    <!-- Runtime knobs for the CLI process (ticket 54, bench/COVERAGE.md "After ticket 54"). Embedders do not inherit these;
+         a host application sets its own. Non-concurrent GC removes the background GC thread and the 6 MB gen0 cap that comes with it:
+         gen0 p99 pause 4.2 ms -> 0.18 ms and about 40% more throughput in gc-latency.lua, for 20-40% more peak memory. -->
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- Replaces runtimeconfig.template.json (PublishAot rejects that file with a warning). Tier-up starts at once: ticket 40, bench/PROFILE.md. Ignored by Native AOT. -->
+    <RuntimeHostConfigurationOption Include="System.Runtime.TieredCompilation.CallCountingDelayMs" Value="0" />
+  </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Lunette\Lunette.csproj" />
   </ItemGroup>

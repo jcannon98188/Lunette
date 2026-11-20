@@ -102,7 +102,7 @@ internal static partial class Interpreter
     }
 
     /// <summary>Makes R[fa] a function by inserting __call handlers in front of it; returns the new argument count.</summary>
-    private static int ResolveCallable(Coroutine co, int fa, int nargs, Proto? p, int pc)
+    private static int ResolveCallable(Coroutine co, int fa, int nargs, Proto? p, int pc, bool deferError = false)
     {
         // The usual case, a table whose metatable's __call is a function: shift the arguments up by one in place.
         var st0 = co.Stack;
@@ -116,17 +116,23 @@ internal static partial class Interpreter
                 return nargs + 1;
             }
         }
-        return ResolveCallableSlow(co, fa, nargs, p, pc);
+        return ResolveCallableSlow(co, fa, nargs, p, pc, deferError);
     }
 
-    private static int ResolveCallableSlow(Coroutine co, int fa, int nargs, Proto? p, int pc)
+    private static int ResolveCallableSlow(Coroutine co, int fa, int nargs, Proto? p, int pc, bool deferError)
     {
         for (int guard = 0; co.Stack[fa].Ref is not (LuaClosure or BuiltinFunction); guard++)
         {
             LuaTable? callMt = co.Stack[fa].Ref switch { LuaTable t => t.Metatable, LuaUserdata u => u.Metatable, _ => null };
             LuaValue tm = callMt is null ? default : callMt.GetTagMethod(TagMethod.Call);
             if (tm.IsNil || guard > 100)
-                throw new LuaException($"{(p is null ? "" : Where(p, pc) + " ")}attempt to call a {Meta.ObjTypeName(co.Stack[fa])} value{VarInfo.DescribeCallee(p, pc)}");
+            {
+                var error = new LuaException($"{(p is null ? "" : Where(p, pc) + " ")}attempt to call a {Meta.ObjTypeName(co.Stack[fa])} value{VarInfo.DescribeCallee(p, pc)}");
+                if (!deferError) throw error;
+                // The dispatch loop takes the error from co.PendingError (RaiseDeferred) and unwinds without a .NET exception.
+                co.PendingError = error;
+                return -1;
+            }
             co.EnsureStack(fa + nargs + 2, p, pc);
             var st = co.Stack;
             Array.Copy(st, fa, st, fa + 1, nargs + 1);
@@ -448,7 +454,13 @@ internal static partial class Interpreter
                     object? fn = Regs.At(r, fa).Ref;
                     if (fn is not (LuaClosure or BuiltinFunction))
                     {
-                        nargs = ResolveCallable(co, fa, nargs, proto, pc - 1);
+                        nargs = ResolveCallable(co, fa, nargs, proto, pc - 1, true);
+                        if (nargs < 0)
+                        {
+                            f = RaiseDeferred(state, co, stop);
+                            top = co.ResumeTop;
+                            goto newframe;
+                        }
                         r = co.Stack;
                         fn = Regs.At(r, fa).Ref;
                     }
@@ -792,10 +804,15 @@ internal static partial class Interpreter
                 arithslow:
                 {
                     if (Arith.TryNumeric(i.Op, ref Regs.At(r, bs + i.A), in Regs.At(r, bs + i.B), in (i.Op >= OpCode.AddK && i.Op <= OpCode.PowK ? ref Regs.At(k, i.C) : ref Regs.At(r, bs + i.C)))) break;
-                    Frame? nf = ArithSlow(state, co, f, i, bs, pc, proto, k);
+                    Frame? nf = ArithSlow(state, co, f, i, bs, pc, proto, k, stop);
                     if (nf is not null)
                     {
                         f = nf;
+                        if (co.Unwound)
+                        {
+                            co.Unwound = false;
+                            top = co.ResumeTop;
+                        }
                         goto newframe;
                     }
                     r = co.Stack;
@@ -803,10 +820,15 @@ internal static partial class Interpreter
                 }
                 indexslow:
                 {
-                    Frame? nf = IndexSlow(state, co, f, i, bs, pc, proto, k);
+                    Frame? nf = IndexSlow(state, co, f, i, bs, pc, proto, k, stop);
                     if (nf is not null)
                     {
                         f = nf;
+                        if (co.Unwound)
+                        {
+                            co.Unwound = false;
+                            top = co.ResumeTop;
+                        }
                         goto newframe;
                     }
                     r = co.Stack;
@@ -814,10 +836,15 @@ internal static partial class Interpreter
                 }
                 setslow:
                 {
-                    Frame? nf = SetSlow(state, co, f, i, bs, pc, proto, k);
+                    Frame? nf = SetSlow(state, co, f, i, bs, pc, proto, k, stop);
                     if (nf is not null)
                     {
                         f = nf;
+                        if (co.Unwound)
+                        {
+                            co.Unwound = false;
+                            top = co.ResumeTop;
+                        }
                         goto newframe;
                     }
                     r = co.Stack;
@@ -871,7 +898,7 @@ internal static partial class Interpreter
     /// Returns the Frame of an __index function that finishes the instruction, or null when the result is stored.
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private static Frame? IndexSlow(LuaState state, Coroutine co, Frame f, Instruction i, int bs, int pc, Proto proto, LuaValue[] k)
+    private static Frame? IndexSlow(LuaState state, Coroutine co, Frame f, Instruction i, int bs, int pc, Proto proto, LuaValue[] k, int stop)
     {
         LuaValue[] r = co.Stack;
         OpCode op = i.Op;
@@ -891,18 +918,19 @@ internal static partial class Interpreter
                 return StartMetaLua(co, f, ccl, LuaValue.FromTable(at), in key, default, 2, Continuation.Value, bs + i.A, pc, proto);
             obj = LuaValue.FromTable(at);
         }
-        if (Meta.PrepareIndex(state, obj, key, proto, pc - 1, out LuaValue res, out MetaCall mc))
+        if (Meta.PrepareIndex(state, obj, key, proto, pc - 1, out LuaValue res, out MetaCall mc, out LuaException? error))
         {
             Frame? nf = StartMeta(state, co, f, in mc, Continuation.Value, bs + i.A, pc, proto, out res);
             if (nf is not null) return nf;
         }
+        else if (error is not null) return RaiseInLoop(state, co, stop, error);
         co.Stack[bs + i.A] = res;
         return null;
     }
 
     /// <summary>SetTable and SetField when the inline store did not apply: a metatable with __newindex, a non-table, an unusual key, or an error.</summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private static Frame? SetSlow(LuaState state, Coroutine co, Frame f, Instruction i, int bs, int pc, Proto proto, LuaValue[] k)
+    private static Frame? SetSlow(LuaState state, Coroutine co, Frame f, Instruction i, int bs, int pc, Proto proto, LuaValue[] k, int stop)
     {
         LuaValue[] r = co.Stack;
         LuaValue key = i.Op == OpCode.SetField ? k[i.B] : r[bs + i.B];
@@ -921,7 +949,8 @@ internal static partial class Interpreter
                 return StartMetaLua(co, f, scl, LuaValue.FromTable(sat), in key, in sval, 3, Continuation.Discard, 0, pc, proto);
             }
         }
-        if (!Meta.PrepareSetIndex(state, r[bs + i.A], key, r[bs + i.C], proto, pc - 1, out MetaCall mc)) return null;
+        if (!Meta.PrepareSetIndex(state, r[bs + i.A], key, r[bs + i.C], proto, pc - 1, out MetaCall mc, out LuaException? error))
+            return error is null ? null : RaiseInLoop(state, co, stop, error);
         return StartMeta(state, co, f, in mc, Continuation.Discard, 0, pc, proto, out _);
     }
 
@@ -930,7 +959,7 @@ internal static partial class Interpreter
     /// Returns the Frame of a metamethod call that finishes the instruction, or null when the result is stored.
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private static Frame? ArithSlow(LuaState state, Coroutine co, Frame f, Instruction i, int bs, int pc, Proto proto, LuaValue[] k)
+    private static Frame? ArithSlow(LuaState state, Coroutine co, Frame f, Instruction i, int bs, int pc, Proto proto, LuaValue[] k, int stop)
     {
         LuaValue[] r = co.Stack;
         OpCode op = i.Op;
@@ -950,7 +979,8 @@ internal static partial class Interpreter
             if (amt.GetTagMethod(aev).Ref is LuaClosure acl)
                 return StartMetaLua(co, f, acl, in lhs, in rhs, default, 2, Continuation.Value, bs + i.A, pc, proto);
         }
-        MetaCall mc = Meta.PrepareArith(state, Meta.ArithEvent(op), lhs, rhs, proto, pc - 1);
+        MetaCall mc = Meta.PrepareArith(state, Meta.ArithEvent(op), lhs, rhs, proto, pc - 1, out LuaException? error);
+        if (error is not null) return RaiseInLoop(state, co, stop, error);
         Frame? nf = StartMeta(state, co, f, in mc, Continuation.Value, bs + i.A, pc, proto, out LuaValue res);
         if (nf is not null) return nf;
         co.Stack[bs + i.A] = res;
@@ -1433,6 +1463,6 @@ internal static partial class Interpreter
 
     internal static string Where(Proto p, int pc)
     {
-        return $"{DebugLib.ChunkId(p.ChunkName)}:{p.Lines[pc]}:";
+        return string.Concat(p.ChunkDisplay, ":", p.Lines[pc].ToString(System.Globalization.CultureInfo.InvariantCulture), ":");
     }
 }

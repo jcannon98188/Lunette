@@ -120,6 +120,15 @@ internal sealed class Proto
     public int LineDefined { get; init; }
     public int LastLineDefined { get; init; }
 
+    private string? _chunkDisplay;
+    private byte[]? _whereBytes;
+
+    /// <summary>The printable chunk name (luaO_chunkid), computed once: the prefix of every position-carrying error message.</summary>
+    public string ChunkDisplay => _chunkDisplay ??= DebugLib.ChunkId(ChunkName);
+
+    /// <summary>UTF-8 of <see cref="ChunkDisplay"/> followed by a colon, the constant head of "chunk:line:" positions built as bytes.</summary>
+    public byte[] WhereBytes => _whereBytes ??= LuaString.FromUtf16(ChunkDisplay + ":").Bytes.ToArray();
+
     private System.Collections.Concurrent.ConcurrentDictionary<int, int>? _liveAt;
 
     /// <summary>

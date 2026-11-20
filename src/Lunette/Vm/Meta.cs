@@ -100,8 +100,20 @@ internal static class Meta
     /// <summary>Resolves <c>t[key]</c>: returns false with the value, or true with the __index function to call.</summary>
     public static bool PrepareIndex(LuaState state, LuaValue t, LuaValue key, Proto? p, int pc, out LuaValue result, out MetaCall mc)
     {
+        bool call = PrepareIndex(state, t, key, p, pc, out result, out mc, out LuaException? error);
+        if (error is not null) throw error;
+        return call;
+    }
+
+    /// <summary>
+    /// <see cref="PrepareIndex(LuaState, LuaValue, LuaValue, Proto?, int, out LuaValue, out MetaCall)"/> that hands back an "attempt to index"
+    /// error instead of throwing it, so the dispatch loop can unwind to a protected Frame without a .NET exception.
+    /// </summary>
+    public static bool PrepareIndex(LuaState state, LuaValue t, LuaValue key, Proto? p, int pc, out LuaValue result, out MetaCall mc, out LuaException? error)
+    {
         mc = default;
         result = default;
+        error = null;
         for (int loop = 0; loop < MaxTagLoop; loop++)
         {
             LuaValue tm;
@@ -121,7 +133,11 @@ internal static class Meta
             else
             {
                 tm = GetTagMethod(state, t, TagMethod.Index);
-                if (tm.IsNil) throw IndexError(t, p, pc, loop == 0);
+                if (tm.IsNil)
+                {
+                    error = IndexError(t, p, pc, loop == 0);
+                    return false;
+                }
             }
             if (tm.IsFunction)
             {
@@ -220,7 +236,16 @@ internal static class Meta
     /// <summary>Does the store when no function is involved (returns false), else returns true with the __newindex call.</summary>
     public static bool PrepareSetIndex(LuaState state, LuaValue t, LuaValue key, LuaValue value, Proto? p, int pc, out MetaCall mc)
     {
+        bool call = PrepareSetIndex(state, t, key, value, p, pc, out mc, out LuaException? error);
+        if (error is not null) throw error;
+        return call;
+    }
+
+    /// <summary><see cref="PrepareSetIndex(LuaState, LuaValue, LuaValue, LuaValue, Proto?, int, out MetaCall)"/> that hands back an "attempt to index" error instead of throwing it.</summary>
+    public static bool PrepareSetIndex(LuaState state, LuaValue t, LuaValue key, LuaValue value, Proto? p, int pc, out MetaCall mc, out LuaException? error)
+    {
         mc = default;
+        error = null;
         for (int loop = 0; loop < MaxTagLoop; loop++)
         {
             LuaValue tm;
@@ -236,7 +261,11 @@ internal static class Meta
             else
             {
                 tm = GetTagMethod(state, t, TagMethod.NewIndex);
-                if (tm.IsNil) throw IndexError(t, p, pc, loop == 0);
+                if (tm.IsNil)
+                {
+                    error = IndexError(t, p, pc, loop == 0);
+                    return false;
+                }
             }
             if (tm.IsFunction)
             {
@@ -289,6 +318,15 @@ internal static class Meta
 
     public static MetaCall PrepareArith(LuaState state, TagMethod ev, LuaValue a, LuaValue b, Proto? p, int pc)
     {
+        MetaCall mc = PrepareArith(state, ev, a, b, p, pc, out LuaException? error);
+        if (error is not null) throw error;
+        return mc;
+    }
+
+    /// <summary><see cref="PrepareArith(LuaState, TagMethod, LuaValue, LuaValue, Proto?, int)"/> that hands back the "attempt to perform arithmetic" error instead of throwing it.</summary>
+    public static MetaCall PrepareArith(LuaState state, TagMethod ev, LuaValue a, LuaValue b, Proto? p, int pc, out LuaException? error)
+    {
+        error = null;
         // Manual 3.4.3: strings convert to numbers in arithmetic (PUC does this through string-metatable metamethods;
         // observably the same unless the other operand has its own metamethod, which still wins below).
         if (ev is >= TagMethod.Add and <= TagMethod.IDiv
@@ -298,10 +336,15 @@ internal static class Meta
         if (tm.IsNil) tm = GetTagMethod(state, b, ev);
         if (tm.IsNil)
         {
-            if (ev is >= TagMethod.Add and <= TagMethod.IDiv && (a.IsString || b.IsString)) throw StringArithError(ev, a, b, p, pc);
+            if (ev is >= TagMethod.Add and <= TagMethod.IDiv && (a.IsString || b.IsString))
+            {
+                error = StringArithError(ev, a, b, p, pc);
+                return default;
+            }
             bool left = !a.IsNumber;
             LuaValue bad = left ? a : b;
-            throw new LuaException($"{At(p, pc)}attempt to perform {OperationName(ev)} on a {ObjTypeName(bad)} value{VarInfo.DescribeOperand(p, pc, left)}");
+            error = new LuaException($"{At(p, pc)}attempt to perform {OperationName(ev)} on a {ObjTypeName(bad)} value{VarInfo.DescribeOperand(p, pc, left)}");
+            return default;
         }
         return new MetaCall(tm, a, b, default, 2, ev);
     }

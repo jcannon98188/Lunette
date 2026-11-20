@@ -168,6 +168,35 @@ Not attempted (gaps): a per-table cached `__index` slot (+8 bytes per table) and
 metamethod-call ratio (now about 2.8x for 4-level methods, 2.7x for 1-level, 3.0x `__index` function, 2.1-2.4x `__add`/`__eq`/`__call`);
 `oop.lua` section 5 (vector class) is allocation bound at about 1.5x.
 
+## After ticket 53 (VM and `error("str")` raising)
+
+Diagnosis: the hypothesis in gap 2 was only half right. Position lookup and `VarInfo.Describe` are cheap on small functions; the 6-8x
+VM-error cost was the **.NET exception throw/catch** (about 2.3 us each), because `error(tbl)` is pending state in the loop but a
+VM-detected error (index/call/arithmetic on a bad value) was thrown out of a helper and caught in `Run`. `error("str")` paid for
+message assembly: `ChunkId` substring + interpolation per call, decode of the message to UTF-16, concat, re-encode to UTF-8.
+
+Kept (all measured, WSL, interleaved vs base, per-section `lap` of `pcall-error.lua`, 5 runs, ms; PUC = reference):
+
+| section | before | after | PUC |
+|---|---|---|---|
+| 2. error with a string message (100k) | 131-142 | 75-83 | 38-44 |
+| 4. runtime error raised by the VM (100k) | 295-360 | 138-147 | 48-69 |
+| steady state, 300k `pcall(vm_error)` | 790-880 | 110 | n/a |
+| steady state, 300k `pcall(error"boom")` | 80-100 | 44 | n/a |
+
+- Index get/set, arithmetic and "attempt to call" errors found by `IndexSlow`/`SetSlow`/`ArithSlow`/`Call` are handed back
+  (`PrepareIndex`/`PrepareSetIndex`/`PrepareArith` error overloads, `ResolveCallable(deferError)`) and unwound by
+  `RaiseInLoop`/`RaiseDeferred` exactly as `Run`'s catch does (fault line noted, `Unwind`, handler run on intact frames). With no
+  protected frame at this level the same exception is thrown, so `Traceback`/`TraceEntries` are captured as before.
+- `Proto.ChunkDisplay` / `Proto.WhereBytes` cache the chunk id; `Interpreter.Where` and `NoteFault` no longer allocate for it;
+  `ErrorValue` builds the positioned message as bytes in one allocation (invalid UTF-8 keeps the old decode/re-encode path).
+
+Reverted: replacing interpolation with `string.Concat` in the message builders (no measurable change).
+
+Remaining gaps: the first ~40-60k errors run at tier-0 speed (section 4 is 100k iterations, so ~90 ms of its 140 ms is warm-up; steady
+state is at PUC parity). `AggressiveOptimization` on the helpers is forbidden by `JitBudgetTests`; tiering knobs belong to the
+startup ticket. Compare/concat/bitwise/length errors and tail-call "attempt to call" still throw.
+
 ## Reproducing
 
 ```
@@ -185,3 +214,117 @@ dotnet run -c Release --project bench/Lunette.Benchmarks -- --filter '*StateBenc
 Caveats: stdout of every script is a checksum identical between PUC and Lunette (verified); stderr carries the timings, so runners
 that discard stderr are unaffected. `os.clock` is process CPU time under both engines (Lunette includes JIT and GC threads). Footprint figures are approximate
 (subtract an assumed 16-byte array slot). Section 1 of each script absorbs Lunette's JIT warm-up.
+
+## After ticket 54 (warm-up and GC pause tail)
+
+All numbers: WSL Ubuntu, 16 CPUs shared with other jobs, interleaved runs, medians (7-11 runs for warm-up, 5-9 for gc-latency), PUC 5.4.9.
+Scripts: `warmup.lua` (first 5 chunks, whole wall), `gc-latency.lua`, `bench/run-macro-linux.sh [--aot|--r2r]`. Absolute numbers drift
+with machine load; compare within a table.
+
+### What the warm-up is, and the lever that removes it
+
+`-v` costs the same as `print(1)` (95-99 ms JIT build, 57-61 ms ReadyToRun): the startup is the .NET runtime plus tier-0 JIT of the
+code the CLI touches (about 880 methods, 92 KB of IL for a `-v` run; 185 methods with R2R), not state creation (stdlib registration is
+about 2 ms; only 26 `LuaState` methods are jitted and none of the `Register` bodies dominate), so lazy library tables or avoiding eager
+string interning would save well under 5 ms. No engine change was made for startup.
+
+The warm-up curve is JIT work spread over the first ~20 chunks (instrumented tier-1, then tier-1, on a background thread whose CPU
+`os.clock` also counts), not a single stall. The measured levers on the JIT CLI (`dotnet Lunette.Cli.dll`), first 5 chunks / whole
+`warmup.lua` wall, baseline 40-45 ms / 223-244 ms:
+
+| setting | first 5 chunks | wall | verdict |
+|---|---:|---:|---|
+| baseline (CallCountingDelayMs=0) | 41-45 | 223-244 | |
+| `TieredPGO=0` | 38 | 237 | within noise on this script; PROFILE.md found n-body +18-25% slower, stays rejected |
+| `TC_QuickJitForLoops=0` | 45 | 307 | worse (+60 ms startup) |
+| `OSR_HitLimit=1` | 57 | 242 | worse |
+| `TC_BackgroundWorkerTimeoutMs=0` | 40 | 251 | no gain |
+| `TieredCompilation=0` | 27 | 328 | +85 ms startup, loses tier-1 PGO |
+| `ReadyToRun=0` (no framework R2R) | 57 | 329 | shows how much the framework R2R already helps |
+| remove `AggressiveOptimization` from `RunLoop` (experiment, not committed) | 80 | 233 | worse: the loop runs in tier-0 until OSR; also worse on top of R2R (43 vs 32) |
+| ReadyToRun publish of the CLI | 32 | 183-193 | -45 ms wall, startup 98 -> 61 ms; needs `-r <rid> -p:PublishAot=false` (see below) |
+| R2R + `TieredPGO=0` | 25 | 159-164 | best JIT-hosted number, but PGO off loses throughput on loops; not applied |
+| **Native AOT publish of the CLI** | **12.3** | **94-108** | startup 4 ms; no warm-up (penalty 0.1-1.7 ms) |
+
+Native AOT is the answer for the shipped CLI: whole-process wall time, JIT build vs R2R vs AOT, median of 3 (ms):
+
+| | JIT | R2R | AOT |
+|---|---:|---:|---:|
+| fib | 388 | 353 | 304 |
+| n-body | 891 | 833 | 867 |
+| binary-trees | 630 | 603 | 504 |
+| string-heavy | 233 | 204 | 85 |
+| spectral-norm | 416 | 371 | 331 |
+| warmup | 221 | 182 | 104 |
+| gc-latency | 1324 | 1328 | 1216 |
+
+Caveat: AOT code has no PGO, so `oop.lua` (metamethod-heavy, benefits from guarded devirtualization in tier-1) is slower under AOT (1781 ms vs
+1434 ms JIT) and `n-body`, `fannkuch` are level; everything else is equal or faster including startup (4 ms vs 98 ms). Per-benchmark
+ratios against PUC (net of startup), Native AOT CLI with the settings below, `run-macro-linux.sh --aot --runs 5`:
+binary-trees 1.12x, closures 1.63x, coroutines 1.88x, fannkuch 2.55x, fib 2.63x, gc-latency 0.54x, k-nucleotide 2.04x, mandelbrot 2.11x,
+n-body 2.48x, nsieve 1.42x, oop 3.13x, pcall-error 2.09x, spectral-norm 2.13x, string-build 1.26x, string-heavy 0.96x, table-lib 1.31x,
+varargs 2.00x, warmup 2.09x. (JIT CLI, same run: warmup 2.41x, string-heavy 1.65x, spectral-norm 2.39x, oop 2.28x, the rest within noise.)
+
+ReadyToRun versus the AOT gate, confirmed: `PublishReadyToRun` is a `publish` feature and needs a RID, while the project sets
+`PublishAot=true` for the gate (which publishes the same project with no ILC or trim warnings). R2R therefore stays a publish-time
+choice (`dotnet publish -r <rid> --self-contained false -p:PublishAot=false -p:PublishReadyToRun=true`), as `run-macro-linux.sh --r2r` does.
+Composite R2R of the framework was not tried (needs a self-contained publish; the CLI is framework-dependent). Embedders running on
+the JIT get R2R only by publishing their own app with `PublishReadyToRun`; Lunette.dll is then precompiled with it, except `RunLoop`
+(`AggressiveOptimization` methods are never R2R) which JITs at FullOpts on first use (the cheaper alternative, tier-0 plus OSR, was slower: see the table).
+
+### GC pause tail (`gc-latency.lua`)
+
+Lunette's own collection machinery (`GcState`: weak-table windows, finalizer drain) never runs here (no weak tables, no `__gc`), and
+`Safepoint` only clears a dead stack slice. The 4.2 ms p99 is the .NET collector in concurrent mode. A run shows about 77 batches over
+1 ms: a 4.1-4.2 ms event repeated about every 20-40 batches and 6-18 ms events about every 135 batches (background and gen1 work),
+versus 7 in non-concurrent mode. By the runtime's GC sources (not measured here) concurrent GC caps gen0 at 6 MB (more frequent collections, each scanning the card-marked old heap, and a background GC
+thread whose CPU also lands in `os.clock`); non-concurrent workstation GC lifts the gen0 cap to up to 200 MB.
+
+JIT CLI, interleaved, median of 7-9 (batch of 100 iterations, ms):
+
+| setting | ns/iter | p99 | p99.9 | max | wall (s) | peak RSS |
+|---|---:|---:|---:|---:|---:|---:|
+| before (concurrent GC) | 2112-2940 | 4.2 | 17-24 | 19-30 | 1.32-1.71 | 155 MB |
+| **`System.GC.Concurrent=false`** | 1297-1388 | 0.17-0.18 | 0.7-0.9 | 76-93 | 0.91-0.96 | 223 MB |
+| concurrent, `GCgen0size=64MB` (env only) | 1468 | 0.16 | 5.2 | 66 | 1.00 | |
+| concurrent, `GCgen0size=256MB` (env only) | 1289 | 0.18 | 0.85 | 76 | 0.93 | |
+| non-concurrent + `GCgen0MaxBudget` 1/16/64 MB, `GCgen1size=32MB`, `GCConserveMemory=5` | 1294-1448 | 0.16-0.20 | 0.7-0.9 | 80-84 | 0.95-1.0 | no effect on max |
+| concurrent, `GCgen0MaxBudget=16MB` or `GCConserveMemory=5` | 2139 / 1927 | 4.2 | 17 | 19-20 | | no effect |
+| Server GC, 4 heaps (non-concurrent) | 1138 | 0.19 | 0.56 | 26 | 0.82 | not applied (see below) |
+| Native AOT CLI, non-concurrent | 1368-1559 | 0.18-0.20 | 0.28-0.30 | 78-86 | 0.81-0.91 | |
+| PUC 5.4.9 | 2656-3108 | 0.23-0.29 | 30-35 | 124-144 | 1.4-1.66 | |
+
+Applied: the **CLI csproj sets `ConcurrentGarbageCollection=false`** (written to `Lunette.Cli.runtimeconfig.json` as `System.GC.Concurrent`; baked into
+the Native AOT binary too). p99 goes from 18x PUC to 0.7-0.8x PUC, p99.9 from 17-24 ms to under 1 ms (PUC 30-35), throughput of this test improves by
+40-50%, and the other macro benchmarks are within noise (fib, n-body, binary-trees, string-heavy, k-nucleotide, spectral-norm, fannkuch, nsieve, oop, closures,
+coroutines, table-lib: all within about 5% in a 5-run interleaved comparison). Costs: **the worst single batch grows from about 20-30 ms to 76-93 ms**
+(two batches in the run: a blocking gen1/gen2 collection of the 40 MB, 400k-object live heap that concurrent mode used to do in the background
+and in small gen0 steps; PUC's max is 124-144 ms, so Lunette still wins max), and peak RSS rises 20-45% on allocation-heavy scripts
+(binary-trees 65 -> 95 MB, string-heavy 65 -> 83 MB, gc-latency 155 -> 223 MB; startup and fib unchanged at 41-43 MB).
+Not applied: a smaller gen0 budget does not shorten the 70+ ms collection; Server GC removes it (26 ms) but costs heaps and threads
+for a short-lived CLI process.
+
+### Embedder guidance (what the CLI sets and what an embedder must set)
+
+Lunette is a library: it does not set any runtime knob. The CLI sets two, in `src/Lunette.Cli/Lunette.Cli.csproj` (moved there from
+`runtimeconfig.template.json`, which `PublishAot` rejected with a warning; the AOT publish is now warning-free):
+
+- `System.Runtime.TieredCompilation.CallCountingDelayMs=0` (ticket 40; JIT hosts only, ignored by Native AOT).
+- `System.GC.Concurrent=false` (this ticket).
+
+A host that wants the same behavior sets them itself: `<ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>` and a
+`RuntimeHostConfigurationOption` for the tiering delay, or `DOTNET_gcConcurrent=0` / `DOTNET_TC_CallCountingDelayMs=0` in the environment.
+Disable concurrent GC when the host runs Lua with a large live heap and cares about p99 or throughput more than the single worst pause or
+memory (it is a process-wide setting: it also changes the host's own allocations). Keep the default when a host cares most about the
+worst-case pause or about memory. `GCgen0size` is environment-only (`DOTNET_GCgen0size`, hex bytes), so it is not a recommended embedder
+knob. `TieredPGO` stays on (PROFILE.md: n-body +18-25% when off). Startup-sensitive hosts should publish with ReadyToRun or Native AOT.
+
+### Kept and reverted
+
+Kept: CLI non-concurrent GC; CLI knobs moved into the csproj (no AOT warning); `run-macro-linux.sh --aot`. Reverted (measured, no win or a
+loss): TieredPGO=0, QuickJitForLoops=0, OSR_HitLimit, BackgroundWorkerTimeoutMs, TieredCompilation=0, `RunLoop` without
+`AggressiveOptimization`, `GCgen0MaxBudget`/`GCgen1size`/`GCConserveMemory`, Server GC, any change to state creation or stdlib
+registration (no measurable startup share). Recommendation, not a code change: ship the CLI as a Native AOT binary (`dotnet publish src/Lunette.Cli -c Release`).
+
+Gaps: the max single pause with non-concurrent GC (76-93 ms) is the remaining GC outlier; the JIT-hosted first-chunk cost (the first chunk takes 14-24 ms: `RunLoop`'s FullOpts
+compile plus tier-0 of the helpers) has no lever that does not cost throughput; AOT is 20% slower than JIT on metamethod-heavy code (oop).
