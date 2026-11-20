@@ -14,7 +14,7 @@ public sealed class LuaState
     internal LuaTable? StringMetatable;
     internal readonly Coroutine Main = new();
     /// <summary>The coroutine currently executing.</summary>
-    internal Coroutine Running => Main;
+    internal Coroutine Running;
     /// <summary>Depth of nested native-to-Lua calls in progress.</summary>
     internal int NativeDepth;
 
@@ -29,6 +29,9 @@ public sealed class LuaState
     internal LuaState(int internCapacity)
     {
         Strings = new StringCache(internCapacity);
+        Main.IsMain = true;
+        Main.Status = CoStatus.Running;
+        Running = Main;
         Globals["print"] = LuaValue.FromObject(new BuiltinFunction(static (state, args) =>
         {
             var o = state.Output;
@@ -45,6 +48,7 @@ public sealed class LuaState
         Utf8Lib.Register(this);
         MathLib.Register(this);
         ErrorLib.Register(this);
+        CoroutineLib.Register(this);
     }
 
     public TextWriter Output { get; set; } = Console.Out;

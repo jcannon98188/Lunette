@@ -61,6 +61,7 @@ internal static partial class Interpreter
     {
         if (state.NativeDepth >= MaxNativeDepth) throw new LuaException("C stack overflow");
         state.NativeDepth++;
+        co.Nny++;
         try
         {
             nargs = ResolveCallable(co, fa, nargs, null, 0);
@@ -74,6 +75,7 @@ internal static partial class Interpreter
         }
         finally
         {
+            co.Nny--;
             state.NativeDepth--;
         }
     }
@@ -99,9 +101,8 @@ internal static partial class Interpreter
     /// Runs the dispatch loop. The only <c>try</c> lives here, outside the loop method: a thrown LuaException
     /// is converted to pending-error state, unwound to the nearest protected Frame and the loop re-entered (ADR 0003).
     /// </summary>
-    private static int Run(LuaState state, Coroutine co, Frame f, int stop)
+    private static int Run(LuaState state, Coroutine co, Frame f, int stop, int top = 0)
     {
-        int top = 0;
         while (true)
         {
             try
@@ -183,7 +184,13 @@ internal static partial class Interpreter
                     if (lhs.IsNumber && rhs.IsNumber) r[bs + i.A] = Arith.Binary(i.Op, lhs, rhs, proto, pc - 1);
                     else
                     {
-                        LuaValue res = Meta.Arith(state, Meta.ArithEvent(i.Op), lhs, rhs, proto, pc - 1);
+                        MetaCall mc = Meta.PrepareArith(state, Meta.ArithEvent(i.Op), lhs, rhs, proto, pc - 1);
+                        Frame? nf = StartMeta(state, co, f, in mc, Continuation.Value, bs + i.A, pc, proto, out LuaValue res);
+                        if (nf is not null)
+                        {
+                            f = nf;
+                            goto newframe;
+                        }
                         r = co.Stack;
                         r[bs + i.A] = res;
                     }
@@ -199,7 +206,13 @@ internal static partial class Interpreter
                     if (lhs.IsNumber && rhs.IsNumber) r[bs + i.A] = Arith.Bitwise(i.Op, lhs, rhs, proto, pc - 1);
                     else
                     {
-                        LuaValue res = Meta.Arith(state, Meta.ArithEvent(i.Op), lhs, rhs, proto, pc - 1);
+                        MetaCall mc = Meta.PrepareArith(state, Meta.ArithEvent(i.Op), lhs, rhs, proto, pc - 1);
+                        Frame? nf = StartMeta(state, co, f, in mc, Continuation.Value, bs + i.A, pc, proto, out LuaValue res);
+                        if (nf is not null)
+                        {
+                            f = nf;
+                            goto newframe;
+                        }
                         r = co.Stack;
                         r[bs + i.A] = res;
                     }
@@ -211,7 +224,13 @@ internal static partial class Interpreter
                     if (v.IsNumber) r[bs + i.A] = Arith.BitwiseNot(v, proto, pc - 1);
                     else
                     {
-                        LuaValue res = Meta.Unary(state, TagMethod.BNot, v, proto, pc - 1);
+                        MetaCall mc = Meta.PrepareUnary(state, TagMethod.BNot, v, proto, pc - 1);
+                        Frame? nf = StartMeta(state, co, f, in mc, Continuation.Value, bs + i.A, pc, proto, out LuaValue res);
+                        if (nf is not null)
+                        {
+                            f = nf;
+                            goto newframe;
+                        }
                         r = co.Stack;
                         r[bs + i.A] = res;
                     }
@@ -223,7 +242,13 @@ internal static partial class Interpreter
                     if (v.IsNumber) r[bs + i.A] = Arith.Negate(v, proto, pc - 1);
                     else
                     {
-                        LuaValue res = Meta.Unm(state, v, proto, pc - 1);
+                        MetaCall mc = Meta.PrepareUnary(state, TagMethod.Unm, v, proto, pc - 1);
+                        Frame? nf = StartMeta(state, co, f, in mc, Continuation.Value, bs + i.A, pc, proto, out LuaValue res);
+                        if (nf is not null)
+                        {
+                            f = nf;
+                            goto newframe;
+                        }
                         r = co.Stack;
                         r[bs + i.A] = res;
                     }
@@ -234,29 +259,62 @@ internal static partial class Interpreter
                     break;
                 case OpCode.Eq:
                 {
-                    bool eq = Meta.Equal(state, r[bs + i.B], r[bs + i.C]);
-                    r = co.Stack;
+                    if (Meta.PrepareEqual(r[bs + i.B], r[bs + i.C], out bool eq, out MetaCall mc))
+                    {
+                        Frame? nf = StartMeta(state, co, f, in mc, Continuation.Bool, bs + i.A, pc, proto, out LuaValue res);
+                        if (nf is not null)
+                        {
+                            f = nf;
+                            goto newframe;
+                        }
+                        r = co.Stack;
+                        eq = !res.IsFalsy;
+                    }
                     r[bs + i.A] = LuaValue.FromBoolean(eq);
                     break;
                 }
                 case OpCode.Lt:
                 {
                     LuaValue lhs = r[bs + i.B], rhs = r[bs + i.C];
-                    bool lt = lhs.IsNumber && rhs.IsNumber
-                        ? Compare.LessThan(lhs, rhs, proto, pc - 1)
-                        : Meta.Order(state, TagMethod.Lt, lhs, rhs, proto, pc - 1);
-                    r = co.Stack;
-                    r[bs + i.A] = LuaValue.FromBoolean(lt);
+                    if (lhs.IsNumber && rhs.IsNumber) r[bs + i.A] = LuaValue.FromBoolean(Compare.LessThan(lhs, rhs, proto, pc - 1));
+                    else
+                    {
+                        if (!Meta.PrepareOrder(state, TagMethod.Lt, lhs, rhs, proto, pc - 1, out bool ordRes, out MetaCall mc))
+                        {
+                            r[bs + i.A] = LuaValue.FromBoolean(ordRes);
+                            break;
+                        }
+                        Frame? nf = StartMeta(state, co, f, in mc, Continuation.Bool, bs + i.A, pc, proto, out LuaValue res);
+                        if (nf is not null)
+                        {
+                            f = nf;
+                            goto newframe;
+                        }
+                        r = co.Stack;
+                        r[bs + i.A] = LuaValue.FromBoolean(!res.IsFalsy);
+                    }
                     break;
                 }
                 case OpCode.Le:
                 {
                     LuaValue lhs = r[bs + i.B], rhs = r[bs + i.C];
-                    bool le = lhs.IsNumber && rhs.IsNumber
-                        ? Compare.LessEqual(lhs, rhs, proto, pc - 1)
-                        : Meta.Order(state, TagMethod.Le, lhs, rhs, proto, pc - 1);
-                    r = co.Stack;
-                    r[bs + i.A] = LuaValue.FromBoolean(le);
+                    if (lhs.IsNumber && rhs.IsNumber) r[bs + i.A] = LuaValue.FromBoolean(Compare.LessEqual(lhs, rhs, proto, pc - 1));
+                    else
+                    {
+                        if (!Meta.PrepareOrder(state, TagMethod.Le, lhs, rhs, proto, pc - 1, out bool ordRes, out MetaCall mc))
+                        {
+                            r[bs + i.A] = LuaValue.FromBoolean(ordRes);
+                            break;
+                        }
+                        Frame? nf = StartMeta(state, co, f, in mc, Continuation.Bool, bs + i.A, pc, proto, out LuaValue res);
+                        if (nf is not null)
+                        {
+                            f = nf;
+                            goto newframe;
+                        }
+                        r = co.Stack;
+                        r[bs + i.A] = LuaValue.FromBoolean(!res.IsFalsy);
+                    }
                     break;
                 }
                 case OpCode.Test:
@@ -291,6 +349,7 @@ internal static partial class Interpreter
                             top = co.ResumeTop;
                             goto newframe;
                         }
+                        if (sp == Special.Yield) return top;
                         if (sp == Special.Done)
                         {
                             r = co.Stack;
@@ -331,6 +390,7 @@ internal static partial class Interpreter
                             top = co.ResumeTop;
                             goto newframe;
                         }
+                        if (sp == Special.Yield) return top;
                         if (sp == Special.Done)
                         {
                             r = co.Stack;
@@ -352,6 +412,12 @@ internal static partial class Interpreter
                         f.Pc = pc;
                         CloseTbc(state, co, bs, Math.Max(bs + proto.MaxStack, ra + n));
                         r = co.Stack;
+                    }
+                    if (f.Cont != Continuation.None)
+                    {
+                        FinishMeta(f, n > 0 ? r[ra] : default, r);
+                        f = co.Frames[--co.Depth - 1]!;
+                        goto newframe;
                     }
                     int dst = f.FuncIdx;
                     int wanted = f.Wanted;
@@ -445,8 +511,16 @@ internal static partial class Interpreter
                             break;
                         }
                     }
-                    LuaValue res = Meta.Index(state, obj, key, proto, pc - 1);
-                    r = co.Stack;
+                    if (Meta.PrepareIndex(state, obj, key, proto, pc - 1, out LuaValue res, out MetaCall mc))
+                    {
+                        Frame? nf = StartMeta(state, co, f, in mc, Continuation.Value, bs + i.A, pc, proto, out res);
+                        if (nf is not null)
+                        {
+                            f = nf;
+                            goto newframe;
+                        }
+                        r = co.Stack;
+                    }
                     r[bs + i.A] = res;
                     break;
                 }
@@ -456,7 +530,16 @@ internal static partial class Interpreter
                     if (obj.Ref is LuaTable t && t.Metatable is null) Meta.RawSet(t, r[bs + i.B], r[bs + i.C], proto, pc - 1);
                     else
                     {
-                        Meta.SetIndex(state, obj, r[bs + i.B], r[bs + i.C], proto, pc - 1);
+                        if (Meta.PrepareSetIndex(state, obj, r[bs + i.B], r[bs + i.C], proto, pc - 1, out MetaCall mc))
+                        {
+                            Frame? nf = StartMeta(state, co, f, in mc, Continuation.Discard, 0, pc, proto, out LuaValue res);
+                        if (nf is not null)
+                        {
+                            f = nf;
+                            goto newframe;
+                        }
+                        r = co.Stack;
+                        }
                         r = co.Stack;
                     }
                     break;
@@ -479,8 +562,17 @@ internal static partial class Interpreter
                     if (obj.Ref is LuaTable t) v = t.Get(key);
                     if (v.IsNil)
                     {
-                        v = Meta.Index(state, obj, key, proto, pc - 1);
+                        if (Meta.PrepareIndex(state, obj, key, proto, pc - 1, out v, out MetaCall mc))
+                        {
+                            Frame? nf = StartMeta(state, co, f, in mc, Continuation.Value, bs + i.A, pc, proto, out LuaValue res);
+                        if (nf is not null)
+                        {
+                            f = nf;
+                            goto newframe;
+                        }
                         r = co.Stack;
+                            v = res;
+                        }
                     }
                     r[bs + i.A] = v;
                     break;
@@ -491,8 +583,16 @@ internal static partial class Interpreter
                     if (v.Ref is LuaTable t && t.Metatable is null) r[bs + i.A] = LuaValue.FromInteger(t.Length());
                     else
                     {
-                        LuaValue res = Meta.Len(state, v, proto, pc - 1);
+                        if (Meta.PrepareLen(state, v, proto, pc - 1, out LuaValue res, out MetaCall mc))
+                        {
+                            Frame? nf = StartMeta(state, co, f, in mc, Continuation.Value, bs + i.A, pc, proto, out res);
+                        if (nf is not null)
+                        {
+                            f = nf;
+                            goto newframe;
+                        }
                         r = co.Stack;
+                        }
                         r[bs + i.A] = res;
                     }
                     break;
