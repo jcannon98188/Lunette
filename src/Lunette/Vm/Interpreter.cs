@@ -1,4 +1,5 @@
 using Lunette.Compiler;
+using Lunette.Unsafe;
 
 namespace Lunette.Vm;
 
@@ -217,10 +218,10 @@ internal static partial class Interpreter
             switch (i.Op)
             {
                 case OpCode.Move:
-                    r[bs + i.A] = r[bs + i.B];
+                    Regs.Copy(ref Regs.At(r, bs + i.A), in Regs.At(r, bs + i.B));
                     break;
                 case OpCode.LoadK:
-                    r[bs + i.A] = k[i.Bx];
+                    Regs.Copy(ref Regs.At(r, bs + i.A), in Regs.At(k, i.Bx));
                     break;
                 case OpCode.LoadKX:
                     r[bs + i.A] = k[code[pc++].Ax];
@@ -279,51 +280,34 @@ internal static partial class Interpreter
                     cl.Upvals[i.B].Set(r[bs + i.A]);
                     break;
                 case OpCode.Add:
+                case OpCode.AddK:
+                    if (ArithFast<AddOp>(ref Regs.At(r, bs + i.A), ref Regs.At(r, bs + i.B), ref (i.Op == OpCode.AddK ? ref Regs.At(k, i.C) : ref Regs.At(r, bs + i.C)))) break;
+                    goto arithslow;
                 case OpCode.Sub:
+                case OpCode.SubK:
+                    if (ArithFast<SubOp>(ref Regs.At(r, bs + i.A), ref Regs.At(r, bs + i.B), ref (i.Op == OpCode.SubK ? ref Regs.At(k, i.C) : ref Regs.At(r, bs + i.C)))) break;
+                    goto arithslow;
                 case OpCode.Mul:
+                case OpCode.MulK:
+                    if (ArithFast<MulOp>(ref Regs.At(r, bs + i.A), ref Regs.At(r, bs + i.B), ref (i.Op == OpCode.MulK ? ref Regs.At(k, i.C) : ref Regs.At(r, bs + i.C)))) break;
+                    goto arithslow;
                 case OpCode.Div:
+                case OpCode.DivK:
+                    if (ArithFast<DivOp>(ref Regs.At(r, bs + i.A), ref Regs.At(r, bs + i.B), ref (i.Op == OpCode.DivK ? ref Regs.At(k, i.C) : ref Regs.At(r, bs + i.C)))) break;
+                    goto arithslow;
                 case OpCode.IDiv:
                 case OpCode.Mod:
                 case OpCode.Pow:
-                {
-                    LuaValue lhs = r[bs + i.B], rhs = r[bs + i.C];
-                    if (lhs.IsNumber && rhs.IsNumber) r[bs + i.A] = Arith.Binary(i.Op, lhs, rhs, proto, pc - 1);
-                    else
-                    {
-                        MetaCall mc = Meta.PrepareArith(state, Meta.ArithEvent(i.Op), lhs, rhs, proto, pc - 1);
-                        Frame? nf = StartMeta(state, co, f, in mc, Continuation.Value, bs + i.A, pc, proto, out LuaValue res);
-                        if (nf is not null)
-                        {
-                            f = nf;
-                            goto newframe;
-                        }
-                        r = co.Stack;
-                        r[bs + i.A] = res;
-                    }
-                    break;
-                }
+                case OpCode.IDivK:
+                case OpCode.ModK:
+                case OpCode.PowK:
+                    goto arithslow;
                 case OpCode.BAnd:
                 case OpCode.BOr:
                 case OpCode.BXor:
                 case OpCode.Shl:
                 case OpCode.Shr:
-                {
-                    LuaValue lhs = r[bs + i.B], rhs = r[bs + i.C];
-                    if (lhs.IsNumber && rhs.IsNumber) r[bs + i.A] = Arith.Bitwise(i.Op, lhs, rhs, proto, pc - 1);
-                    else
-                    {
-                        MetaCall mc = Meta.PrepareArith(state, Meta.ArithEvent(i.Op), lhs, rhs, proto, pc - 1);
-                        Frame? nf = StartMeta(state, co, f, in mc, Continuation.Value, bs + i.A, pc, proto, out LuaValue res);
-                        if (nf is not null)
-                        {
-                            f = nf;
-                            goto newframe;
-                        }
-                        r = co.Stack;
-                        r[bs + i.A] = res;
-                    }
-                    break;
-                }
+                    goto arithslow;
                 case OpCode.BNot:
                 {
                     LuaValue v = r[bs + i.B];
@@ -374,7 +358,7 @@ internal static partial class Interpreter
                             goto newframe;
                         }
                         r = co.Stack;
-                        eq = !res.IsFalsy;
+                        eq = Truthy(res);
                     }
                     r[bs + i.A] = LuaValue.FromBoolean(eq);
                     break;
@@ -397,7 +381,7 @@ internal static partial class Interpreter
                             goto newframe;
                         }
                         r = co.Stack;
-                        r[bs + i.A] = LuaValue.FromBoolean(!res.IsFalsy);
+                        r[bs + i.A] = LuaValue.FromBoolean(Truthy(res));
                     }
                     break;
                 }
@@ -419,13 +403,79 @@ internal static partial class Interpreter
                             goto newframe;
                         }
                         r = co.Stack;
-                        r[bs + i.A] = LuaValue.FromBoolean(!res.IsFalsy);
+                        r[bs + i.A] = LuaValue.FromBoolean(Truthy(res));
                     }
                     break;
                 }
                 case OpCode.Test:
-                    if (!r[bs + i.A].IsFalsy != (i.C != 0)) pc++;
+                    if (!Regs.IsFalsy(ref Regs.At(r, bs + i.A)) != (i.C != 0)) pc++;
+                    else
+                    {
+                        i = code[pc++]; // the Jmp that follows runs now, without another dispatch
+                        goto case OpCode.Jmp;
+                    }
                     break;
+                case OpCode.JLt:
+                case OpCode.JLtK:
+                case OpCode.JGtK:
+                {
+                    // R[B] < R[C], R[B] < K[C], or K[C] < R[B]
+                    OpCode op = i.Op;
+                    ref LuaValue x = ref Regs.At(r, bs + i.B);
+                    ref LuaValue y = ref (op == OpCode.JLt ? ref Regs.At(r, bs + i.C) : ref Regs.At(k, i.C));
+                    ref LuaValue lhs = ref (op == OpCode.JGtK ? ref y : ref x);
+                    ref LuaValue rhs = ref (op == OpCode.JGtK ? ref x : ref y);
+                    bool res;
+                    if (lhs.IsInteger && rhs.IsInteger) res = lhs.AsInteger < rhs.AsInteger;
+                    else if (lhs.IsFloat && rhs.IsFloat) res = lhs.AsFloat < rhs.AsFloat;
+                    else goto condslow;
+                    if (res == (i.A != 0))
+                    {
+                        i = code[pc++];
+                        goto case OpCode.Jmp;
+                    }
+                    pc++;
+                    break;
+                }
+                case OpCode.JLe:
+                case OpCode.JLeK:
+                case OpCode.JGeK:
+                {
+                    OpCode op = i.Op;
+                    ref LuaValue x = ref Regs.At(r, bs + i.B);
+                    ref LuaValue y = ref (op == OpCode.JLe ? ref Regs.At(r, bs + i.C) : ref Regs.At(k, i.C));
+                    ref LuaValue lhs = ref (op == OpCode.JGeK ? ref y : ref x);
+                    ref LuaValue rhs = ref (op == OpCode.JGeK ? ref x : ref y);
+                    bool res;
+                    if (lhs.IsInteger && rhs.IsInteger) res = lhs.AsInteger <= rhs.AsInteger;
+                    else if (lhs.IsFloat && rhs.IsFloat) res = lhs.AsFloat <= rhs.AsFloat;
+                    else goto condslow;
+                    if (res == (i.A != 0))
+                    {
+                        i = code[pc++];
+                        goto case OpCode.Jmp;
+                    }
+                    pc++;
+                    break;
+                }
+                case OpCode.JEq:
+                case OpCode.JEqK:
+                {
+                    ref LuaValue lhs = ref Regs.At(r, bs + i.B);
+                    ref LuaValue rhs = ref (i.Op == OpCode.JEq ? ref Regs.At(r, bs + i.C) : ref Regs.At(k, i.C));
+                    bool res;
+                    if (lhs.IsInteger && rhs.IsInteger) res = lhs.AsInteger == rhs.AsInteger;
+                    else if (lhs.IsFloat && rhs.IsFloat) res = lhs.AsFloat == rhs.AsFloat;
+                    else if (ReferenceEquals(lhs.Ref, rhs.Ref)) res = true;
+                    else goto condslow;
+                    if (res == (i.A != 0))
+                    {
+                        i = code[pc++];
+                        goto case OpCode.Jmp;
+                    }
+                    pc++;
+                    break;
+                }
                 case OpCode.Jmp:
                     if (i.Ax < pc)
                     {
@@ -595,8 +645,11 @@ internal static partial class Interpreter
                     if (f.Cont != Continuation.None)
                     {
                         Continuation cont = f.Cont;
-                        FinishMeta(f, n > 0 ? r[ra] : default, r);
+                        int expect = f.ContDest;
+                        LuaValue mres = n > 0 ? r[ra] : default;
+                        FinishMeta(f, mres, r);
                         f = ResumeAfterMeta(state, co, cont, ref top);
+                        if (cont == Continuation.Cond && Truthy(mres) != (expect != 0)) f.Pc++; // the compare's Jmp is not taken
                         goto newframe;
                     }
                     int dst = f.FuncIdx;
@@ -627,8 +680,32 @@ internal static partial class Interpreter
                     if (ForPrep(r, bs + i.A, proto, pc - 1)) pc++;
                     break;
                 case OpCode.ForLoop:
-                    if (!ForLoop(r, bs + i.A)) pc++;
-                    break;
+                {
+                    int ra = bs + i.A;
+                    ref LuaValue idx = ref Regs.At(r, ra);
+                    ref LuaValue cnt = ref Regs.At(r, ra + 1);
+                    ref LuaValue stp = ref Regs.At(r, ra + 2);
+                    if (stp.IsInteger)
+                    {
+                        ulong count = (ulong)cnt.AsInteger;
+                        if (count == 0)
+                        {
+                            pc++;
+                            break;
+                        }
+                        long next = unchecked(idx.AsInteger + stp.AsInteger);
+                        Regs.SetBits(ref cnt, (long)(count - 1)); // the hidden loop state always holds integers here
+                        Regs.SetBits(ref idx, next);
+                        Regs.SetInteger(ref Regs.At(r, ra + 3), next);
+                    }
+                    else if (!ForLoopFloat(r, ra))
+                    {
+                        pc++;
+                        break;
+                    }
+                    i = code[pc++]; // the Jmp back to the loop body: taken here (it is also the loop's poll point)
+                    goto case OpCode.Jmp;
+                }
                 case OpCode.Closure:
                 {
                     var np = proto.Protos[i.Bx];
@@ -784,20 +861,13 @@ internal static partial class Interpreter
                 }
                 case OpCode.Concat:
                 {
-                    LuaValue lhs = r[bs + i.B], rhs = r[bs + i.C];
-                    if ((lhs.IsString || lhs.IsNumber) && (rhs.IsString || rhs.IsNumber)) r[bs + i.A] = StringConv.Concat(state, lhs, rhs);
-                    else
+                    Frame? nf = ConcatOp(state, co, f, i, bs, pc, proto);
+                    if (nf is not null)
                     {
-                        MetaCall mc = Meta.PrepareConcat(state, lhs, rhs, proto, pc - 1);
-                        Frame? nf = StartMeta(state, co, f, in mc, Continuation.Value, bs + i.A, pc, proto, out LuaValue res);
-                        if (nf is not null)
-                        {
-                            f = nf;
-                            goto newframe;
-                        }
-                        r = co.Stack;
-                        r[bs + i.A] = res;
+                        f = nf;
+                        goto newframe;
                     }
+                    r = co.Stack;
                     break;
                 }
                 case OpCode.TForLoop:
@@ -806,8 +876,175 @@ internal static partial class Interpreter
                     break;
                 default:
                     throw new InvalidOperationException($"bad opcode {i.Op}");
+                arithslow:
+                {
+                    Frame? nf = ArithSlow(state, co, f, i, bs, pc, proto, k);
+                    if (nf is not null)
+                    {
+                        f = nf;
+                        goto newframe;
+                    }
+                    r = co.Stack;
+                    break;
+                }
+                condslow:
+                {
+                    Frame? nf = CondSlow(state, co, f, i, bs, pc, proto, k, out bool take);
+                    if (nf is not null)
+                    {
+                        f = nf;
+                        goto newframe;
+                    }
+                    r = co.Stack;
+                    if (take)
+                    {
+                        i = code[pc++];
+                        goto case OpCode.Jmp;
+                    }
+                    pc++;
+                    break;
+                }
             }
         }
+    }
+
+    /// <summary>
+    /// Arithmetic the inline paths did not take: mixed or unusual number types, IDiv/Mod/Pow, strings, metamethods, errors.
+    /// Returns the Frame of a metamethod call that finishes the instruction, or null when the result is stored.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static Frame? ArithSlow(LuaState state, Coroutine co, Frame f, Instruction i, int bs, int pc, Proto proto, LuaValue[] k)
+    {
+        LuaValue[] r = co.Stack;
+        OpCode op = i.Op;
+        LuaValue lhs = r[bs + i.B];
+        LuaValue rhs = Meta.IsArithK(op) ? k[i.C] : r[bs + i.C];
+        if (lhs.IsNumber && rhs.IsNumber)
+        {
+            r[bs + i.A] = op is OpCode.BAnd or OpCode.BOr or OpCode.BXor or OpCode.Shl or OpCode.Shr
+                ? Arith.Bitwise(op, lhs, rhs, proto, pc - 1)
+                : Arith.Binary(Meta.BaseArith(op), lhs, rhs, proto, pc - 1);
+            return null;
+        }
+        MetaCall mc = Meta.PrepareArith(state, Meta.ArithEvent(op), lhs, rhs, proto, pc - 1);
+        Frame? nf = StartMeta(state, co, f, in mc, Continuation.Value, bs + i.A, pc, proto, out LuaValue res);
+        if (nf is not null) return nf;
+        co.Stack[bs + i.A] = res;
+        return null;
+    }
+
+    /// <summary>
+    /// A fused compare-and-jump whose operands are not two integers or two floats: mixed numbers, strings, metamethods, errors.
+    /// Returns the Frame of a metamethod call that finishes the instruction, or null with <paramref name="take"/> saying whether the jump is taken.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static Frame? CondSlow(LuaState state, Coroutine co, Frame f, Instruction i, int bs, int pc, Proto proto, LuaValue[] k, out bool take)
+    {
+        LuaValue[] r = co.Stack;
+        OpCode op = i.Op;
+        LuaValue cb = r[bs + i.B];
+        LuaValue cc = op >= OpCode.JEqK ? k[i.C] : r[bs + i.C];
+        bool swap = op is OpCode.JGtK or OpCode.JGeK; // K[C] < R[B]
+        LuaValue lhs = swap ? cc : cb, rhs = swap ? cb : cc;
+        bool res;
+        bool needMeta;
+        MetaCall mc;
+        take = false;
+        if (op is OpCode.JEq or OpCode.JEqK) needMeta = Meta.PrepareEqual(lhs, rhs, out res, out mc);
+        else
+        {
+            bool lt = op is OpCode.JLt or OpCode.JLtK or OpCode.JGtK;
+            if (lhs.IsNumber && rhs.IsNumber)
+            {
+                res = lt ? Compare.LessThan(lhs, rhs, proto, pc - 1) : Compare.LessEqual(lhs, rhs, proto, pc - 1);
+                needMeta = false;
+                mc = default;
+            }
+            else needMeta = Meta.PrepareOrder(state, lt ? TagMethod.Lt : TagMethod.Le, lhs, rhs, proto, pc - 1, out res, out mc);
+        }
+        if (needMeta)
+        {
+            Frame? nf = StartMeta(state, co, f, in mc, Continuation.Cond, i.A, pc, proto, out LuaValue mres);
+            if (nf is not null) return nf;
+            res = !mres.IsFalsy;
+        }
+        take = res == (i.A != 0);
+        return null;
+    }
+
+    /// <summary>Concat out of line: the dispatch loop has a limited inlining budget. Returns a metamethod Frame, or null when the result is stored.</summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static Frame? ConcatOp(LuaState state, Coroutine co, Frame f, Instruction i, int bs, int pc, Proto proto)
+    {
+        LuaValue[] r = co.Stack;
+        LuaValue lhs = r[bs + i.B], rhs = r[bs + i.C];
+        if ((lhs.IsString || lhs.IsNumber) && (rhs.IsString || rhs.IsNumber))
+        {
+            r[bs + i.A] = StringConv.Concat(state, lhs, rhs);
+            return null;
+        }
+        MetaCall mc = Meta.PrepareConcat(state, lhs, rhs, proto, pc - 1);
+        Frame? nf = StartMeta(state, co, f, in mc, Continuation.Value, bs + i.A, pc, proto, out LuaValue res);
+        if (nf is not null) return nf;
+        co.Stack[bs + i.A] = res;
+        return null;
+    }
+
+    /// <summary>The truthiness of a metamethod's result; out of line so the dispatch loop's inlining budget goes to the hot paths.</summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static bool Truthy(LuaValue v) => !v.IsFalsy;
+
+    private interface IArith
+    {
+        static abstract long Int(long a, long b);
+        static abstract double Flt(double a, double b);
+        /// <summary>False for an operator whose result on two integers is a float (Div).</summary>
+        static abstract bool IntResult { get; }
+    }
+
+    private struct AddOp : IArith
+    {
+        public static long Int(long a, long b) => unchecked(a + b);
+        public static double Flt(double a, double b) => a + b;
+        public static bool IntResult => true;
+    }
+
+    private struct SubOp : IArith
+    {
+        public static long Int(long a, long b) => unchecked(a - b);
+        public static double Flt(double a, double b) => a - b;
+        public static bool IntResult => true;
+    }
+
+    private struct MulOp : IArith
+    {
+        public static long Int(long a, long b) => unchecked(a * b);
+        public static double Flt(double a, double b) => a * b;
+        public static bool IntResult => true;
+    }
+
+    private struct DivOp : IArith
+    {
+        public static long Int(long a, long b) => 0;
+        public static double Flt(double a, double b) => a / b;
+        public static bool IntResult => false;
+    }
+
+    /// <summary>The number-only fast path of Add/Sub/Mul/Div: stores the result and returns true, or returns false for anything else.</summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private static bool ArithFast<TOp>(ref LuaValue ra, ref LuaValue rb, ref LuaValue rc) where TOp : struct, IArith
+    {
+        // Two floats or two integers; mixed operands take the out-of-line path (this is inlined at every arithmetic opcode)
+        if (rb.IsFloat)
+        {
+            if (!rc.IsFloat) return false;
+            Regs.SetFloat(ref ra, TOp.Flt(rb.AsFloat, rc.AsFloat));
+            return true;
+        }
+        if (!rb.IsInteger || !rc.IsInteger) return false;
+        if (TOp.IntResult) Regs.SetInteger(ref ra, TOp.Int(rb.AsInteger, rc.AsInteger));
+        else Regs.SetFloat(ref ra, TOp.Flt(rb.AsInteger, rc.AsInteger));
+        return true;
     }
 
     /// <summary>Sets up a Frame for a Lua call whose function sits at <paramref name="fa"/> with <paramref name="nargs"/> arguments above it.</summary>
@@ -947,19 +1184,9 @@ internal static partial class Interpreter
         return false;
     }
 
-    /// <summary>Advances the loop; returns true when another iteration should run.</summary>
-    private static bool ForLoop(LuaValue[] r, int ra)
+    /// <summary>Advances a float loop (the integer loop is inline in the dispatch); returns true when another iteration should run.</summary>
+    private static bool ForLoopFloat(LuaValue[] r, int ra)
     {
-        if (r[ra + 2].IsInteger)
-        {
-            ulong count = (ulong)r[ra + 1].AsInteger;
-            if (count == 0) return false;
-            r[ra + 1] = LuaValue.FromInteger((long)(count - 1));
-            long idx = unchecked(r[ra].AsInteger + r[ra + 2].AsInteger);
-            r[ra] = LuaValue.FromInteger(idx);
-            r[ra + 3] = r[ra];
-            return true;
-        }
         double step = r[ra + 2].AsFloat, limit = r[ra + 1].AsFloat;
         double next = r[ra].AsFloat + step;
         if (step > 0 ? next <= limit : limit <= next)

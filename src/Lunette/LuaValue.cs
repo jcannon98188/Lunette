@@ -14,10 +14,10 @@ public readonly partial struct LuaValue
         public override string ToString() => name;
     }
 
-    private static readonly object IntegerTag = new Tag("integer");
-    private static readonly object FloatTag = new Tag("float");
+    internal static readonly object IntegerTag = new Tag("integer");
+    internal static readonly object FloatTag = new Tag("float");
     private static readonly object TrueTag = new Tag("true");
-    private static readonly object FalseTag = new Tag("false");
+    internal static readonly object FalseTag = new Tag("false");
 
     internal readonly object? Ref;
     internal readonly long Bits;

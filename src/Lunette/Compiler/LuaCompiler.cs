@@ -237,7 +237,102 @@ internal sealed class LuaCompiler
 
     private int EmitJmp(int line) => Emit(Instruction.JmpTo(0), line);
 
-    private void PatchJmp(int at, int target) => _fs.Code[at] = Instruction.JmpTo(target);
+    private void PatchJmp(int at, int target)
+    {
+        _fs.Code[at] = Instruction.JmpTo(target);
+        if (target == Here) _lastTarget = target; // a jump lands after the last instruction: it can no longer be rewritten on its own
+    }
+
+    /// <summary>Highest pc a jump was patched to while it was the next instruction to emit.</summary>
+    private int _lastTarget = -1;
+
+    /// <summary>Set by <see cref="Condition"/> for the next <see cref="Expr"/> only: a lone comparison may become a fused compare-and-jump.</summary>
+    private bool _wantCond;
+
+    /// <summary>The Jmp after a fused compare-and-jump emitted for the condition just compiled, or -1.</summary>
+    private int _condJump = -1;
+
+    private enum OperandKind : byte { None, Reg, Const }
+
+    /// <summary>The register of <paramref name="name"/> when it is a plain local of the function being compiled (not a folded constant), else -1.</summary>
+    private int LocalReg(string name)
+    {
+        var l = FindLocal(_fs, name);
+        return l is null || l.IsFolded ? -1 : l.Reg;
+    }
+
+    private static bool SameConst(LuaValue a, LuaValue b) =>
+        (ReferenceEquals(a.Ref, b.Ref) && a.Bits == b.Bits) || (a.Ref is byte[] && b.Ref is byte[] && LuaValue.RawEquals(a, b));
+
+    /// <summary>Index of <paramref name="v"/> in the first 256 constants (the ones a K operand reaches), adding it when there is room; -1 when there is none.</summary>
+    private int ConstOperand(LuaValue v)
+    {
+        var consts = _fs.Consts;
+        int n = Math.Min(consts.Count, 256);
+        for (int i = 0; i < n; i++)
+            if (SameConst(consts[i], v)) return i;
+        return consts.Count < 256 ? AddConst(v) : -1;
+    }
+
+    /// <summary>A number constant's index, reusing an equal one (same type and bits), for the 16-bit LoadK operand.</summary>
+    private int NumberConst(LuaValue v)
+    {
+        var consts = _fs.Consts;
+        for (int i = 0; i < consts.Count; i++)
+            if (SameConst(consts[i], v)) return i;
+        return AddConst(v);
+    }
+
+    /// <summary>
+    /// When the current token starts a complete operand at binding <paramref name="limit"/> that needs no code (a local variable's register,
+    /// or a number literal or folded constant; with <paramref name="anyConst"/> also nil, booleans and strings), consumes it and says which.
+    /// </summary>
+    private bool TryOperand(int limit, bool constOk, bool anyConst, out OperandKind kind, out int index)
+    {
+        kind = OperandKind.None;
+        index = 0;
+        LuaValue lit;
+        switch (_tok.Kind)
+        {
+            case Tok.Name:
+            {
+                string name = _tok.Text;
+                if (FoldedValue(name) is { } folded)
+                {
+                    if (!constOk || !(folded.IsNumber || anyConst)) return false;
+                    lit = folded;
+                    break;
+                }
+                int reg = LocalReg(name);
+                if (reg < 0 || !OperandEnds(limit)) return false;
+                Advance();
+                kind = OperandKind.Reg;
+                index = reg;
+                return true;
+            }
+            case Tok.Integer when constOk: lit = LuaValue.FromInteger(_tok.Int); break;
+            case Tok.Float when constOk: lit = LuaValue.FromFloat(_tok.Float); break;
+            case Tok.String when constOk && anyConst: lit = LuaValue.FromString(_tok.Str); break;
+            case Tok.Nil when constOk && anyConst: lit = default; break;
+            case Tok.True when constOk && anyConst: lit = LuaValue.FromBoolean(true); break;
+            case Tok.False when constOk && anyConst: lit = LuaValue.FromBoolean(false); break;
+            default: return false;
+        }
+        if (!OperandEnds(limit)) return false;
+        int k = ConstOperand(lit);
+        if (k < 0) return false;
+        Advance();
+        kind = OperandKind.Const;
+        index = k;
+        return true;
+    }
+
+    /// <summary>True when the token after the current one neither starts a suffix of it nor a binary operator that binds tighter than <paramref name="limit"/>.</summary>
+    private bool OperandEnds(int limit)
+    {
+        Tok next = Peek().Kind;
+        return !IsSuffixStart(next) && !(BinaryPriority(next, out int l, out _) && l > limit);
+    }
 
     private int Alloc()
     {
@@ -798,6 +893,8 @@ internal sealed class LuaCompiler
             Advance();
             if (!IsSuffixStart(_tok.Kind)) return new Place { Kind = 0, Name = name, Line = line };
             int reg = Alloc();
+            int local = LocalReg(name);
+            if (local >= 0 && _tok.Kind is Tok.Dot or Tok.LBracket or Tok.Colon) return Suffixes(reg, true, line, local);
             LoadVariable(name, reg, line);
             return Suffixes(reg, true, line);
         }
@@ -831,13 +928,16 @@ internal sealed class LuaCompiler
         }
         if (_tok.Kind != Tok.Assign) throw Err("syntax error");
         Advance();
+        if (places.Count > 1) ResolveConflicts(places);
         int baseReg = _fs.Free;
+        int exprStart = Here;
         var (n, open) = ExprList();
         AdjustList(places.Count, n, open, baseReg);
         int storeLine = _lastLine; // PUC stores after reading the whole right-hand side
         for (int i = places.Count - 1; i >= 0; i--)
         {
             var p = places[i];
+            if (p.Kind == 0 && places.Count == 1 && n == 1 && open < 0 && TryRetargetLocal(p.Name, exprStart, baseReg)) continue;
             if (p.Kind == 0) StoreVariable(p.Name, baseReg + i, storeLine);
             else Emit(Instruction.Abc(OpCode.SetTable, p.Table, p.Key, baseReg + i), storeLine);
         }
@@ -845,10 +945,52 @@ internal sealed class LuaCompiler
     }
 
     /// <summary>
+    /// In a multiple assignment a table or key that is a local read in place must not see another target's store (PUC's check_conflict):
+    /// when a target assigns that local, the indexed target uses a copy made before the right-hand side runs.
+    /// </summary>
+    private void ResolveConflicts(List<Place> places)
+    {
+        for (int v = 0; v < places.Count; v++)
+        {
+            if (places[v].Kind != 0 || FindLocal(_fs, places[v].Name) is not { IsFolded: false } local) continue;
+            for (int i = 0; i < places.Count; i++)
+            {
+                var p = places[i];
+                if (p.Kind != 1 || (p.Table != local.Reg && p.Key != local.Reg)) continue;
+                int tmp = Alloc();
+                Emit(Instruction.Abc(OpCode.Move, tmp, local.Reg, 0), _lastLine);
+                if (p.Table == local.Reg) p.Table = tmp;
+                if (p.Key == local.Reg) p.Key = tmp;
+                places[i] = p;
+            }
+        }
+    }
+
+    private static bool Retargetable(OpCode op) =>
+        op is OpCode.Move or OpCode.LoadK or OpCode.LoadBool or OpCode.GetGlobal or OpCode.GetUpval or OpCode.Unm or OpCode.Not
+            or OpCode.BNot or OpCode.Len or OpCode.Concat or OpCode.GetTable or OpCode.Eq or OpCode.Lt or OpCode.Le
+        || Lunette.Vm.Meta.IsBinaryArith(op);
+
+    /// <summary>
+    /// For <c>x = expr</c> with a local <c>x</c>: when the last instruction of <c>expr</c> (emitted at or after <paramref name="startPc"/>) leaves its value
+    /// in temporary <paramref name="source"/> and no jump lands after it, makes it write <c>x</c> directly instead of emitting a Move.
+    /// </summary>
+    private bool TryRetargetLocal(string name, int startPc, int source)
+    {
+        if (KindOf(name) != VarKind.Regular || FindLocal(_fs, name) is not { IsFolded: false } local) return false;
+        int last = Here - 1;
+        if (last < startPc || _lastTarget == Here) return false;
+        var ins = _fs.Code[last];
+        if (ins.A != source || !Retargetable(ins.Op)) return false;
+        _fs.Code[last] = Instruction.Abc(ins.Op, local.Reg, ins.B, ins.C);
+        return true;
+    }
+
+    /// <summary>
     /// Applies field, index, method-call and call suffixes to the value in register <paramref name="reg"/>.
     /// With <paramref name="place"/> the final index suffix is left unloaded so it can be assigned to.
     /// </summary>
-    private Place Suffixes(int reg, bool place, int line)
+    private Place Suffixes(int reg, bool place, int line, int src = -1)
     {
         while (true)
         {
@@ -858,7 +1000,10 @@ internal sealed class LuaCompiler
                 case Tok.Dot:
                 case Tok.LBracket:
                 {
+                    int tbl = src >= 0 ? src : reg; // src: the table is a local, read where it lives
+                    src = -1;
                     int key = _fs.Free;
+                    int keyReg = key;
                     if (_tok.Kind == Tok.Dot)
                     {
                         Advance();
@@ -869,12 +1014,13 @@ internal sealed class LuaCompiler
                     else
                     {
                         Advance();
-                        Expr(Alloc(), 0);
+                        if (TryOperand(0, false, false, out var kind, out int idx) && kind == OperandKind.Reg) keyReg = idx;
+                        else Expr(Alloc(), 0);
                         Expect(Tok.RBracket, "]");
                     }
                     if (place && !IsSuffixStart(_tok.Kind))
-                        return new Place { Kind = 1, Table = reg, Key = key, Line = l };
-                    Emit(Instruction.Abc(OpCode.GetTable, reg, reg, key), l);
+                        return new Place { Kind = 1, Table = tbl, Key = keyReg, Line = l };
+                    Emit(Instruction.Abc(OpCode.GetTable, reg, tbl, keyReg), l);
                     _fs.Free = Math.Max(key, reg + 1);
                     _openIdx = -1;
                     break;
@@ -883,7 +1029,8 @@ internal sealed class LuaCompiler
                 {
                     Advance();
                     string name = ExpectName();
-                    CallSuffix(reg, name);
+                    CallSuffix(reg, name, src);
+                    src = -1;
                     if (place && !IsSuffixStart(_tok.Kind)) return new Place { Kind = 2, CallIdx = _openIdx, Line = l };
                     break;
                 }
@@ -927,8 +1074,16 @@ internal sealed class LuaCompiler
     {
         int save = _fs.Free;
         int t = Alloc();
+        _wantCond = true;
         Expr(t, 0);
+        int fused = _condJump;
+        _condJump = -1;
         if (follow != Tok.Eof) Expect(follow, followText);
+        if (fused >= 0)
+        {
+            _fs.Free = save;
+            return fused;
+        }
         int line = _lastLine; // PUC emits the test after the last token it consumed
         Emit(Instruction.Abc(OpCode.Test, t, 0, 0), line);
         int j = EmitJmp(line);
@@ -966,13 +1121,34 @@ internal sealed class LuaCompiler
         Block();
         ExpectMatch(Tok.Until, "until", "repeat", line);
         int t = Alloc();
+        _wantCond = true;
         Expr(t, 0);
+        int fused = _condJump;
+        _condJump = -1;
         int condLine = _lastLine;
         bool captured = false;
         for (int i = nlocals; i < _fs.Locals.Count; i++) captured |= _fs.Locals[i].Captured || _fs.Locals[i].Kind == VarKind.Close;
-        if (captured) Emit(Instruction.Abc(OpCode.Close, free, 0, 0), condLine);
-        Emit(Instruction.Abc(OpCode.Test, t, 0, 0), condLine);
-        PatchJmp(EmitJmp(condLine), top);
+        if (fused >= 0)
+        {
+            // the compare and its jump go after the Close that releases the body's captured locals
+            if (captured)
+            {
+                var cmp = _fs.Code[fused - 1];
+                int cmpLine = _fs.Lines[fused - 1];
+                _fs.Code.RemoveRange(fused - 1, 2);
+                _fs.Lines.RemoveRange(fused - 1, 2);
+                Emit(Instruction.Abc(OpCode.Close, free, 0, 0), condLine);
+                Emit(cmp, cmpLine);
+                fused = EmitJmp(cmpLine);
+            }
+            PatchJmp(fused, top);
+        }
+        else
+        {
+            if (captured) Emit(Instruction.Abc(OpCode.Close, free, 0, 0), condLine);
+            Emit(Instruction.Abc(OpCode.Test, t, 0, 0), condLine);
+            PatchJmp(EmitJmp(condLine), top);
+        }
         LeaveBlock();
         _fs.DropLocals(nlocals);
         _fs.Free = free;
@@ -1002,7 +1178,7 @@ internal sealed class LuaCompiler
             Advance();
             Expr(stepReg, 0);
         }
-        else EmitLoadK(stepReg, AddConst(LuaValue.FromInteger(1)), line);
+        else EmitLoadK(stepReg, NumberConst(LuaValue.FromInteger(1)), line);
         Expect(Tok.Do, "do");
         Emit(Instruction.Abc(OpCode.ForPrep, a, 0, 0), line);
         int exit = EmitJmp(line);
@@ -1182,17 +1358,32 @@ internal sealed class LuaCompiler
 
     private void ExprCore(int target, int limit)
     {
+        bool wantCond = _wantCond;
+        _wantCond = false;
+        _condJump = -1;
         _openIdx = -1;
         int line = _tok.Line;
         int leftStart = Here;
+        int leftReg = -1; // a local variable used as the left operand in place, with no code emitted for it
         if (_tok.Kind is Tok.Minus or Tok.Not or Tok.Tilde or Tok.Hash)
         {
             OpCode unop = _tok.Kind switch { Tok.Not => OpCode.Not, Tok.Tilde => OpCode.BNot, Tok.Hash => OpCode.Len, _ => OpCode.Unm };
             Advance();
-            Expr(target, UnaryPriority);
-            Emit(Instruction.Abc(unop, target, target, 0), line);
+            if (unop == OpCode.Unm && _tok.Kind is Tok.Integer or Tok.Float && Peek().Kind != Tok.Caret)
+            {
+                // a negated number literal is one constant
+                LuaValue neg = _tok.Kind == Tok.Integer ? LuaValue.FromInteger(unchecked(-_tok.Int)) : LuaValue.FromFloat(-_tok.Float);
+                EmitLoadK(target, NumberConst(neg), line);
+                Advance();
+            }
+            else
+            {
+                Expr(target, UnaryPriority);
+                Emit(Instruction.Abc(unop, target, target, 0), line);
+            }
             _openIdx = -1;
         }
+        else if (_tok.Kind == Tok.Name && InPlaceLeft(limit, out leftReg)) Advance();
         else Simple(target);
 
         while (BinaryPriority(_tok.Kind, out int left, out int right) && left > limit)
@@ -1209,15 +1400,74 @@ internal sealed class LuaCompiler
             }
             else
             {
-                RelabelPendingLeft(leftStart, opLine);
+                bool compare = op is Tok.Eq or Tok.Ne or Tok.Lt or Tok.Le or Tok.Gt or Tok.Ge;
+                bool arith = op is Tok.Plus or Tok.Minus or Tok.Star or Tok.Slash or Tok.DSlash or Tok.Percent or Tok.Caret;
+                int lsrc = leftReg >= 0 ? leftReg : target;
+                if (leftReg < 0) RelabelPendingLeft(leftStart, opLine);
+                leftReg = -1;
                 int save = _fs.Free;
-                int rhs = Alloc();
-                Expr(rhs, right);
-                EmitBinary(op, target, rhs, opLine);
+                var kind = OperandKind.None;
+                int idx = 0;
+                if (op != Tok.Concat)
+                {
+                    // a constant right operand needs an instruction form that takes one: arithmetic, or a compare fused with its jump
+                    bool constOk = arith || (compare && wantCond && !(BinaryPriority(Peek().Kind, out int pl, out _) && pl > limit));
+                    TryOperand(right, constOk, op is Tok.Eq or Tok.Ne, out kind, out idx);
+                }
+                if (kind == OperandKind.None)
+                {
+                    idx = Alloc();
+                    Expr(idx, right);
+                    kind = OperandKind.Reg;
+                }
+                bool last = !(BinaryPriority(_tok.Kind, out int nextLeft, out _) && nextLeft > limit);
+                if (compare && wantCond && last) EmitFusedCompare(op, lsrc, kind, idx, _lastLine);
+                else
+                {
+                    if (kind == OperandKind.Const && !arith) throw new InvalidOperationException("constant operand without a K form");
+                    EmitBinary(op, target, lsrc, kind, idx, opLine);
+                }
                 _fs.Free = save;
             }
             _openIdx = -1;
         }
+    }
+
+    /// <summary>True when the current token names a local variable that is the left operand of a binary operator with a register form that binds tighter than <paramref name="limit"/>.</summary>
+    private bool InPlaceLeft(int limit, out int reg)
+    {
+        reg = -1;
+        int local = LocalReg(_tok.Text);
+        if (local < 0) return false;
+        Tok next = Peek().Kind;
+        if (next is Tok.And or Tok.Or or Tok.Concat || !BinaryPriority(next, out int l, out _) || l <= limit) return false;
+        reg = local;
+        return true;
+    }
+
+    /// <summary>Emits a comparison fused with the jump taken when it is false (a condition's skip jump); <see cref="_condJump"/> is that jump.</summary>
+    private void EmitFusedCompare(Tok op, int lsrc, OperandKind kind, int idx, int line)
+    {
+        int a = op == Tok.Ne ? 1 : 0;
+        Instruction ins;
+        if (kind == OperandKind.Const)
+        {
+            OpCode k = op switch { Tok.Eq or Tok.Ne => OpCode.JEqK, Tok.Lt => OpCode.JLtK, Tok.Le => OpCode.JLeK, Tok.Gt => OpCode.JGtK, _ => OpCode.JGeK };
+            ins = Instruction.Abc(k, a, lsrc, idx);
+        }
+        else
+        {
+            ins = op switch
+            {
+                Tok.Eq or Tok.Ne => Instruction.Abc(OpCode.JEq, a, lsrc, idx),
+                Tok.Lt => Instruction.Abc(OpCode.JLt, a, lsrc, idx),
+                Tok.Le => Instruction.Abc(OpCode.JLe, a, lsrc, idx),
+                Tok.Gt => Instruction.Abc(OpCode.JLt, a, idx, lsrc),
+                _ => Instruction.Abc(OpCode.JLe, a, idx, lsrc),
+            };
+        }
+        Emit(ins, line);
+        _condJump = EmitJmp(line);
     }
 
     /// <summary>
@@ -1232,32 +1482,34 @@ internal sealed class LuaCompiler
         for (int pc = start; pc < Here; pc++) _fs.Lines[pc] = opLine;
     }
 
-    private void EmitBinary(Tok op, int target, int rhs, int line)
+    /// <summary>Emits <c>target = lsrc op rhs</c>, where the right operand is register <paramref name="rhs"/> or, for arithmetic with <paramref name="kind"/> Const, constant <paramref name="rhs"/>.</summary>
+    private void EmitBinary(Tok op, int target, int lsrc, OperandKind kind, int rhs, int line)
     {
+        bool k = kind == OperandKind.Const;
         switch (op)
         {
-            case Tok.Plus: Emit(Instruction.Abc(OpCode.Add, target, target, rhs), line); break;
-            case Tok.Minus: Emit(Instruction.Abc(OpCode.Sub, target, target, rhs), line); break;
-            case Tok.Star: Emit(Instruction.Abc(OpCode.Mul, target, target, rhs), line); break;
-            case Tok.Slash: Emit(Instruction.Abc(OpCode.Div, target, target, rhs), line); break;
-            case Tok.DSlash: Emit(Instruction.Abc(OpCode.IDiv, target, target, rhs), line); break;
-            case Tok.Percent: Emit(Instruction.Abc(OpCode.Mod, target, target, rhs), line); break;
-            case Tok.Caret: Emit(Instruction.Abc(OpCode.Pow, target, target, rhs), line); break;
-            case Tok.Concat: Emit(Instruction.Abc(OpCode.Concat, target, target, rhs), line); break;
-            case Tok.Amp: Emit(Instruction.Abc(OpCode.BAnd, target, target, rhs), line); break;
-            case Tok.Pipe: Emit(Instruction.Abc(OpCode.BOr, target, target, rhs), line); break;
-            case Tok.Tilde: Emit(Instruction.Abc(OpCode.BXor, target, target, rhs), line); break;
-            case Tok.Shl: Emit(Instruction.Abc(OpCode.Shl, target, target, rhs), line); break;
-            case Tok.Shr: Emit(Instruction.Abc(OpCode.Shr, target, target, rhs), line); break;
-            case Tok.Eq: Emit(Instruction.Abc(OpCode.Eq, target, target, rhs), line); break;
+            case Tok.Plus: Emit(Instruction.Abc(k ? OpCode.AddK : OpCode.Add, target, lsrc, rhs), line); break;
+            case Tok.Minus: Emit(Instruction.Abc(k ? OpCode.SubK : OpCode.Sub, target, lsrc, rhs), line); break;
+            case Tok.Star: Emit(Instruction.Abc(k ? OpCode.MulK : OpCode.Mul, target, lsrc, rhs), line); break;
+            case Tok.Slash: Emit(Instruction.Abc(k ? OpCode.DivK : OpCode.Div, target, lsrc, rhs), line); break;
+            case Tok.DSlash: Emit(Instruction.Abc(k ? OpCode.IDivK : OpCode.IDiv, target, lsrc, rhs), line); break;
+            case Tok.Percent: Emit(Instruction.Abc(k ? OpCode.ModK : OpCode.Mod, target, lsrc, rhs), line); break;
+            case Tok.Caret: Emit(Instruction.Abc(k ? OpCode.PowK : OpCode.Pow, target, lsrc, rhs), line); break;
+            case Tok.Concat: Emit(Instruction.Abc(OpCode.Concat, target, lsrc, rhs), line); break;
+            case Tok.Amp: Emit(Instruction.Abc(OpCode.BAnd, target, lsrc, rhs), line); break;
+            case Tok.Pipe: Emit(Instruction.Abc(OpCode.BOr, target, lsrc, rhs), line); break;
+            case Tok.Tilde: Emit(Instruction.Abc(OpCode.BXor, target, lsrc, rhs), line); break;
+            case Tok.Shl: Emit(Instruction.Abc(OpCode.Shl, target, lsrc, rhs), line); break;
+            case Tok.Shr: Emit(Instruction.Abc(OpCode.Shr, target, lsrc, rhs), line); break;
+            case Tok.Eq: Emit(Instruction.Abc(OpCode.Eq, target, lsrc, rhs), line); break;
             case Tok.Ne:
-                Emit(Instruction.Abc(OpCode.Eq, target, target, rhs), line);
+                Emit(Instruction.Abc(OpCode.Eq, target, lsrc, rhs), line);
                 Emit(Instruction.Abc(OpCode.Not, target, target, 0), line);
                 break;
-            case Tok.Lt: Emit(Instruction.Abc(OpCode.Lt, target, target, rhs), line); break;
-            case Tok.Le: Emit(Instruction.Abc(OpCode.Le, target, target, rhs), line); break;
-            case Tok.Gt: Emit(Instruction.Abc(OpCode.Lt, target, rhs, target), line); break;
-            case Tok.Ge: Emit(Instruction.Abc(OpCode.Le, target, rhs, target), line); break;
+            case Tok.Lt: Emit(Instruction.Abc(OpCode.Lt, target, lsrc, rhs), line); break;
+            case Tok.Le: Emit(Instruction.Abc(OpCode.Le, target, lsrc, rhs), line); break;
+            case Tok.Gt: Emit(Instruction.Abc(OpCode.Lt, target, rhs, lsrc), line); break;
+            case Tok.Ge: Emit(Instruction.Abc(OpCode.Le, target, rhs, lsrc), line); break;
             default: throw new InvalidOperationException(op.ToString());
         }
     }
@@ -1268,11 +1520,11 @@ internal sealed class LuaCompiler
         switch (_tok.Kind)
         {
             case Tok.Integer:
-                EmitLoadK(target, AddConst(LuaValue.FromInteger(_tok.Int)), line);
+                EmitLoadK(target, NumberConst(LuaValue.FromInteger(_tok.Int)), line);
                 Advance();
                 return;
             case Tok.Float:
-                EmitLoadK(target, AddConst(LuaValue.FromFloat(_tok.Float)), line);
+                EmitLoadK(target, NumberConst(LuaValue.FromFloat(_tok.Float)), line);
                 Advance();
                 return;
             case Tok.Nil:
@@ -1305,9 +1557,19 @@ internal sealed class LuaCompiler
                 TableConstructor(target);
                 return;
             case Tok.Name:
+            {
+                int local = LocalReg(_tok.Text);
+                if (local >= 0 && Peek().Kind is Tok.Dot or Tok.LBracket or Tok.Colon)
+                {
+                    // a local used as the table of an index or method call is read in place
+                    Advance();
+                    Suffixes(target, false, line, local);
+                    return;
+                }
                 LoadVariable(_tok.Text, target, line);
                 Advance();
                 break;
+            }
             case Tok.LParen:
                 Advance();
                 Expr(target, 0);
@@ -1321,15 +1583,16 @@ internal sealed class LuaCompiler
     }
 
     /// <summary>Compiles a call (or method call, when <paramref name="method"/> is set) whose function value is in <paramref name="target"/>.</summary>
-    private void CallSuffix(int target, string? method)
+    private void CallSuffix(int target, string? method, int src = -1)
     {
         int line = _tok.Line;
         int save = _fs.Free;
         int fn = target;
+        bool fromSrc = method is not null && src >= 0; // the receiver is a local: Self reads it where it lives
         if (target != _fs.Free - 1)
         {
             fn = Alloc();
-            Emit(Instruction.Abc(OpCode.Move, fn, target, 0), line);
+            if (!fromSrc) Emit(Instruction.Abc(OpCode.Move, fn, target, 0), line);
         }
         int extra = 0;
         if (method is not null)
@@ -1337,7 +1600,7 @@ internal sealed class LuaCompiler
             Alloc(); // fn + 1 receives the receiver
             int k = Alloc();
             EmitLoadK(k, AddConst(NameConst(method)), line);
-            Emit(Instruction.Abc(OpCode.Self, fn, fn, k), line);
+            Emit(Instruction.Abc(OpCode.Self, fn, fromSrc ? src : fn, k), line);
             _fs.Free = fn + 2;
             extra = 1;
         }
