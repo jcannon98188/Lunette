@@ -9,6 +9,7 @@ public class LuaValueTests
     public void LuaValue_is_sixteen_bytes() =>
         Assert.Equal(16, System.Runtime.CompilerServices.Unsafe.SizeOf<LuaValue>());
 
+#if !LUA_SAFE_ACCESS // RawValue exists only in the unsafe helpers; the safe twin has no raw view
     [Fact]
     public void RawValue_view_has_the_layout_of_LuaValue()
     {
@@ -22,6 +23,7 @@ public class LuaValueTests
         Assert.Same(LuaValue.FloatTag, raw.Ref);
         Assert.Equal(BitConverter.DoubleToInt64Bits(-0.5), raw.Bits);
     }
+#endif
 
     [Fact]
     public void Default_value_is_nil() =>

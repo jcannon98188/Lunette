@@ -4,11 +4,9 @@ name: nightly-variants
 # report; they are never a PR trigger and never part of `ci-gate`, so they cannot block a merge. Any failing variant opens
 # (or comments on) one tracking issue via the `report` job.
 #
-# Variants: linux arm64, preview .NET SDK, capacity-1 intern cache, constant string hash (ADR 0005).
-#
-# Explicit waiver: the LUA_SAFE_ACCESS safe-twin variant (whole suite on bounds-checked twins of the Unsafe helpers) is
-# a documented no-op. No `LUA_SAFE_ACCESS` define and no unsafe helpers exist in src/ (the engine is written against
-# checked accesses throughout), so there is nothing to switch. Add a `safe-access` job here if unsafe helpers are introduced.
+# Variants: linux arm64, preview .NET SDK, capacity-1 intern cache, constant string hash (ADR 0005), and the LUA_SAFE_ACCESS
+# safe twin (ticket lua-engine-build/46): `-p:LuaSafeAccess=true` compiles src/Lunette/Unsafe/RegsSafe.cs (bounds-checked,
+# always-barriered) instead of Regs.cs, in every project, and runs the whole suite plus the differential tests.
 on:
   schedule:
     - cron: "43 4 * * *"
@@ -79,10 +77,30 @@ jobs:
       - run: dotnet test -c Release --filter "FullyQualifiedName!~Lunette.Tests.Suite.SuiteTests" tests/Lunette.Tests
       - run: dotnet test -c Release --no-build --filter "FullyQualifiedName~Lunette.Tests.Suite.SuiteTests" tests/Lunette.Tests
 
+  # Whole suite and differential tests on the bounds-checked twins of the Lunette.Unsafe helpers (the define reaches the CLI that
+  # the differential tests spawn, since it is a build-wide property). The alloc/JIT budget tests skip themselves under the define.
+  safe-twin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      LUNETTE_REQUIRE_REFERENCE: "1"
+      LUNETTE_REFERENCE_LUA: ${{ github.workspace }}/.reference/lua
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - run: ci/build-reference.sh .reference
+      - run: .reference/lua -v
+      # Same split as ci.yml: the suite files run apart from the other tests (the in-process suite measures the GC heap,
+      # which a concurrently running unrelated test class would disturb).
+      - run: dotnet test -c Release -p:LuaSafeAccess=true --filter "FullyQualifiedName!~Lunette.Tests.Suite.SuiteTests" tests/Lunette.Tests
+      - run: dotnet test -c Release -p:LuaSafeAccess=true --no-build --filter "FullyQualifiedName~Lunette.Tests.Suite.SuiteTests" tests/Lunette.Tests
+
   # Always runs; opens or updates one tracking issue when any variant failed.
   report:
     if: always()
-    needs: [arm64, preview-sdk, capacity-1-cache, constant-hash]
+    needs: [arm64, preview-sdk, capacity-1-cache, constant-hash, safe-twin]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -94,7 +112,7 @@ jobs:
         if: env.FAILED == 'true'
         run: |
           title="Nightly variant run failing"
-          body="Run ${RUN_URL} had a failing variant (arm64, preview-sdk, capacity-1-cache or constant-hash). See the run summary."
+          body="Run ${RUN_URL} had a failing variant (arm64, preview-sdk, capacity-1-cache, constant-hash or safe-twin). See the run summary."
           existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number')
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"

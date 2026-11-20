@@ -9,4 +9,9 @@
     <!-- unsafe is confined to the core assembly (see src/Lunette/Lunette.csproj). -->
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
   </PropertyGroup>
+  <!-- Safe-twin variant (ADR 0001/0006 invariants unchanged): dotnet test -c Release -p:LuaSafeAccess=true swaps every Lunette.Unsafe helper for
+       its bounds-checked twin (src/Lunette/Unsafe/RegsSafe.cs) in every project of the build. Nightly only (nightly-variants.yml). -->
+  <PropertyGroup Condition="'$(LuaSafeAccess)' == 'true'">
+    <DefineConstants>$(DefineConstants);LUA_SAFE_ACCESS</DefineConstants>
+  </PropertyGroup>
 </Project>
