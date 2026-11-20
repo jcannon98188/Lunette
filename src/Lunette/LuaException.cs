@@ -34,6 +34,17 @@ public sealed class LuaException : Exception
 
     public override string Message => _message;
 
+    /// <summary>The Lua stack traceback captured where an uncaught error was raised, or null.</summary>
+    public string? Traceback { get; internal set; }
+
+    /// <summary>The error value as the standalone interpreter shows it: strings and numbers as they are, other values through <c>__tostring</c> when they have one.</summary>
+    public string Describe(LuaState state)
+    {
+        if (Value.IsString || Value.IsNumber) return Message;
+        LuaValue tostring = Vm.Meta.GetMetatable(state, Value)?.Get(LuaValue.FromString("__tostring")) ?? default;
+        return tostring.IsNil ? Message : Vm.Meta.ToStringValue(state, Value).ToString();
+    }
+
     internal void Prefix(string where)
     {
         _message = where + " " + _message;

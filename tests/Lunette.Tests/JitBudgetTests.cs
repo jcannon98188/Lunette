@@ -83,7 +83,9 @@ public class JitBudgetTests
         Assert.True(m.Instructions > 5 && m.Instructions < 60);
         Assert.True(m.BasicBlocks >= 3);
         Assert.True(m.LocalRefs >= 4);
-        Assert.Equal(2, m.Locals);
+#if !DEBUG
+        Assert.Equal(2, m.Locals); // Debug codegen adds temporaries, so the exact count is only stable in Release.
+#endif
     }
 
     [Fact]

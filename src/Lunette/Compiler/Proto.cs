@@ -92,4 +92,7 @@ internal sealed class Proto
     public required string[] UpvalNames { get; init; }
     public required LocVar[] LocVars { get; init; }
     public required Proto[] Protos { get; init; }
+    /// <summary>Source line of the function keyword (0 for a main chunk) and of its closing end; debug.getinfo reports them.</summary>
+    public int LineDefined { get; init; }
+    public int LastLineDefined { get; init; }
 }
