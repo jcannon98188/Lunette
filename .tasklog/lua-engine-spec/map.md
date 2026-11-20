@@ -35,6 +35,7 @@ Settled in charting (grilling with the user):
 - [Execution architecture and coroutine model](tickets/06-execution-architecture-and-coroutine-model.md): One-pass PUC 5.4 register bytecode (own encoding, no AST); one `switch` loop with hot paths inline and cold paths in helpers; Lua-to-Lua calls are heap frames, metamethods/iterators/pcall yieldable, sort/gsub/load-reader re-entrant and non-yieldable; nested resume with PUC limits (1M stack slots, 200 re-entrancy levels); bytecode `Proto` is the seam for a later backend.
 - [Host API shape](tickets/07-host-api-shape.md): Idiomatic C# host API over one 16-byte `LuaValue`; single-threaded `LuaState`; span-based host-function fast path with opt-in yield/continuations; no-reflection core; best-effort sandbox limits; minimal PUC-compatible CLI.
 - [Error model, pcall and debug library scope](tickets/08-error-model-pcall-and-debug-library-scope.md): Errors are pending-state plus in-loop unwinding with no exceptions on common paths (throw only as an ergonomic fallback caught outside the loop); PUC-literal message text; full `debug` library; two source-generated loop variants for hook cost.
+- [Test harness and waiver policy](tickets/09-test-harness-and-waiver-policy.md): Pinned unmodified 5.4.9 suite, one test per file plus CLI `all.lua` run, no managed `T` (`api.lua` waived), reason-coded waiver manifest applied as overlays, reference 5.4.9 built in CI for differential testing, tiered milestones, ratchet CI via `required-files`.
 
 ## Not yet specified
 
