@@ -234,44 +234,27 @@ internal static partial class Interpreter
                     break;
                 case OpCode.GetGlobal:
                 {
-                    LuaValue obj = cl.Upvals[i.B].Get(), key = k[i.C];
-                    if (obj.Ref is LuaTable t)
+                    UpVal uv = cl.Upvals[i.B];
+                    if ((uv.Owner is null ? uv.Value.Ref : uv.Owner.Stack[uv.Index].Ref) is LuaTable t)
                     {
-                        LuaValue v = t.Get(key);
-                        if (!v.IsNil || t.Metatable is null)
+                        ref readonly LuaValue v = ref t.GetStrRef((byte[])Regs.At(k, i.C).Ref!);
+                        if (!v.IsNil || t.NoIndex)
                         {
-                            r[bs + i.A] = v;
+                            Regs.Copy(ref Regs.At(r, bs + i.A), in v);
                             break;
                         }
                     }
-                    if (Meta.PrepareIndex(state, obj, key, proto, pc - 1, out LuaValue res, out MetaCall mc))
-                    {
-                        Frame? nf = StartMeta(state, co, f, in mc, Continuation.Value, bs + i.A, pc, proto, out res);
-                        if (nf is not null)
-                        {
-                            f = nf;
-                            goto newframe;
-                        }
-                        r = co.Stack;
-                    }
-                    r[bs + i.A] = res;
-                    break;
+                    goto otherslow;
                 }
                 case OpCode.SetGlobal:
                 {
-                    LuaValue obj = cl.Upvals[i.B].Get();
-                    if (obj.Ref is LuaTable t && t.Metatable is null) Meta.RawSet(t, k[i.C], r[bs + i.A], proto, pc - 1);
-                    else if (Meta.PrepareSetIndex(state, obj, k[i.C], r[bs + i.A], proto, pc - 1, out MetaCall mc))
+                    UpVal uv = cl.Upvals[i.B];
+                    if ((uv.Owner is null ? uv.Value.Ref : uv.Owner.Stack[uv.Index].Ref) is LuaTable t && t.NoNewIndex)
                     {
-                        Frame? nf = StartMeta(state, co, f, in mc, Continuation.Discard, 0, pc, proto, out LuaValue res);
-                        if (nf is not null)
-                        {
-                            f = nf;
-                            goto newframe;
-                        }
-                        r = co.Stack;
+                        t.SetStr((byte[])Regs.At(k, i.C).Ref!, in Regs.At(r, bs + i.A));
+                        break;
                     }
-                    break;
+                    goto otherslow;
                 }
                 case OpCode.GetUpval:
                 {
@@ -314,105 +297,22 @@ internal static partial class Interpreter
                 case OpCode.Shl:
                 case OpCode.Shr:
                     goto arithslow;
-                case OpCode.BNot:
-                {
-                    LuaValue v = r[bs + i.B];
-                    if (v.IsNumber) r[bs + i.A] = Arith.BitwiseNot(v, proto, pc - 1);
-                    else
-                    {
-                        MetaCall mc = Meta.PrepareUnary(state, TagMethod.BNot, v, proto, pc - 1);
-                        Frame? nf = StartMeta(state, co, f, in mc, Continuation.Value, bs + i.A, pc, proto, out LuaValue res);
-                        if (nf is not null)
-                        {
-                            f = nf;
-                            goto newframe;
-                        }
-                        r = co.Stack;
-                        r[bs + i.A] = res;
-                    }
-                    break;
-                }
                 case OpCode.Unm:
-                {
-                    LuaValue v = r[bs + i.B];
-                    if (v.IsNumber) r[bs + i.A] = Arith.Negate(v, proto, pc - 1);
-                    else
+                    if (Regs.At(r, bs + i.B).IsNumber)
                     {
-                        MetaCall mc = Meta.PrepareUnary(state, TagMethod.Unm, v, proto, pc - 1);
-                        Frame? nf = StartMeta(state, co, f, in mc, Continuation.Value, bs + i.A, pc, proto, out LuaValue res);
-                        if (nf is not null)
-                        {
-                            f = nf;
-                            goto newframe;
-                        }
-                        r = co.Stack;
-                        r[bs + i.A] = res;
+                        r[bs + i.A] = Arith.Negate(r[bs + i.B], proto, pc - 1);
+                        break;
                     }
-                    break;
-                }
+                    goto otherslow;
+                case OpCode.BNot:
+                case OpCode.Eq:
+                case OpCode.Lt:
+                case OpCode.Le:
+                case OpCode.Self:
+                    goto otherslow;
                 case OpCode.Not:
                     r[bs + i.A] = LuaValue.FromBoolean(r[bs + i.B].IsFalsy);
                     break;
-                case OpCode.Eq:
-                {
-                    if (Meta.PrepareEqual(r[bs + i.B], r[bs + i.C], out bool eq, out MetaCall mc))
-                    {
-                        Frame? nf = StartMeta(state, co, f, in mc, Continuation.Bool, bs + i.A, pc, proto, out LuaValue res);
-                        if (nf is not null)
-                        {
-                            f = nf;
-                            goto newframe;
-                        }
-                        r = co.Stack;
-                        eq = Truthy(res);
-                    }
-                    r[bs + i.A] = LuaValue.FromBoolean(eq);
-                    break;
-                }
-                case OpCode.Lt:
-                {
-                    LuaValue lhs = r[bs + i.B], rhs = r[bs + i.C];
-                    if (lhs.IsNumber && rhs.IsNumber) r[bs + i.A] = LuaValue.FromBoolean(Compare.LessThan(lhs, rhs, proto, pc - 1));
-                    else
-                    {
-                        if (!Meta.PrepareOrder(state, TagMethod.Lt, lhs, rhs, proto, pc - 1, out bool ordRes, out MetaCall mc))
-                        {
-                            r[bs + i.A] = LuaValue.FromBoolean(ordRes);
-                            break;
-                        }
-                        Frame? nf = StartMeta(state, co, f, in mc, Continuation.Bool, bs + i.A, pc, proto, out LuaValue res);
-                        if (nf is not null)
-                        {
-                            f = nf;
-                            goto newframe;
-                        }
-                        r = co.Stack;
-                        r[bs + i.A] = LuaValue.FromBoolean(Truthy(res));
-                    }
-                    break;
-                }
-                case OpCode.Le:
-                {
-                    LuaValue lhs = r[bs + i.B], rhs = r[bs + i.C];
-                    if (lhs.IsNumber && rhs.IsNumber) r[bs + i.A] = LuaValue.FromBoolean(Compare.LessEqual(lhs, rhs, proto, pc - 1));
-                    else
-                    {
-                        if (!Meta.PrepareOrder(state, TagMethod.Le, lhs, rhs, proto, pc - 1, out bool ordRes, out MetaCall mc))
-                        {
-                            r[bs + i.A] = LuaValue.FromBoolean(ordRes);
-                            break;
-                        }
-                        Frame? nf = StartMeta(state, co, f, in mc, Continuation.Bool, bs + i.A, pc, proto, out LuaValue res);
-                        if (nf is not null)
-                        {
-                            f = nf;
-                            goto newframe;
-                        }
-                        r = co.Stack;
-                        r[bs + i.A] = LuaValue.FromBoolean(Truthy(res));
-                    }
-                    break;
-                }
                 case OpCode.Test:
                     if (!Regs.IsFalsy(ref Regs.At(r, bs + i.A)) != (i.C != 0)) pc++;
                     else
@@ -725,54 +625,15 @@ internal static partial class Interpreter
                     goto case OpCode.Jmp;
                 }
                 case OpCode.Closure:
-                {
-                    var np = proto.Protos[i.Bx];
-                    var ups = new UpVal[np.Upvalues.Length];
-                    for (int j = 0; j < ups.Length; j++)
-                    {
-                        var d = np.Upvalues[j];
-                        ups[j] = d.InStack ? co.FindUpval(bs + d.Index) : cl.Upvals[d.Index];
-                    }
-                    r[bs + i.A] = LuaValue.FromObject(new LuaClosure(np, ups));
+                    NewClosure(co, cl, proto.Protos[i.Bx], bs, i.A);
                     break;
-                }
                 case OpCode.Close:
-                    if (co.OpenUpvals.Count > 0) co.Close(bs + i.A);
-                    if (co.Tbc.Count > 0 && co.Tbc[^1] >= bs + i.A)
-                    {
-                        f.Pc = pc;
-                        Frame? hf = StartClose(state, co, f, bs + i.A, bs + proto.MaxStack, top);
-                        r = co.Stack;
-                        if (hf is not null)
-                        {
-                            f = hf;
-                            goto newframe;
-                        }
-                    }
-                    break;
                 case OpCode.Tbc:
-                    MarkToBeClosed(state, co,bs + i.A, proto, pc - 1, proto.Names[i.Bx]);
-                    break;
+                    goto otherslow;
                 case OpCode.Vararg:
-                {
-                    int ra = bs + i.A;
-                    int n = f.VarargCount;
-                    int wanted = i.C - 1;
-                    if (wanted < 0)
-                    {
-                        co.EnsureStack(ra + n, proto, pc - 1);
-                        r = co.Stack;
-                        Array.Copy(r, f.VarargBase, r, ra, n);
-                        top = ra + n;
-                    }
-                    else
-                    {
-                        int c = Math.Min(n, wanted);
-                        Array.Copy(r, f.VarargBase, r, ra, c);
-                        for (int j = c; j < wanted; j++) r[ra + j] = default;
-                    }
+                    top = VarargOp(co, f, i, bs, pc, proto, top);
+                    r = co.Stack;
                     break;
-                }
                 case OpCode.NewTable:
                 {
                     int arraySize = code[pc++].Ax;
@@ -855,49 +716,13 @@ internal static partial class Interpreter
                     }
                     goto indexslow;
                 }
-                case OpCode.Self:
-                {
-                    LuaValue obj = r[bs + i.B], key = r[bs + i.C];
-                    r[bs + i.A + 1] = obj;
-                    LuaValue v = default;
-                    if (obj.Ref is LuaTable t) v = t.Get(key);
-                    if (v.IsNil)
-                    {
-                        if (Meta.PrepareIndex(state, obj, key, proto, pc - 1, out v, out MetaCall mc))
-                        {
-                            Frame? nf = StartMeta(state, co, f, in mc, Continuation.Value, bs + i.A, pc, proto, out LuaValue res);
-                        if (nf is not null)
-                        {
-                            f = nf;
-                            goto newframe;
-                        }
-                        r = co.Stack;
-                            v = res;
-                        }
-                    }
-                    r[bs + i.A] = v;
-                    break;
-                }
                 case OpCode.Len:
-                {
-                    LuaValue v = r[bs + i.B];
-                    if (v.Ref is LuaTable t && t.Metatable is null) r[bs + i.A] = LuaValue.FromInteger(t.Length());
-                    else
+                    if (Regs.At(r, bs + i.B).Ref is LuaTable lt && lt.Metatable is null)
                     {
-                        if (Meta.PrepareLen(state, v, proto, pc - 1, out LuaValue res, out MetaCall mc))
-                        {
-                            Frame? nf = StartMeta(state, co, f, in mc, Continuation.Value, bs + i.A, pc, proto, out res);
-                        if (nf is not null)
-                        {
-                            f = nf;
-                            goto newframe;
-                        }
-                        r = co.Stack;
-                        }
-                        r[bs + i.A] = res;
+                        r[bs + i.A] = LuaValue.FromInteger(lt.Length());
+                        break;
                     }
-                    break;
-                }
+                    goto otherslow;
                 case OpCode.Concat:
                 {
                     Frame? nf = ConcatOp(state, co, f, i, bs, pc, proto);
@@ -940,6 +765,17 @@ internal static partial class Interpreter
                 setslow:
                 {
                     Frame? nf = SetSlow(state, co, f, i, bs, pc, proto, k);
+                    if (nf is not null)
+                    {
+                        f = nf;
+                        goto newframe;
+                    }
+                    r = co.Stack;
+                    break;
+                }
+                otherslow:
+                {
+                    Frame? nf = OtherSlow(state, co, f, i, bs, pc, proto, k, top);
                     if (nf is not null)
                     {
                         f = nf;
@@ -1073,6 +909,164 @@ internal static partial class Interpreter
         }
         take = res == (i.A != 0);
         return null;
+    }
+
+    /// <summary>
+    /// The instructions the dispatch loop does not run inline (their frame temporaries would grow the loop's frame, which every native-to-Lua callback pays to zero):
+    /// GetGlobal/SetGlobal off the raw-table path, Eq/Lt/Le/BNot/Self, Unm and Len on non-numbers and tables with metatables, Close and Tbc.
+    /// Returns the Frame of a metamethod call that finishes the instruction, or null when it is done.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static Frame? OtherSlow(LuaState state, Coroutine co, Frame f, Instruction i, int bs, int pc, Proto proto, LuaValue[] k, int top)
+    {
+        LuaValue[] r = co.Stack;
+        LuaValue res;
+        MetaCall mc;
+        Frame? nf;
+        switch (i.Op)
+        {
+            case OpCode.GetGlobal:
+            {
+                LuaValue obj = f.Closure.Upvals[i.B].Get(), key = k[i.C];
+                if (Meta.PrepareIndex(state, obj, key, proto, pc - 1, out res, out mc))
+                {
+                    nf = StartMeta(state, co, f, in mc, Continuation.Value, bs + i.A, pc, proto, out res);
+                    if (nf is not null) return nf;
+                }
+                co.Stack[bs + i.A] = res;
+                return null;
+            }
+            case OpCode.SetGlobal:
+            {
+                LuaValue obj = f.Closure.Upvals[i.B].Get();
+                if (Meta.PrepareSetIndex(state, obj, k[i.C], r[bs + i.A], proto, pc - 1, out mc))
+                    return StartMeta(state, co, f, in mc, Continuation.Discard, 0, pc, proto, out _);
+                return null;
+            }
+            case OpCode.Unm:
+            case OpCode.BNot:
+            {
+                LuaValue v = r[bs + i.B];
+                if (i.Op == OpCode.BNot && v.IsNumber)
+                {
+                    r[bs + i.A] = Arith.BitwiseNot(v, proto, pc - 1);
+                    return null;
+                }
+                mc = Meta.PrepareUnary(state, i.Op == OpCode.Unm ? TagMethod.Unm : TagMethod.BNot, v, proto, pc - 1);
+                nf = StartMeta(state, co, f, in mc, Continuation.Value, bs + i.A, pc, proto, out res);
+                if (nf is not null) return nf;
+                co.Stack[bs + i.A] = res;
+                return null;
+            }
+            case OpCode.Eq:
+            {
+                bool eq;
+                if (Meta.PrepareEqual(r[bs + i.B], r[bs + i.C], out eq, out mc))
+                {
+                    nf = StartMeta(state, co, f, in mc, Continuation.Bool, bs + i.A, pc, proto, out res);
+                    if (nf is not null) return nf;
+                    eq = Truthy(res);
+                }
+                co.Stack[bs + i.A] = LuaValue.FromBoolean(eq);
+                return null;
+            }
+            case OpCode.Lt:
+            case OpCode.Le:
+            {
+                bool isLt = i.Op == OpCode.Lt;
+                LuaValue lhs = r[bs + i.B], rhs = r[bs + i.C];
+                if (lhs.IsNumber && rhs.IsNumber)
+                {
+                    r[bs + i.A] = LuaValue.FromBoolean(isLt ? Compare.LessThan(lhs, rhs, proto, pc - 1) : Compare.LessEqual(lhs, rhs, proto, pc - 1));
+                    return null;
+                }
+                if (!Meta.PrepareOrder(state, isLt ? TagMethod.Lt : TagMethod.Le, lhs, rhs, proto, pc - 1, out bool ordRes, out mc))
+                {
+                    r[bs + i.A] = LuaValue.FromBoolean(ordRes);
+                    return null;
+                }
+                nf = StartMeta(state, co, f, in mc, Continuation.Bool, bs + i.A, pc, proto, out res);
+                if (nf is not null) return nf;
+                co.Stack[bs + i.A] = LuaValue.FromBoolean(Truthy(res));
+                return null;
+            }
+            case OpCode.Self:
+            {
+                LuaValue obj = r[bs + i.B], key = r[bs + i.C];
+                r[bs + i.A + 1] = obj;
+                res = default;
+                if (obj.Ref is LuaTable t) res = t.Get(key);
+                if (res.IsNil && Meta.PrepareIndex(state, obj, key, proto, pc - 1, out res, out mc))
+                {
+                    nf = StartMeta(state, co, f, in mc, Continuation.Value, bs + i.A, pc, proto, out res);
+                    if (nf is not null) return nf;
+                }
+                co.Stack[bs + i.A] = res;
+                return null;
+            }
+            case OpCode.Len:
+            {
+                LuaValue v = r[bs + i.B];
+                if (Meta.PrepareLen(state, v, proto, pc - 1, out res, out mc))
+                {
+                    nf = StartMeta(state, co, f, in mc, Continuation.Value, bs + i.A, pc, proto, out res);
+                    if (nf is not null) return nf;
+                }
+                co.Stack[bs + i.A] = res;
+                return null;
+            }
+            case OpCode.Close:
+            case OpCode.Tbc:
+                if (i.Op == OpCode.Tbc)
+                {
+                    MarkToBeClosed(state, co, bs + i.A, proto, pc - 1, proto.Names[i.Bx]);
+                    return null;
+                }
+                if (co.OpenUpvals.Count > 0) co.Close(bs + i.A);
+                if (co.Tbc.Count > 0 && co.Tbc[^1] >= bs + i.A)
+                {
+                    f.Pc = pc;
+                    return StartClose(state, co, f, bs + i.A, bs + proto.MaxStack, top);
+                }
+                return null;
+            default:
+                throw new InvalidOperationException($"bad opcode {i.Op}");
+        }
+    }
+
+    /// <summary>The Closure instruction: instantiates the nested function, capturing its upvalues.</summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static void NewClosure(Coroutine co, LuaClosure cl, Proto np, int bs, int a)
+    {
+        var ups = new UpVal[np.Upvalues.Length];
+        for (int j = 0; j < ups.Length; j++)
+        {
+            var d = np.Upvalues[j];
+            ups[j] = d.InStack ? co.FindUpval(bs + d.Index) : cl.Upvals[d.Index];
+        }
+        co.Stack[bs + a] = LuaValue.FromObject(new LuaClosure(np, ups));
+    }
+
+    /// <summary>The Vararg instruction; returns the new <c>top</c> (changed only when all values are wanted).</summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static int VarargOp(Coroutine co, Frame f, Instruction i, int bs, int pc, Proto proto, int top)
+    {
+        int ra = bs + i.A;
+        int n = f.VarargCount;
+        int wanted = i.C - 1;
+        LuaValue[] r;
+        if (wanted < 0)
+        {
+            co.EnsureStack(ra + n, proto, pc - 1);
+            r = co.Stack;
+            Array.Copy(r, f.VarargBase, r, ra, n);
+            return ra + n;
+        }
+        r = co.Stack;
+        int c = Math.Min(n, wanted);
+        Array.Copy(r, f.VarargBase, r, ra, c);
+        for (int j = c; j < wanted; j++) r[ra + j] = default;
+        return top;
     }
 
     /// <summary>Concat out of line: the dispatch loop has a limited inlining budget. Returns a metamethod Frame, or null when the result is stored.</summary>
