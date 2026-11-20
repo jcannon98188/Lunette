@@ -124,6 +124,8 @@ internal static partial class Interpreter
         }
     }
 
+    [LuaInterpreterLoop]
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
     private static int RunLoop(LuaState state, Coroutine co, Frame f, int stop, int top)
     {
         LuaClosure cl;

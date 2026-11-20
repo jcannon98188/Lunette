@@ -1,0 +1,19 @@
+{
+  "_comment": "Interpreter-loop JIT budgets: 70% of the retail MinOpts limits (60000 IL bytes, 20000 IL instructions, 2000 blocks, 2000 locals, 8000 local refs); IL locals capped at ~500 to keep headroom under the 921-local inlining cliff. inlineIntendedPrefixes name helpers that must be inlined into [LuaInterpreterLoop] methods; inlineLeftovers is the recorded baseline of calls to them that the JIT currently does NOT inline (a ratchet: counts may only fall; a new callee or a higher count fails). Loosen only in a PR citing before/after numbers; CODEOWNERS enforces.",
+  "limits": {
+    "ilBytes": 36000,
+    "ilInstructions": 14000,
+    "basicBlocks": 1400,
+    "localRefs": 5600,
+    "ilLocals": 500
+  },
+  "inlineIntendedPrefixes": [
+    "Lunette.LuaValue:",
+    "Lunette.LuaNumber:",
+    "Lunette.Compiler.Instruction:"
+  ],
+  "inlineLeftovers": {
+    "Lunette.LuaValue:FromBoolean": 11,
+    "Lunette.Compiler.Instruction:get_Op": 1
+  }
+}
