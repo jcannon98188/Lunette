@@ -7,6 +7,7 @@ internal static class CoroutineLib
 {
     public static void Register(LuaState state)
     {
+        if (!state.Wants("coroutine")) return;
         var t = new LuaTable(0, 8);
         Add(t, "create", Create);
         Add(t, "resume", Resume);

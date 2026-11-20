@@ -9,6 +9,7 @@ internal static class StringLib
 {
     public static void Register(LuaState state)
     {
+        if (!state.Wants("string")) return;
         var lib = new LuaTable();
         void Add(string name, BuiltinBody body) =>
             lib.Set(LuaValue.FromString(state.Strings.FromUtf16(name)), LuaValue.FromObject(new BuiltinFunction(body)));

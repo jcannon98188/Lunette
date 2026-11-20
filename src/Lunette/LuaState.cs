@@ -73,8 +73,20 @@ public sealed partial class LuaState : IDisposable
     private static int DefaultInternCapacity() =>
         int.TryParse(Environment.GetEnvironmentVariable("LUNETTE_INTERN_CAPACITY"), out int n) && n > 0 ? n : StringCache.DefaultCapacity;
 
-    internal LuaState(int internCapacity, ILuaPlatform? platform = null)
+    private readonly LuaStateOptions? _construction;
+
+    /// <summary>Whether construction registers the global <paramref name="name"/>: always for a full state, only when allowlisted for a sandboxed one.</summary>
+    internal bool Wants(string name) => _construction is null || _construction.IsAllowed(name);
+
+    /// <summary>Registers a library or base function while the state is being built; a withheld name is dropped without ever being reachable.</summary>
+    internal void Define(string name, LuaValue value)
     {
+        if (Wants(name)) SetGlobal(name, value);
+    }
+
+    internal LuaState(int internCapacity, ILuaPlatform? platform = null, LuaStateOptions? options = null)
+    {
+        _construction = options;
         Platform = platform ?? new DefaultLuaPlatform();
         Strings = new StringCache(internCapacity);
         Gc = new Gc.GcState(this);
@@ -82,9 +94,9 @@ public sealed partial class LuaState : IDisposable
         Main.IsMain = true;
         Main.Status = CoStatus.Running;
         Running = Main;
-        SetGlobal("_G", LuaValue.FromTable(Globals));
-        SetGlobal("_VERSION", LuaValue.FromString("Lua 5.4"));
-        SetGlobal("print", LuaValue.FromObject(new BuiltinFunction(static (state, args) =>
+        Define("_G", LuaValue.FromTable(Globals));
+        Define("_VERSION", LuaValue.FromString("Lua 5.4"));
+        if (Wants("print")) SetGlobal("print", LuaValue.FromObject(new BuiltinFunction(static (state, args) =>
         {
             if (state.OutputStream is { } raw)
             {
@@ -108,7 +120,7 @@ public sealed partial class LuaState : IDisposable
         BaseLib.Register(this);
         StringLib.Register(this);
         Utf8Lib.Register(this);
-        MathLib.Register(this);
+        MathLib.Register(this, options?.Seed);
         ErrorLib.Register(this);
         CoroutineLib.Register(this);
         TableLib.Register(this);

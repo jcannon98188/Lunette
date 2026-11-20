@@ -4,7 +4,7 @@ namespace Lunette.Lib;
 internal static class GcLib
 {
     public static void Register(LuaState state) =>
-        state.SetGlobal("collectgarbage", LuaValue.FromObject(new BuiltinFunction(CollectGarbage, BuiltinKind.Collect)));
+        state.Define("collectgarbage", LuaValue.FromObject(new BuiltinFunction(CollectGarbage, BuiltinKind.Collect)));
 
     private static LuaValue[]? CollectGarbage(LuaState state, ReadOnlySpan<LuaValue> args)
     {

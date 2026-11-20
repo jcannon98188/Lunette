@@ -10,6 +10,7 @@ internal static class TableLib
 
     public static void Register(LuaState state)
     {
+        if (!state.Wants("table")) return;
         var t = new LuaTable(0, 8);
         Add(t, "insert", Insert);
         Add(t, "remove", Remove);
