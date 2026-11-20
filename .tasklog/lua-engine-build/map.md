@@ -53,6 +53,14 @@ A pure-managed C# (.NET 11) Lua 5.4 engine and minimal CLI, built to the lua-eng
 - [Fix DoString inside a host function running under require](tickets/37-fix-dostring-inside-a-host-function-running-under-require.md): DoString re-entry fixed.
 - [Suite: make db.lua, errors.lua, all.lua, locals.lua pass or waive](tickets/38-suite-make-db-lua-errors-lua-all-lua-locals-lua-pass-or-waiv.md): db/errors/all/locals suite files green.
 - [Fix gc.lua timeout flake in the full test run](tickets/39-fix-gc-lua-timeout-flake-in-the-full-test-run.md): gc.lua full-run timeout fixed.
+- [Perf: reproducible Linux macro-benchmark baseline vs PUC and profile](tickets/40-perf-reproducible-linux-macro-benchmark-baseline-vs-puc-and.md): Reproducible Linux macro baseline and profile (25a54e8)
+- [Perf: arithmetic, comparison and numeric-for fast paths in the VM loop](tickets/41-perf-arithmetic-comparison-and-numeric-for-fast-paths-in-the.md): Arithmetic, comparison and for-loop fast paths
+- [Perf: call/return and frame setup overhead](tickets/42-perf-call-return-and-frame-setup-overhead.md): Call/return fast paths (eac3b84)
+- [Perf: table get/set, array part and GETFIELD/SETFIELD fast paths](tickets/43-perf-table-get-set-array-part-and-getfield-setfield-fast-pat.md): Table and field fast paths (83f7748)
+- [Perf: string library, concatenation and interning costs](tickets/44-perf-string-library-concatenation-and-interning-costs.md): String library and interning costs (38c1227)
+- [Bench: compare Lunette against Lua-in-WASM (PUC 5.4.9 compiled to WASM, wasmoon)](tickets/45-bench-compare-lunette-against-lua-in-wasm-puc-5-4-9-compiled.md): Lua-in-WASM comparison (2026eb9)
+- [Safe-twin build (LUA_SAFE_ACCESS) for Lunette.Unsafe helpers and nightly variant](tickets/46-safe-twin-build-lua-safe-access-for-lunette-unsafe-helpers-a.md): Safe twin for Lunette.Unsafe (0f80501)
+- [Perf: smaller RunLoop frame, cached closure state, builtin call protocol](tickets/47-perf-smaller-runloop-frame-cached-closure-state-builtin-call.md): RunLoop frame and builtin call protocol (5a4d0e7)
 
 ## Not yet specified
 
