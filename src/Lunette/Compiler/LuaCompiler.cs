@@ -44,16 +44,22 @@ internal sealed class LuaCompiler
     private FuncState _fs = new(null);
     private int _openIdx = -1;
 
-    private LuaCompiler(string source, string chunkName)
+    private readonly StringCache _cache;
+
+    private LuaCompiler(byte[] source, string chunkName, StringCache cache)
     {
-        _lex = new Lexer(source, chunkName);
+        _cache = cache;
+        _lex = new Lexer(source, chunkName, cache);
         _chunkName = chunkName;
         _tok = _lex.Next();
     }
 
-    public static Proto Compile(string source, string chunkName)
+    public static Proto Compile(string source, string chunkName, StringCache? cache = null) =>
+        Compile(LuaString.FromUtf16(source).Bytes.ToArray(), chunkName, cache);
+
+    public static Proto Compile(byte[] source, string chunkName, StringCache? cache = null)
     {
-        var c = new LuaCompiler(source, chunkName);
+        var c = new LuaCompiler(source, chunkName, cache ?? new StringCache());
         c._fs.IsVararg = true;
         c.Block();
         if (c._tok.Kind != Tok.Eof) throw c.Err("'<eof>' expected");
@@ -139,6 +145,8 @@ internal sealed class LuaCompiler
         if (upTo > MaxRegisters) throw Err("function or expression needs too many registers");
         if (upTo - 1 > _fs.Max) _fs.Max = upTo - 1;
     }
+
+    private LuaValue NameConst(string n) => LuaValue.FromString(_cache.FromUtf16(n));
 
     private int AddConst(LuaValue v)
     {
@@ -348,7 +356,7 @@ internal sealed class LuaCompiler
                 if (field.Length > 0)
                 {
                     int kk = Alloc();
-                    Emit(Instruction.ABx(OpCode.LoadK, kk, AddConst(LuaValue.FromString(field))), line);
+                    Emit(Instruction.ABx(OpCode.LoadK, kk, AddConst(NameConst(field))), line);
                     Emit(Instruction.Abc(OpCode.GetTable, obj, obj, kk), line);
                     _fs.Free = obj + 1;
                 }
@@ -358,7 +366,7 @@ internal sealed class LuaCompiler
                 if (isMethod) break;
             }
             int key = Alloc();
-            Emit(Instruction.ABx(OpCode.LoadK, key, AddConst(LuaValue.FromString(field))), line);
+            Emit(Instruction.ABx(OpCode.LoadK, key, AddConst(NameConst(field))), line);
             int fnReg = Alloc();
             FunctionBody(fnReg, line, isMethod);
             Emit(Instruction.Abc(OpCode.SetTable, obj, key, fnReg), line);
@@ -477,7 +485,7 @@ internal sealed class LuaCompiler
                         Advance();
                         string name = ExpectName();
                         int k = Alloc();
-                        Emit(Instruction.ABx(OpCode.LoadK, k, AddConst(LuaValue.FromString(name))), l);
+                        Emit(Instruction.ABx(OpCode.LoadK, k, AddConst(NameConst(name))), l);
                     }
                     else
                     {
@@ -755,6 +763,7 @@ internal sealed class LuaCompiler
             case Tok.Tilde: left = right = 5; return true;
             case Tok.Amp: left = right = 6; return true;
             case Tok.Shl or Tok.Shr: left = right = 7; return true;
+            case Tok.Concat: left = 9; right = 8; return true;
             case Tok.Plus or Tok.Minus: left = right = 10; return true;
             case Tok.Star or Tok.Slash or Tok.DSlash or Tok.Percent: left = right = 11; return true;
             case Tok.Caret: left = 14; right = 13; return true;
@@ -812,6 +821,7 @@ internal sealed class LuaCompiler
             case Tok.DSlash: Emit(Instruction.Abc(OpCode.IDiv, target, target, rhs), line); break;
             case Tok.Percent: Emit(Instruction.Abc(OpCode.Mod, target, target, rhs), line); break;
             case Tok.Caret: Emit(Instruction.Abc(OpCode.Pow, target, target, rhs), line); break;
+            case Tok.Concat: Emit(Instruction.Abc(OpCode.Concat, target, target, rhs), line); break;
             case Tok.Amp: Emit(Instruction.Abc(OpCode.BAnd, target, target, rhs), line); break;
             case Tok.Pipe: Emit(Instruction.Abc(OpCode.BOr, target, target, rhs), line); break;
             case Tok.Tilde: Emit(Instruction.Abc(OpCode.BXor, target, target, rhs), line); break;
@@ -865,7 +875,7 @@ internal sealed class LuaCompiler
                 FunctionBody(target, line, false);
                 return;
             case Tok.String:
-                Emit(Instruction.ABx(OpCode.LoadK, target, AddConst(LuaValue.FromString(_tok.Text))), line);
+                Emit(Instruction.ABx(OpCode.LoadK, target, AddConst(LuaValue.FromString(_tok.Str))), line);
                 Advance();
                 return;
             case Tok.LBrace:
@@ -903,7 +913,7 @@ internal sealed class LuaCompiler
         {
             Alloc(); // fn + 1 receives the receiver
             int k = Alloc();
-            Emit(Instruction.ABx(OpCode.LoadK, k, AddConst(LuaValue.FromString(method))), line);
+            Emit(Instruction.ABx(OpCode.LoadK, k, AddConst(NameConst(method))), line);
             Emit(Instruction.Abc(OpCode.Self, fn, fn, k), line);
             _fs.Free = fn + 2;
             extra = 1;
@@ -912,7 +922,7 @@ internal sealed class LuaCompiler
         switch (_tok.Kind)
         {
             case Tok.String:
-                Emit(Instruction.ABx(OpCode.LoadK, Alloc(), AddConst(LuaValue.FromString(_tok.Text))), line);
+                Emit(Instruction.ABx(OpCode.LoadK, Alloc(), AddConst(LuaValue.FromString(_tok.Str))), line);
                 Advance();
                 b++;
                 break;
@@ -978,7 +988,7 @@ internal sealed class LuaCompiler
             if (_tok.Kind == Tok.Name && Peek().Kind == Tok.Assign)
             {
                 int k = Alloc();
-                Emit(Instruction.ABx(OpCode.LoadK, k, AddConst(LuaValue.FromString(_tok.Text))), _tok.Line);
+                Emit(Instruction.ABx(OpCode.LoadK, k, AddConst(LuaValue.FromString(_tok.Str))), _tok.Line);
                 Advance();
                 Advance();
                 int v = Alloc();

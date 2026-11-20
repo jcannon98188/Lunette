@@ -13,10 +13,10 @@ public static class Program
             return 1;
         }
         string path = args[0];
-        string source;
+        byte[] source;
         try
         {
-            source = File.ReadAllText(path);
+            source = File.ReadAllBytes(path);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
@@ -26,7 +26,7 @@ public static class Program
         var state = new LuaState { Output = stdout };
         try
         {
-            state.DoString(source, "@" + path);
+            state.DoBytes(source, "@" + path);
         }
         catch (LuaException e)
         {

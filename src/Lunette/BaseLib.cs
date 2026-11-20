@@ -32,18 +32,23 @@ internal static class BaseLib
         {
             LuaValue v = Arg(args, 0);
             if (v.Ref is LuaTable t) return [LuaValue.FromInteger(t.Length())];
-            if (v.Ref is string s) return [LuaValue.FromInteger(s.Length)];
+            if (v.Ref is byte[] s) return [LuaValue.FromInteger(new LuaString(s).Length)];
             throw new LuaException("table or string expected");
         });
         Add(state, "setmetatable", SetMetatable);
-        Add(state, "getmetatable", (_, args) =>
+        Add(state, "getmetatable", (st, args) =>
         {
-            var mt = Meta.GetMetatable(Arg(args, 0));
+            var mt = Meta.GetMetatable(st, Arg(args, 0));
             if (mt is null) return [default];
             LuaValue protectedValue = mt.Get(ProtectedKey);
             return [protectedValue.IsNil ? LuaValue.FromTable(mt) : protectedValue];
         });
-        Add(state, "tostring", (st, args) => [LuaValue.FromString(Meta.ToStringValue(st, Arg(args, 0)))]);
+        Add(state, "tostring", (st, args) =>
+        {
+            if (args.Length == 0) throw ArgError(1, "tostring", "value expected");
+            return [LuaValue.FromString(Meta.ToStringValue(st, args[0]))];
+        });
+        Add(state, "tonumber", ToNumber);
     }
 
     private static void Add(LuaState state, string name, BuiltinBody body) =>
@@ -60,10 +65,39 @@ internal static class BaseLib
         throw ArgError(n, fn, $"table expected, got {got}");
     }
 
+    private static LuaValue[] ToNumber(LuaState state, ReadOnlySpan<LuaValue> args)
+    {
+        if (args.Length < 2 || args[1].IsNil)
+        {
+            if (args.Length == 0) throw ArgError(1, "tonumber", "value expected");
+            return [StringConv.TryToNumber(args[0], out LuaValue n) ? n : default];
+        }
+        long b = Lib.LibArgs.CheckInteger("tonumber", args, 1);
+        if (args[0].Ref is not byte[] raw) throw Lib.LibArgs.TypeError("tonumber", args, 0, "string");
+        if (b < 2 || b > 36) throw ArgError(2, "tonumber", "base out of range");
+        ReadOnlySpan<byte> s = new LuaString(raw).Bytes;
+        int i = 0;
+        while (i < s.Length && (s[i] == (byte)' ' || (uint)(s[i] - 9) < 5)) i++;
+        bool neg = false;
+        if (i < s.Length && s[i] == (byte)'-') { neg = true; i++; }
+        if (i >= s.Length || !char.IsAsciiLetterOrDigit((char)s[i])) return [default];
+        ulong acc = 0;
+        while (i < s.Length && char.IsAsciiLetterOrDigit((char)s[i]))
+        {
+            int d = char.IsAsciiDigit((char)s[i]) ? s[i] - '0' : (s[i] | 0x20) - 'a' + 10;
+            if (d >= b) return [default];
+            acc = unchecked(acc * (ulong)b + (ulong)d);
+            i++;
+        }
+        while (i < s.Length && (s[i] == (byte)' ' || (uint)(s[i] - 9) < 5)) i++;
+        if (i != s.Length) return [default];
+        return [LuaValue.FromInteger(unchecked((long)(neg ? 0UL - acc : acc)))];
+    }
+
     private static LuaValue[] Type(LuaState state, ReadOnlySpan<LuaValue> args)
     {
         if (args.Length == 0) throw ArgError(1, "type", "value expected");
-        return [LuaValue.FromString(args[0].TypeName)];
+        return [LuaValue.FromString(state.Strings.FromUtf16(args[0].TypeName))];
     }
 
     private static LuaValue[] Next(LuaState state, ReadOnlySpan<LuaValue> args)
@@ -76,7 +110,7 @@ internal static class BaseLib
     private static LuaValue[] Pairs(LuaState state, ReadOnlySpan<LuaValue> args, BuiltinFunction next)
     {
         if (args.Length == 0) throw ArgError(1, "pairs", "table expected, got no value");
-        var mt = Meta.GetMetatable(args[0]);
+        var mt = Meta.GetMetatable(state, args[0]);
         LuaValue tm = mt is null ? default : mt.Get(PairsKey);
         if (tm.IsNil) return [LuaValue.FromObject(next), args[0], default];
         var res = Interpreter.CallValues(state, tm, args[..1]);
