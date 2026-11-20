@@ -10,11 +10,14 @@ namespace Lunette.Lib;
 internal sealed class MathLib
 {
     private readonly ulong[] _rng = new ulong[4];
+    /// <summary>The host-chosen seed; when set, <c>math.randomseed()</c> without arguments returns to it instead of reading the clock.</summary>
+    private readonly (ulong, ulong)? _hostSeed;
 
     public Dictionary<string, LuaValue> Members { get; } = new();
 
-    public MathLib()
+    public MathLib((ulong, ulong)? hostSeed = null)
     {
+        _hostSeed = hostSeed;
         Members["pi"] = LuaValue.FromFloat(Math.PI);
         Members["huge"] = LuaValue.FromFloat(double.PositiveInfinity);
         Members["maxinteger"] = LuaValue.FromInteger(long.MaxValue);
@@ -42,7 +45,8 @@ internal sealed class MathLib
         Add("min", static (_, a) => MinMax("min", a, false));
         Add("random", (_, a) => Random(a));
         Add("randomseed", (_, a) => RandomSeed(a));
-        SetSeed((ulong)DateTime.UtcNow.Ticks, (ulong)Environment.TickCount64);
+        if (hostSeed is var (h1, h2)) SetSeed(h1, h2);
+        else SetSeed((ulong)DateTime.UtcNow.Ticks, (ulong)Environment.TickCount64);
     }
 
     private void Add(string name, BuiltinBody body) => Members[name] = LuaValue.FromObject(new BuiltinFunction(body));
@@ -150,9 +154,9 @@ internal sealed class MathLib
     }
 
     /// <summary>Installs a fresh <c>math</c> table (with its own random state) as the global <c>math</c>.</summary>
-    public static void Register(LuaState state)
+    public static void Register(LuaState state, (ulong, ulong)? hostSeed = null)
     {
-        var lib = new MathLib();
+        var lib = new MathLib(hostSeed);
         var table = new LuaTable();
         foreach (var (name, value) in lib.Members)
             table.Set(LuaValue.FromString(state.Strings.FromUtf16(name)), value);
@@ -242,8 +246,12 @@ internal sealed class MathLib
         long n1, n2;
         if (a.Length == 0)
         {
-            n1 = DateTime.UtcNow.Ticks;
-            n2 = Environment.TickCount64;
+            if (_hostSeed is var (h1, h2)) { n1 = (long)h1; n2 = (long)h2; }
+            else
+            {
+                n1 = DateTime.UtcNow.Ticks;
+                n2 = Environment.TickCount64;
+            }
         }
         else
         {

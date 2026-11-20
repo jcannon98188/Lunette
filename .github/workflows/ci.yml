@@ -56,6 +56,7 @@ jobs:
       - name: Suppression ratchet (count may only decrease)
         run: node ci/check-suppressions.js ${{ github.base_ref && format('--base-ref origin/{0}', github.base_ref) || '' }}
       - run: node --test ci/check-suppressions.test.js
+      - run: node --test bench/lib/perf.test.mjs
       - name: Analyzer canary (violations of every rule fail the build)
         run: node ci/analyzer-canary.js
 
@@ -152,11 +153,37 @@ jobs:
           path: /tmp/lunette-jit-*.txt
           retention-days: 14
 
+  # Native AOT + trimming gate: publish the CLI with ILC (TreatWarningsAsErrors makes any trim/AOT warning fail the
+  # publish), then run the pinned core-language suite subset and a smoke script through the native binary.
+  aot:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: dotnet publish src/Lunette.Cli -c Release -r linux-x64 -o aot-out
+      - name: Published output is native (no managed Lunette.Cli.dll)
+        run: test -x aot-out/Lunette.Cli && test ! -e aot-out/Lunette.Cli.dll && test ! -e aot-out/Lunette.dll
+      - run: node ci/run-aot-subset.mjs aot-out/Lunette.Cli --out aot-failures
+      - name: Upload failing file output
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aot-failures
+          path: aot-failures
+          retention-days: 14
+
   # The single aggregate check required by branch protection (ADR/ticket 18).
   # Later tickets add their jobs to `needs`; nightly and benchmark jobs never block.
   ci-gate:
     if: always()
-    needs: [build, test, ratchet, reference, differential, fast-checks, alloc-budget, jit-budget]
+    needs: [build, test, ratchet, reference, differential, fast-checks, alloc-budget, jit-budget, aot]
     runs-on: ubuntu-latest
     steps:
       - name: Require every upstream job to succeed
