@@ -189,6 +189,8 @@ Lunette.LuaStateOptions.Allow(params string![]! names) -> Lunette.LuaStateOption
 Lunette.LuaStateOptions.Limits.get -> Lunette.LuaLimits?
 Lunette.LuaStateOptions.Limits.init -> void
 Lunette.LuaStateOptions.LuaStateOptions() -> void
+Lunette.LuaStateOptions.Platform.get -> Lunette.ILuaPlatform?
+Lunette.LuaStateOptions.Platform.init -> void
 Lunette.LuaStateOptions.Replace(string! name, Lunette.HostFunction! function) -> Lunette.LuaStateOptions!
 Lunette.LuaStateOptions.SeedRandom(long seed, long seed2 = 0) -> Lunette.LuaStateOptions!
 Lunette.LuaStackFrame
