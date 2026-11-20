@@ -31,11 +31,57 @@ jobs:
           global-json-file: global.json
       - run: dotnet test -c Release
 
+  # Analyzer failures are part of ci-gate: the build above already fails on LD001-LD005, banned APIs and
+  # AOT analyzers (warnings and analyzer diagnostics are errors); this job proves that, and ratchets suppressions.
+  fast-checks:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Suppression ratchet (count may only decrease)
+        run: node ci/check-suppressions.js ${{ github.base_ref && format('--base-ref origin/{0}', github.base_ref) || '' }}
+      - run: node --test ci/check-suppressions.test.js
+      - name: Analyzer canary (violations of every rule fail the build)
+        run: node ci/analyzer-canary.js
+
+  # The suite runs per file inside `test` (tests/Lunette.Tests/Suite); this job guards the ratchet list itself.
+  ratchet:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: node ci/check-required-files.mjs origin/${{ github.base_ref || 'main' }}
+
+  # Reference binary (PUC Lua 5.4.9) from checksummed source; Linux only. Cached by version, tarball SHA and runner image.
+  reference:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: .reference
+          key: reference-lua-5.4.9-2335b6c5-${{ runner.os }}-${{ runner.arch }}-ubuntu-latest
+      - run: ci/build-reference.sh .reference
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reference-lua
+          path: .reference/lua
+          retention-days: 14
+
   # The single aggregate check required by branch protection (ADR/ticket 18).
   # Later tickets add their jobs to `needs`; nightly and benchmark jobs never block.
   ci-gate:
     if: always()
-    needs: [build, test]
+    needs: [build, test, ratchet, reference, fast-checks]
     runs-on: ubuntu-latest
     steps:
       - name: Require every upstream job to succeed
