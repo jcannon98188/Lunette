@@ -13,6 +13,7 @@ internal static class Verify
         {
             [AttributeUsage(AttributeTargets.All)] internal sealed class LuaHotPathAttribute : Attribute { }
             [AttributeUsage(AttributeTargets.All)] internal sealed class LuaColdThrowAttribute : Attribute { }
+            [AttributeUsage(AttributeTargets.All)] internal sealed class LuaInterpreterLoopAttribute : Attribute { }
             [AttributeUsage(AttributeTargets.All)] internal sealed class LuaStringPathAttribute : Attribute { }
         }
 

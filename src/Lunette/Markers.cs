@@ -1,6 +1,6 @@
 namespace Lunette;
 
-// Markers for the custom analyzers (Lunette.Analyzers, rules LD001-LD005). The analyzers match them by simple name.
+// Markers for the custom analyzers (Lunette.Analyzers, rules LD001-LD006). The analyzers match them by simple name.
 
 /// <summary>Code on the interpreter's hot path: no allocation (LD001), no throw (LD002).</summary>
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct | AttributeTargets.Method | AttributeTargets.Constructor | AttributeTargets.Property)]

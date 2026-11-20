@@ -76,6 +76,31 @@ public class JitProbeTests
         Assert.Contains("MinOpts", File.ReadAllText(run.DisasmFile));
     }
 
+    /// <summary>The machine-code listing of one generic instantiation of the loop, cut out of the JitDisasm output.</summary>
+    private static string Listing(string disasm, string typeArgument)
+    {
+        string header = $"Assembly listing for method Lunette.Vm.Interpreter:RunLoop[Lunette.Vm.{typeArgument}]";
+        int start = disasm.IndexOf(header, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"no JIT listing for RunLoop<{typeArgument}>; the probe did not run that loop");
+        int next = disasm.IndexOf("; Assembly listing for method", start + header.Length, StringComparison.Ordinal);
+        return next < 0 ? disasm[start..] : disasm[start..next];
+    }
+
+    [Fact]
+    public void Fast_loop_variant_contains_no_hook_checks_while_the_traced_variant_does()
+    {
+        AllocationTests.RequireOptimized();
+        if (Optimizer.Disabled) return;
+        // LUNETTE_PROBE_TRACED makes the probe also run under debug.sethook, so both instantiations get jitted.
+        ProbeRun run = RunProbe(LoopNames(), ("LUNETTE_PROBE_TRACED", "1"));
+        string disasm = File.ReadAllText(run.DisasmFile);
+        var hookCall = new Regex(@"\bcall\s+\[Lunette\.Vm\.Interpreter:(Trace\w+|FireHook)\(");
+
+        // The traced loop must show the pattern, or the fast-loop check below could never fail.
+        Assert.Matches(hookCall, Listing(disasm, "TracedLoop"));
+        Assert.DoesNotMatch(hookCall, Listing(disasm, "FastLoop"));
+    }
+
     [Fact]
     public void Interpreter_loop_has_no_new_unreinlined_helper_calls()
     {

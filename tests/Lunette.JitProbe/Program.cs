@@ -19,6 +19,18 @@ state.DoString("""
     return s
     """);
 
+// LUNETTE_PROBE_TRACED: also run under a hook so the traced instantiation of the loop gets jitted (the hook-check test).
+if (Environment.GetEnvironmentVariable("LUNETTE_PROBE_TRACED") == "1")
+{
+    state.DoString("""
+        local n = 0
+        debug.sethook(function() n = n + 1 end, "l")
+        local function f(x) return x + 1 end
+        for i = 1, 1000 do f(i) end
+        debug.sethook()
+        """);
+}
+
 // EventListener delivery from the runtime is asynchronous; give it time to drain.
 Thread.Sleep(1500);
 foreach (string line in listener.Lines) Console.WriteLine(line);
