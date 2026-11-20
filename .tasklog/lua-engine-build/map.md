@@ -68,6 +68,7 @@ A pure-managed C# (.NET 11) Lua 5.4 engine and minimal CLI, built to the lua-eng
 - [Perf: VM runtime and string error raising 2.5-8x PUC (message building)](tickets/53-perf-vm-runtime-and-string-error-raising-2-5-8x-puc-message.md): Error raising without .NET throws (202df0d)
 - [Perf: warm-up and GC pause tail (first-chunk JIT cost, gen0 p99)](tickets/54-perf-warm-up-and-gc-pause-tail-first-chunk-jit-cost-gen0-p99.md): Non-concurrent GC for CLI, AOT recommendation (de7fc97)
 - [Perf: metamethod function calls (__index chains, __newindex, __call) 3-5.7x PUC](tickets/52-perf-metamethod-function-calls-index-chains-newindex-call-3.md): Metamethod call fast paths (7fda119)
+- [Perf: varargs/select, closure iterators and builtin per-call overhead (unpack, tonumber, string.rep/sub/byte)](tickets/55-perf-varargs-select-closure-iterators-and-builtin-per-call-o.md): Vararg and builtin fast paths (915d09a)
 
 ## Not yet specified
 
