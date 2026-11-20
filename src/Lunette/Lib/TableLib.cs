@@ -98,7 +98,7 @@ internal static class TableLib
         LuaValue removed = Geti(state, t, pos);
         for (; pos < size; pos++) Seti(state, t, pos, Geti(state, t, pos + 1));
         Seti(state, t, pos, default);
-        return [removed];
+        return Rets.One(removed);
     }
 
     private static LuaValue[] Concat(LuaState state, ReadOnlySpan<LuaValue> args)
@@ -117,7 +117,7 @@ internal static class TableLib
             if (i != last) b.Append(sep.Bytes);
             if (i == long.MaxValue) break;
         }
-        return [LuaValue.FromString(b.ToLuaString(state.Strings))];
+        return Rets.One(LuaValue.FromString(b.ToLuaString(state.Strings)));
     }
 
     private static LuaValue[] Unpack(LuaState state, ReadOnlySpan<LuaValue> args)
@@ -138,7 +138,7 @@ internal static class TableLib
         var t = new LuaTable(args.Length, 1);
         for (int i = 0; i < args.Length; i++) t.SetInt(i + 1, args[i]);
         t.Set(LuaValue.FromString(state.Strings.FromUtf16("n")), LuaValue.FromInteger(args.Length));
-        return [LuaValue.FromTable(t)];
+        return Rets.One(LuaValue.FromTable(t));
     }
 
     private static LuaValue[] Move(LuaState state, ReadOnlySpan<LuaValue> args)
@@ -159,7 +159,7 @@ internal static class TableLib
             else
                 for (long i = n - 1; i >= 0; i--) Seti(state, a2, t + i, Geti(state, a1, f + i));
         }
-        return [a2];
+        return Rets.One(a2);
     }
 
     // ---- sort: the quicksort of ltablib.c, so "invalid order function" is detected the same way ----

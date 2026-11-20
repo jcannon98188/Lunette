@@ -80,6 +80,15 @@ public class AllocationTests
         { "string-format-d", "local fmt = string.format function work(n) for i = 1, n do local x = fmt('%d', 123456) end end" },
         { "string-rep", "local rep = string.rep function work(n) for i = 1, n do local x = rep('ab', 30) end end" },
         { "string-gsub", "local s = string.rep('abc', 20) function work(n) for i = 1, n do local x = s:gsub('b', 'x') end end" },
+        { "string-byte", "local s = string.rep('abcdef', 20) function work(n) local t = 0 for i = 1, n do t = t + s:byte(i % 100 + 1) end return t end" },
+        { "string-len", "local s = string.rep('abcdef', 20) function work(n) local t = 0 for i = 1, n do t = t + #s + s:len() end return t end" },
+        { "string-concat", "local a, c = string.rep('a', 20), 100000 function work(n) for i = 1, n do c = c + 1 local x = a .. c end end" },
+        { "math-builtins", "local sqrt, floor, abs, max = math.sqrt, math.floor, math.abs, math.max function work(n) local f = 0.5 for i = 1, n do f = f + sqrt(i) * 0.5 - floor(f / 3) + abs(-i) + max(i, 3) end return f end" },
+        { "pairs-iteration", "local t = {1, 2, 3, 4, 5, 6, 7, 8, a = 1, b = 2} function work(n) local s = 0 for i = 1, n do for _, v in pairs(t) do s = s + v end end return s end" },
+        { "ipairs-iteration", "local t = {1, 2, 3, 4, 5, 6, 7, 8} function work(n) local s = 0 for i = 1, n do for _, v in ipairs(t) do s = s + v end end return s end" },
+        { "select-varargs", "local function f(...) return select('#', ...) + (select(2, ...)) end function work(n) local s = 0 for i = 1, n do s = s + f(i, 2, 3) end return s end" },
+        { "metamethod-arith", "local mt = {} mt.__add = function(a, b) return 1 end local a, b = setmetatable({}, mt), setmetatable({}, mt) function work(n) local s = 0 for i = 1, n do s = s + (a + b) end return s end" },
+        { "coroutine-resume-yield", "local co = coroutine.wrap(function() local i = 0 while true do i = i + 1 coroutine.yield(i) end end) function work(n) local s = 0 for i = 1, n do s = s + co() end return s end" },
     };
 
     [Theory]

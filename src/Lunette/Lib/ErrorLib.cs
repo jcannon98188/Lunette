@@ -74,7 +74,7 @@ internal static class ErrorLib
             co.Depth = depth;
             co.Close(level);
             co.CallTop = level;
-            return [LuaValue.FromBoolean(false), value];
+            return Rets.Two(LuaValue.FromBoolean(false), value);
         }
     }
 }

@@ -37,7 +37,7 @@ internal static class StringLib
         state.StringMetatable = meta;
     }
 
-    private static LuaValue[] One(LuaValue v) => [v];
+    private static LuaValue[] One(LuaValue v) => Rets.One(v);
 
     private static LuaValue Str(LuaState state, ReadOnlySpan<byte> bytes) => LuaValue.FromString(state.Strings.Intern(bytes));
 
@@ -122,6 +122,7 @@ internal static class StringLib
         long start = PosRelatI(pi, l);
         long end = GetEndPos(OptInteger("byte", args, 2, pi), l);
         if (start > end) return [];
+        if (start == end) return One(LuaValue.FromInteger(s[(int)start - 1]));
         if (end - start >= int.MaxValue) throw new LuaException("string slice too long");
         var res = new LuaValue[end - start + 1];
         for (long i = start; i <= end; i++) res[i - start] = LuaValue.FromInteger(s[(int)i - 1]);
@@ -397,13 +398,13 @@ internal static class StringLib
         LuaString p = CheckString(state, fn, args, 1);
         long ls = s.Length;
         long init = PosRelatI(OptInteger(fn, args, 2, 1), ls) - 1;
-        if (init > ls) return [default];
+        if (init > ls) return Rets.One(default);
         ReadOnlySpan<byte> src = s.Bytes, pat = p.Bytes;
         if (find && ((args.Length > 3 && !args[3].IsFalsy) || NoSpecials(pat)))
         {
             int idx = src[(int)init..].IndexOf(pat);
-            if (idx < 0) return [default];
-            return [LuaValue.FromInteger(init + idx + 1), LuaValue.FromInteger(init + idx + pat.Length)];
+            if (idx < 0) return Rets.One(default);
+            return Rets.Two(LuaValue.FromInteger(init + idx + 1), LuaValue.FromInteger(init + idx + pat.Length));
         }
         Span<int> capStart = stackalloc int[MatchState.MaxCaptures];
         Span<int> capLen = stackalloc int[MatchState.MaxCaptures];
@@ -431,7 +432,7 @@ internal static class StringLib
                 return caps;
             }
         } while (s1++ < src.Length && !anchor);
-        return [default];
+        return Rets.One(default);
     }
 
     private sealed class GMatchState(LuaString s, LuaString p, int pos)
@@ -469,7 +470,7 @@ internal static class StringLib
                 }
             }
             gm.Pos = src.Length + 1;
-            return [default];
+            return Rets.One(default);
         })));
     }
 
@@ -510,7 +511,7 @@ internal static class StringLib
                 if (anchor) break;
             }
             if (pos < src.Length) b.Append(src[pos..]);
-            return [!changed ? LuaValue.FromString(s) : LuaValue.FromString(b.ToLuaString(state.Strings)), LuaValue.FromInteger(n)];
+            return Rets.Two(!changed ? LuaValue.FromString(s) : LuaValue.FromString(b.ToLuaString(state.Strings)), LuaValue.FromInteger(n));
         }
         finally
         {

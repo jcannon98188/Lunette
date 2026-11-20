@@ -783,12 +783,14 @@ internal static partial class Interpreter
         {
             co.EnsureStack(fa + n, proto, pc);
             res?.CopyTo(co.Stack, fa);
+            Rets.Release(res);
             return fa + n;
         }
         var r = co.Stack;
         int c = Math.Min(n, wanted);
         for (int j = 0; j < c; j++) r[fa + j] = res![j];
         for (int j = c; j < wanted; j++) r[fa + j] = default;
+        Rets.Release(res);
         return fa + wanted;
     }
 

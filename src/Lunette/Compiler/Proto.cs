@@ -54,7 +54,11 @@ internal enum OpCode : byte
 /// <summary>One 32-bit instruction: op(8) A(8) B(8) C(8); Bx overlays B and C as 16 bits; Ax is the upper 24 bits.</summary>
 internal readonly record struct Instruction(uint Raw)
 {
-    public OpCode Op => (OpCode)(Raw & 0xFF);
+    public OpCode Op
+    {
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+        get => (OpCode)(Raw & 0xFF);
+    }
     public int A => (int)((Raw >> 8) & 0xFF);
     public int B => (int)((Raw >> 16) & 0xFF);
     public int C => (int)((Raw >> 24) & 0xFF);
