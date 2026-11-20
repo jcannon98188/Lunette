@@ -73,6 +73,64 @@ internal static class Arith
         throw Fail(a, true, p, pc);
     }
 
+    /// <summary>
+    /// The number-only cases of binary arithmetic that the dispatch loop's inline paths leave out (mixed integer/float operands, IDiv, Mod, Pow and the bitwise
+    /// operators on integers): stores the result in <paramref name="dst"/> and returns true. Returns false for anything that can fail or needs a metamethod
+    /// (non-numbers, a zero or negative integer divisor, floats in a bitwise operator), which takes the general path.
+    /// </summary>
+    public static bool TryNumeric(OpCode op, ref LuaValue dst, in LuaValue x, in LuaValue y)
+    {
+        bool xi = x.IsInteger, yi = y.IsInteger;
+        if (!(xi || x.IsFloat) || !(yi || y.IsFloat)) return false;
+        OpCode b = Meta.BaseArith(op);
+        if (b >= OpCode.BAnd)
+        {
+            if (!(xi && yi)) return false;
+            long a = x.AsInteger, c = y.AsInteger;
+            long res = b switch
+            {
+                OpCode.BAnd => a & c,
+                OpCode.BOr => a | c,
+                OpCode.BXor => a ^ c,
+                OpCode.Shl => LuaNumber.ShiftLeft(a, c),
+                _ => LuaNumber.ShiftLeft(a, unchecked(-c)),
+            };
+            Lunette.Unsafe.Regs.SetInteger(ref dst, res);
+            return true;
+        }
+        if (xi && yi)
+        {
+            long a = x.AsInteger, c = y.AsInteger;
+            switch (b)
+            {
+                case OpCode.Add: Lunette.Unsafe.Regs.SetInteger(ref dst, unchecked(a + c)); return true;
+                case OpCode.Sub: Lunette.Unsafe.Regs.SetInteger(ref dst, unchecked(a - c)); return true;
+                case OpCode.Mul: Lunette.Unsafe.Regs.SetInteger(ref dst, unchecked(a * c)); return true;
+                case OpCode.IDiv:
+                case OpCode.Mod:
+                    if (c <= 0) return false;
+                    long q = a / c;
+                    bool adjust = a < 0 && q * c != a;
+                    Lunette.Unsafe.Regs.SetInteger(ref dst, b == OpCode.IDiv ? (adjust ? q - 1 : q) : a - q * c + (adjust ? c : 0));
+                    return true;
+            }
+        }
+        double fa = xi ? x.AsInteger : x.AsFloat, fb = yi ? y.AsInteger : y.AsFloat;
+        double fr;
+        switch (b)
+        {
+            case OpCode.Add: fr = fa + fb; break;
+            case OpCode.Sub: fr = fa - fb; break;
+            case OpCode.Mul: fr = fa * fb; break;
+            case OpCode.Div: fr = fa / fb; break;
+            case OpCode.IDiv: fr = Math.Floor(fa / fb); break;
+            case OpCode.Mod: fr = FloatMod(fa, fb); break;
+            default: fr = Math.Pow(fa, fb); break;
+        }
+        Lunette.Unsafe.Regs.SetFloat(ref dst, fr);
+        return true;
+    }
+
     private static string Pos(Proto? p, int pc) => p is null ? "" : Interpreter.Where(p, pc) + " ";
 
     private static long IntFloorDiv(long x, long y, Proto? p, int pc)

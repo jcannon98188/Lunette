@@ -742,6 +742,7 @@ internal static partial class Interpreter
                     throw new InvalidOperationException($"bad opcode {i.Op}");
                 arithslow:
                 {
+                    if (Arith.TryNumeric(i.Op, ref Regs.At(r, bs + i.A), in Regs.At(r, bs + i.B), in (i.Op >= OpCode.AddK && i.Op <= OpCode.PowK ? ref Regs.At(k, i.C) : ref Regs.At(r, bs + i.C)))) break;
                     Frame? nf = ArithSlow(state, co, f, i, bs, pc, proto, k);
                     if (nf is not null)
                     {
@@ -1131,16 +1132,25 @@ internal static partial class Interpreter
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     private static bool ArithFast<TOp>(ref LuaValue ra, ref LuaValue rb, ref LuaValue rc) where TOp : struct, IArith
     {
-        // Two floats or two integers; mixed operands take the out-of-line path (this is inlined at every arithmetic opcode)
+        // Numbers only (this is inlined at every arithmetic opcode): two floats, two integers, or one of each (the integer converts, as PUC does)
         if (rb.IsFloat)
         {
-            if (!rc.IsFloat) return false;
-            Regs.SetFloat(ref ra, TOp.Flt(rb.AsFloat, rc.AsFloat));
+            double y;
+            if (rc.IsFloat) y = rc.AsFloat;
+            else if (rc.IsInteger) y = rc.AsInteger;
+            else return false;
+            Regs.SetFloat(ref ra, TOp.Flt(rb.AsFloat, y));
             return true;
         }
-        if (!rb.IsInteger || !rc.IsInteger) return false;
-        if (TOp.IntResult) Regs.SetInteger(ref ra, TOp.Int(rb.AsInteger, rc.AsInteger));
-        else Regs.SetFloat(ref ra, TOp.Flt(rb.AsInteger, rc.AsInteger));
+        if (!rb.IsInteger) return false;
+        if (rc.IsInteger)
+        {
+            if (TOp.IntResult) Regs.SetInteger(ref ra, TOp.Int(rb.AsInteger, rc.AsInteger));
+            else Regs.SetFloat(ref ra, TOp.Flt(rb.AsInteger, rc.AsInteger));
+            return true;
+        }
+        if (!rc.IsFloat) return false;
+        Regs.SetFloat(ref ra, TOp.Flt(rb.AsInteger, rc.AsFloat));
         return true;
     }
 
