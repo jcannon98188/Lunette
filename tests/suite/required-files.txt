@@ -33,3 +33,4 @@ locals.lua
 gc.lua
 closure.lua
 gengc.lua
+all.lua
