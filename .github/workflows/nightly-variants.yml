@@ -27,7 +27,10 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
-      - run: dotnet test -c Release tests/Lunette.Tests
+      # Same split as ci.yml: the suite files run apart from the other tests (the in-process suite measures the GC heap,
+      # which a concurrently running unrelated test class would disturb).
+      - run: dotnet test -c Release --filter "FullyQualifiedName!~Lunette.Tests.Suite.SuiteTests" tests/Lunette.Tests
+      - run: dotnet test -c Release --no-build --filter "FullyQualifiedName~Lunette.Tests.Suite.SuiteTests" tests/Lunette.Tests
 
   # Newest preview SDK instead of the pinned one: drop global.json so the pin does not apply.
   preview-sdk:
@@ -41,7 +44,10 @@ jobs:
           dotnet-quality: preview
       - run: rm global.json
       - run: dotnet --info
-      - run: dotnet test -c Release tests/Lunette.Tests
+      # Same split as ci.yml: the suite files run apart from the other tests (the in-process suite measures the GC heap,
+      # which a concurrently running unrelated test class would disturb).
+      - run: dotnet test -c Release --filter "FullyQualifiedName!~Lunette.Tests.Suite.SuiteTests" tests/Lunette.Tests
+      - run: dotnet test -c Release --no-build --filter "FullyQualifiedName~Lunette.Tests.Suite.SuiteTests" tests/Lunette.Tests
 
   capacity-1-cache:
     runs-on: ubuntu-latest
@@ -53,7 +59,10 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
-      - run: dotnet test -c Release tests/Lunette.Tests
+      # Same split as ci.yml: the suite files run apart from the other tests (the in-process suite measures the GC heap,
+      # which a concurrently running unrelated test class would disturb).
+      - run: dotnet test -c Release --filter "FullyQualifiedName!~Lunette.Tests.Suite.SuiteTests" tests/Lunette.Tests
+      - run: dotnet test -c Release --no-build --filter "FullyQualifiedName~Lunette.Tests.Suite.SuiteTests" tests/Lunette.Tests
 
   constant-hash:
     runs-on: ubuntu-latest
@@ -65,7 +74,10 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
-      - run: dotnet test -c Release tests/Lunette.Tests
+      # Same split as ci.yml: the suite files run apart from the other tests (the in-process suite measures the GC heap,
+      # which a concurrently running unrelated test class would disturb).
+      - run: dotnet test -c Release --filter "FullyQualifiedName!~Lunette.Tests.Suite.SuiteTests" tests/Lunette.Tests
+      - run: dotnet test -c Release --no-build --filter "FullyQualifiedName~Lunette.Tests.Suite.SuiteTests" tests/Lunette.Tests
 
   # Always runs; opens or updates one tracking issue when any variant failed.
   report:
