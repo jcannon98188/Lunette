@@ -1,0 +1,41 @@
+name: nightly-differential
+
+# Fresh-seed generated programs against the Reference binary (ticket lua-engine-spec/18). Never blocks a merge;
+# a failing seed is minimised by hand and committed to tests/differential/corpus.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fresh-seeds:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      LUNETTE_REQUIRE_REFERENCE: "1"
+      LUNETTE_REFERENCE_LUA: ${{ github.workspace }}/.reference/lua
+      LUNETTE_DIFF_ARTIFACTS: ${{ github.workspace }}/diff-failures
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/cache@v4
+        with:
+          path: .reference
+          key: reference-lua-5.4.9-2335b6c5-${{ runner.os }}-${{ runner.arch }}-ubuntu-latest
+      - run: ci/build-reference.sh .reference
+      - name: Pick today's seed range
+        run: echo "LUNETTE_DIFF_SEEDS=$(( $(date +%s) / 86400 * 1000 )):500" >> "$GITHUB_ENV"
+      - run: dotnet test -c Release --filter "FullyQualifiedName~Lunette.Tests.Differential.GeneratedDifferentialTests" tests/Lunette.Tests
+      - name: Upload failing seeds
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: differential-failing-seeds
+          path: ${{ github.workspace }}/diff-failures
+          if-no-files-found: ignore
+          retention-days: 14
