@@ -177,11 +177,11 @@ public sealed partial class LuaState
 
     /// <inheritdoc cref="Load(string)"/>
     public LuaFunction Load(string source, string chunkName) =>
-        new LuaClosure(LuaCompiler.Compile(source, chunkName, Strings), []);
+        NewMainClosure(LuaCompiler.Compile(source, chunkName, Strings), LuaValue.FromTable(Globals));
 
     /// <summary>Compiles a text chunk given as bytes.</summary>
     public LuaFunction Load(ReadOnlySpan<byte> source, string chunkName) =>
-        new LuaClosure(LuaCompiler.Compile(source.ToArray(), chunkName, Strings), []);
+        NewMainClosure(LuaCompiler.Compile(source.ToArray(), chunkName, Strings), LuaValue.FromTable(Globals));
 
     /// <summary>Calls <paramref name="function"/> and returns all its results.</summary>
     public LuaValue[] Call(LuaFunction function, ReadOnlySpan<LuaValue> args)
@@ -267,10 +267,10 @@ public sealed partial class LuaState
     }
 
     /// <summary>Reads a global variable (nil when unset).</summary>
-    public LuaValue GetGlobal(string name) => Globals.GetValueOrDefault(name);
+    public LuaValue GetGlobal(string name) => Globals.Get(LuaValue.FromString(Strings.FromUtf16(name)));
 
     /// <summary>Sets a global variable.</summary>
-    public void SetGlobal(string name, LuaValue value) => Globals[name] = value;
+    public void SetGlobal(string name, LuaValue value) => Globals.Set(LuaValue.FromString(Strings.FromUtf16(name)), value);
 
     /// <summary>
     /// Associates a metatable with a .NET type: <see cref="CreateUserdata"/> uses it for objects of that type

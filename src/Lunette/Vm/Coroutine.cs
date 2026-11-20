@@ -33,6 +33,8 @@ internal sealed class Frame
     public int VarargCount;
     /// <summary>Non-zero when this Frame is the target of a pcall (1) or xpcall (2): errors below it stop here.</summary>
     public byte PcallKind;
+    /// <summary>How many protected Frames sit at or below this one; PUC's C-stack limit of nested pcalls is emulated with it.</summary>
+    public int PcallLevel;
     /// <summary>Stack index where a protected call puts its status (true/false); its results follow.</summary>
     public int PcallBase;
     /// <summary>The xpcall message handler.</summary>
@@ -173,6 +175,7 @@ internal sealed class Coroutine
         if (Depth == Frames.Length) Array.Resize(ref Frames, Frames.Length * 2);
         Frame f = Frames[Depth++] ??= new Frame();
         f.PcallKind = 0;
+        f.PcallLevel = Depth > 1 ? Frames[Depth - 2]!.PcallLevel : 0;
         f.Cont = Continuation.None;
         f.IsTail = false;
         f.Native = false;

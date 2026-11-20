@@ -13,8 +13,8 @@ internal static class BaseLib
         var next = new BuiltinFunction(Next);
         var ipairsAux = new BuiltinFunction(IpairsAux);
         Add(state, "type", Type);
-        state.Globals["next"] = LuaValue.FromObject(next);
-        Add(state, "pairs", (st, args) => Pairs(st, args, next));
+        state.SetGlobal("next", LuaValue.FromObject(next));
+        state.SetGlobal("pairs", LuaValue.FromObject(new BuiltinFunction((st, args) => Pairs(st, args, next), BuiltinKind.Pairs)));
         Add(state, "ipairs", (_, args) =>
         {
             if (args.Length == 0) throw ArgError(1, "ipairs", "table expected, got no value");
@@ -67,7 +67,7 @@ internal static class BaseLib
     }
 
     private static void Add(LuaState state, string name, BuiltinBody body) =>
-        state.Globals[name] = LuaValue.FromObject(new BuiltinFunction(body));
+        state.SetGlobal(name, LuaValue.FromObject(new BuiltinFunction(body)));
 
     private static LuaValue Arg(ReadOnlySpan<LuaValue> args, int i) => i < args.Length ? args[i] : default;
 
@@ -95,6 +95,7 @@ internal static class BaseLib
         while (i < s.Length && (s[i] == (byte)' ' || (uint)(s[i] - 9) < 5)) i++;
         bool neg = false;
         if (i < s.Length && s[i] == (byte)'-') { neg = true; i++; }
+        else if (i < s.Length && s[i] == (byte)'+') i++;
         if (i >= s.Length || !char.IsAsciiLetterOrDigit((char)s[i])) return [default];
         ulong acc = 0;
         while (i < s.Length && char.IsAsciiLetterOrDigit((char)s[i]))

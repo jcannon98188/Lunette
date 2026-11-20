@@ -370,6 +370,16 @@ public sealed partial class LuaTable
     }
 
     /// <summary>Resizes the array part to <paramref name="newASize"/> slots and the hash part to hold <paramref name="nhSize"/> entries.</summary>
+    /// <summary>Drops every entry and the metatable (used when an aborted state is discarded).</summary>
+    internal void Clear()
+    {
+        _arr = [];
+        _nodes = [];
+        _limit = 0;
+        _lastFree = 0;
+        Metatable = null;
+    }
+
     internal void Resize(int newASize, int nhSize)
     {
         _limit = _arr.Length;

@@ -113,7 +113,7 @@ public class MathLibTests
         Assert.Equal("1", Call("min", I(1), F(3.5), I(2)));
         Assert.Equal("9007199254740993", Call("max", I(9007199254740993), F(9007199254740992.0)));
         var ex = Assert.Throws<LuaException>(() => Call("max"));
-        Assert.Equal("bad argument #1 to 'max' (number expected, got no value)", ex.Message);
+        Assert.Equal("bad argument #1 to 'max' (value expected)", ex.Message);
     }
 
     [Fact]

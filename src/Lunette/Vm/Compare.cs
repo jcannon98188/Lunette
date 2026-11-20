@@ -82,7 +82,7 @@ internal static class Compare
 
     internal static LuaException Error(LuaValue a, LuaValue b, Proto? p, int pc)
     {
-        string t1 = a.TypeName, t2 = b.TypeName;
+        string t1 = Meta.ObjTypeName(a), t2 = Meta.ObjTypeName(b);
         string msg = t1 == t2
             ? $"attempt to compare two {t1} values"
             : $"attempt to compare {t1} with {t2}";

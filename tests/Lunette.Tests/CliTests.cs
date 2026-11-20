@@ -37,9 +37,40 @@ public class CliTests
         {
             var (code, _, e) = Run(path);
             Assert.Equal(1, code);
-            Assert.Contains("attempt to perform 'n//0'", e);
+            Assert.Contains("attempt to divide by zero", e);
         }
         finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void Dash_e_runs_a_statement()
+    {
+        var (code, o, _) = Run("-e", "print('hi')");
+        Assert.Equal(0, code);
+        Assert.Equal("hi\n", o);
+    }
+
+    [Fact]
+    public void Script_arguments_reach_the_arg_table_and_the_vararg()
+    {
+        string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".lua");
+        File.WriteAllText(path, "print(#arg, arg[1], arg[2], ...)\nprint(arg[0] == " + "'" + path.Replace("\\", "\\\\") + "')\n");
+        try
+        {
+            var (code, o, e) = Run(path, "a", "b");
+            Assert.Equal(0, code);
+            Assert.Equal("2\ta\tb\ta\tb\ntrue\n", o);
+            Assert.Equal("", e);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void Dash_l_requires_a_module_before_the_script()
+    {
+        var (code, o, _) = Run("-l", "string", "-e", "print(string ~= nil)");
+        Assert.Equal(0, code);
+        Assert.Equal("true\n", o);
     }
 
     [Fact]

@@ -1,3 +1,16 @@
 # Milestone gate and regression ratchet (ticket 09, decision 7).
 # One suite file per line. Every listed file must pass in CI; the list may only grow.
 # Files not listed here are run and reported but may fail until their tier lands.
+bitwise.lua
+vararg.lua
+tpack.lua
+pm.lua
+utf8.lua
+math.lua
+api.lua
+code.lua
+bwcoercion.lua
+constructs.lua
+goto.lua
+heavy.lua
+big.lua

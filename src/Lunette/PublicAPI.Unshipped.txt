@@ -50,6 +50,8 @@ Lunette.LuaState.Register(string! name, System.Func<double, double>! function) -
 Lunette.LuaState.Register(string! name, System.Func<string!, string!>! function) -> void
 Lunette.LuaState.RegisterMetatable<T>(Lunette.LuaTable! metatable) -> void
 Lunette.LuaState.RequestInterrupt() -> void
+Lunette.LuaState.RunScript(byte[]! source, string! chunkName, System.Collections.Generic.IReadOnlyList<string!>! args) -> void
+Lunette.LuaState.SetCommandLineArgs(System.Collections.Generic.IReadOnlyList<string!>! all, int scriptIndex) -> void
 Lunette.LuaState.SetGlobal(string! name, Lunette.LuaValue value) -> void
 Lunette.LuaState.SetLimits(Lunette.LuaLimits! limits) -> void
 Lunette.LuaTable

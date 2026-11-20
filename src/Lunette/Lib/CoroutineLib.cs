@@ -16,7 +16,7 @@ internal static class CoroutineLib
         Add(t, "isyieldable", IsYieldable);
         Add(t, "running", static (st, _) => [LuaValue.FromObject(st.Running), LuaValue.FromBoolean(st.Running.IsMain)]);
         Add(t, "close", Close);
-        state.Globals["coroutine"] = LuaValue.FromTable(t);
+        state.SetGlobal("coroutine", LuaValue.FromTable(t));
     }
 
     private static void Add(LuaTable t, string name, BuiltinBody body) =>
@@ -30,14 +30,21 @@ internal static class CoroutineLib
         throw LuaErrors.TypeError(args, 0, fn, "coroutine");
     }
 
-    private static Coroutine NewCoroutine(ReadOnlySpan<LuaValue> args, string fn)
+    private static Coroutine NewCoroutine(LuaState state, ReadOnlySpan<LuaValue> args, string fn)
     {
         if (args.Length == 0 || !args[0].IsFunction) throw LuaErrors.TypeError(args, 0, fn, "function");
-        return new Coroutine { Body = args[0] };
+        LuaValue body = args[0];
+        if (body.Ref is BuiltinFunction)
+        {
+            // A host function as the body runs through a Lua trampoline so that it can yield across pcall and friends.
+            LuaClosure tramp = state.Load("local f = ...; return function(...) return f(...) end"u8.ToArray(), "=(coroutine)", LuaValue.FromTable(state.Globals));
+            body = Interpreter.CallValues(state, LuaValue.FromObject(tramp), [body])[0];
+        }
+        return new Coroutine { Body = body };
     }
 
     private static LuaValue[] Create(LuaState state, ReadOnlySpan<LuaValue> args) =>
-        [LuaValue.FromObject(NewCoroutine(args, "create"))];
+        [LuaValue.FromObject(NewCoroutine(state, args, "create"))];
 
     private static LuaValue[] Resume(LuaState state, ReadOnlySpan<LuaValue> args)
     {
@@ -73,7 +80,7 @@ internal static class CoroutineLib
 
     private static LuaValue[] Wrap(LuaState state, ReadOnlySpan<LuaValue> args)
     {
-        Coroutine co = NewCoroutine(args, "wrap");
+        Coroutine co = NewCoroutine(state, args, "wrap");
         return [LuaValue.FromObject(new BuiltinFunction((st, a) =>
         {
             if (Interpreter.Resume(st, co, a, out LuaValue[] res)) return res;

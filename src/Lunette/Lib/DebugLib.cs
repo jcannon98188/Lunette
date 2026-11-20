@@ -41,7 +41,7 @@ internal static class DebugLib
             LibArgs.CheckInteger("setcstacklimit", args, 0);
             return [LuaValue.FromInteger(200)];
         });
-        state.Globals["debug"] = LuaValue.FromTable(t);
+        state.SetGlobal("debug", LuaValue.FromTable(t));
     }
 
     private static void Add(LuaTable t, string name, BuiltinBody body) =>
@@ -74,8 +74,8 @@ internal static class DebugLib
 
     private static LuaValue Lookup(LuaState state, string lib, string name)
     {
-        if (lib.Length == 0) return state.Globals.GetValueOrDefault(name);
-        return state.Globals.GetValueOrDefault(lib).Ref is LuaTable t ? t.Get(Str(name)) : default;
+        if (lib.Length == 0) return state.GetGlobal(name);
+        return state.GetGlobal(lib).Ref is LuaTable t ? t.Get(Str(name)) : default;
     }
 
     internal static List<Level> Levels(LuaState state, Coroutine co, LuaValue self, bool includeSelf)
@@ -328,11 +328,15 @@ internal static class DebugLib
     /// <summary>"print" or "string.rep" when <paramref name="fn"/> is a global or a library function (lauxlib pushglobalfuncname).</summary>
     private static string? GlobalFuncName(LuaState state, LuaValue fn)
     {
-        foreach (var (k, v) in state.Globals)
-            if (ReferenceEquals(v.Ref, fn.Ref) && fn.Ref is not null) return k;
+        LuaValue gkey = default;
+        while (state.Globals.Next(gkey, out LuaValue gk, out LuaValue gv))
+        {
+            if (ReferenceEquals(gv.Ref, fn.Ref) && fn.Ref is not null && gk.Ref is byte[]) return gk.ToString();
+            gkey = gk;
+        }
         foreach (string lib in LibNames)
         {
-            if (!state.Globals.TryGetValue(lib, out LuaValue lv) || lv.Ref is not LuaTable t) continue;
+            if (state.GetGlobal(lib).Ref is not LuaTable t) continue;
             LuaValue key = default;
             while (t.Next(key, out LuaValue k, out LuaValue v))
             {
@@ -570,7 +574,7 @@ internal static class DebugLib
             try
             {
                 Proto proto = LuaCompiler.Compile(line, "=(debug command)", state.Strings);
-                Interpreter.CallValues(state, LuaValue.FromObject(new LuaClosure(proto, [])), []);
+                Interpreter.CallValues(state, LuaValue.FromObject(state.NewMainClosure(proto, LuaValue.FromTable(state.Globals))), []);
             }
             catch (LuaException e)
             {

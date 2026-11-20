@@ -49,8 +49,7 @@ internal static class StringConv
     public static bool TryParseNumber(ReadOnlySpan<byte> text, out LuaValue result)
     {
         result = default;
-        if (text.Length > 200) return false;
-        Span<char> chars = stackalloc char[text.Length];
+        Span<char> chars = text.Length <= 256 ? stackalloc char[text.Length] : new char[text.Length];
         for (int i = 0; i < text.Length; i++)
         {
             if (text[i] == 0) return false;

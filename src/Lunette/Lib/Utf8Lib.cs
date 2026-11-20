@@ -29,7 +29,7 @@ internal static class Utf8Lib
         });
         ReadOnlySpan<byte> pattern = [(byte)'[', 0, (byte)'-', 0x7F, 0xC2, (byte)'-', 0xFD, (byte)']', (byte)'[', 0x80, (byte)'-', 0xBF, (byte)']', (byte)'*'];
         lib.Set(LuaValue.FromString(state.Strings.FromUtf16("charpattern")), LuaValue.FromString(state.Strings.Intern(pattern)));
-        state.Globals["utf8"] = LuaValue.FromTable(lib);
+        state.SetGlobal("utf8", LuaValue.FromTable(lib));
     }
 
     private static bool IsCont(int c) => (c & 0xC0) == 0x80;
@@ -155,7 +155,7 @@ internal static class Utf8Lib
         ReadOnlySpan<byte> s = str.Bytes;
         long len = s.Length;
         long n = CheckInteger("offset", args, 1);
-        long posi = n > 0 ? 1 : len + 1;
+        long posi = n >= 0 ? 1 : len + 1;
         posi = PosRelat(OptInteger("offset", args, 2, posi), len);
         if (!(1 <= posi && --posi <= len)) throw ArgError("offset", 3, "position out of bounds");
         if (n == 0)

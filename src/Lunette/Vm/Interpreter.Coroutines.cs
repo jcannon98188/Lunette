@@ -158,7 +158,10 @@ internal static partial class Interpreter
         if (co.Tbc.Count > 0)
         {
             Coroutine prev = state.Running;
+            CoStatus before = co.Status;
             state.Running = co;
+            prev.Status = CoStatus.Normal;
+            co.Status = CoStatus.Running;
             try
             {
                 err = CloseTbcOnError(state, co, 0, err);
@@ -166,6 +169,8 @@ internal static partial class Interpreter
             finally
             {
                 state.Running = prev;
+                prev.Status = CoStatus.Running;
+                co.Status = before;
             }
         }
         co.Close(0);

@@ -125,7 +125,7 @@ public class StringLibTests
     [InlineData("""string.unpack("i4", "ab")""", "data string too short")]
     [InlineData("""string.pack("i17", 1)""", "integral size (17) out of limits [1,16]")]
     [InlineData("""string.pack("q", 1)""", "invalid format option 'q'")]
-    [InlineData("""string.packsize("s")""", "variable-size format in packsize")]
+    [InlineData("""string.packsize("s")""", "variable-length format")]
     public void Pack_errors(string src, string fragment) =>
         Assert.Contains(fragment, Assert.Throws<LuaException>(() => Run(src)).Message);
 

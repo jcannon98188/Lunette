@@ -10,11 +10,19 @@ internal struct MetaCall
     /// <summary>When set, the operation already produced <see cref="Direct"/> (e.g. string coercion) and no call is needed.</summary>
     public bool IsDirect;
     public LuaValue Direct;
+    /// <summary>The event this call serves, for the "(metamethod 'x')" part of a not-callable error.</summary>
+    public TagMethod Ev;
+    public bool HasEv;
 
     public static MetaCall Done(LuaValue v) => new MetaCall { IsDirect = true, Direct = v };
 
-    public MetaCall(LuaValue fn, LuaValue a, LuaValue b, LuaValue c, int n)
+    public MetaCall(LuaValue fn, LuaValue a, LuaValue b, LuaValue c, int n, TagMethod? ev = null)
     {
+        if (ev is { } e)
+        {
+            Ev = e;
+            HasEv = true;
+        }
         Fn = fn;
         A = a;
         B = b;
@@ -52,7 +60,7 @@ internal static class Meta
             var i = p.Code[pc];
             info = VarInfo.Describe(p, pc, i.Op == OpCode.SetTable ? i.A : i.B);
         }
-        return new LuaException($"{At(p, pc)}attempt to index a {v.TypeName} value{info}");
+        return new LuaException($"{At(p, pc)}attempt to index a {ObjTypeName(v)} value{info}");
     }
 
     // ---- indexing ----
@@ -62,7 +70,27 @@ internal static class Meta
         PrepareIndex(state, t, key, p, pc, out LuaValue v, out MetaCall mc) ? CallMeta(state, in mc) : v;
 
     /// <summary>Calls a prepared metamethod on a nested loop and returns its first result.</summary>
-    public static LuaValue CallMeta(LuaState state, in MetaCall mc) => mc.IsDirect ? mc.Direct : Interpreter.Call1(state, mc.Fn, mc.A, mc.B, mc.C, mc.N);
+    public static LuaValue CallMeta(LuaState state, in MetaCall mc)
+    {
+        if (mc.IsDirect) return mc.Direct;
+        CheckCallable(in mc);
+        return Interpreter.Call1(state, mc.Fn, mc.A, mc.B, mc.C, mc.N);
+    }
+
+    /// <summary>Raises "attempt to call a X value (metamethod 'ev')" when a metamethod is neither a function nor callable.</summary>
+    public static void CheckCallable(in MetaCall mc)
+    {
+        if (!mc.HasEv || mc.Fn.Ref is LuaFunction) return;
+        if (mc.Fn.Ref is LuaTable { Metatable: { } mt } && !mt.GetTagMethod(TagMethod.Call).IsNil) return;
+        throw LuaErrors.Error($"attempt to call a {ObjTypeName(mc.Fn)} value (metamethod '{TagMethods.Name(mc.Ev)[2..]}')");
+    }
+
+    /// <summary>The type name used in error messages: a table's string __name when it has one, else the basic type.</summary>
+    public static string ObjTypeName(in LuaValue v)
+    {
+        if (v.Ref is LuaTable { Metatable: { } mt } && mt.Get(NameKey).Ref is byte[] n) return new LuaString(n).ToString();
+        return v.TypeName;
+    }
 
     /// <summary>Resolves <c>t[key]</c>: returns false with the value, or true with the __index function to call.</summary>
     public static bool PrepareIndex(LuaState state, LuaValue t, LuaValue key, Proto? p, int pc, out LuaValue result, out MetaCall mc)
@@ -92,7 +120,7 @@ internal static class Meta
             }
             if (tm.IsFunction)
             {
-                mc = new MetaCall(tm, t, key, default, 2);
+                mc = new MetaCall(tm, t, key, default, 2, TagMethod.Index);
                 return true;
             }
             t = tm;
@@ -137,7 +165,7 @@ internal static class Meta
             }
             if (tm.IsFunction)
             {
-                mc = new MetaCall(tm, t, key, value, 3);
+                mc = new MetaCall(tm, t, key, value, 3, TagMethod.NewIndex);
                 return true;
             }
             t = tm;
@@ -181,9 +209,9 @@ internal static class Meta
         {
             bool left = !a.IsNumber;
             LuaValue bad = left ? a : b;
-            throw new LuaException($"{At(p, pc)}attempt to perform {OperationName(ev)} on a {bad.TypeName} value{VarInfo.DescribeOperand(p, pc, left)}");
+            throw new LuaException($"{At(p, pc)}attempt to perform {OperationName(ev)} on a {ObjTypeName(bad)} value{VarInfo.DescribeOperand(p, pc, left)}");
         }
-        return new MetaCall(tm, a, b, default, 2);
+        return new MetaCall(tm, a, b, default, 2, ev);
     }
 
     private static OpCode OpFor(TagMethod ev) => ev switch
@@ -210,8 +238,8 @@ internal static class Meta
         if (ev == TagMethod.Unm && StringConv.TryToNumber(a, out LuaValue n))
             return MetaCall.Done(Vm.Arith.Negate(n, p!, pc));
         LuaValue tm = GetTagMethod(state, a, ev);
-        if (tm.IsNil) throw new LuaException($"{At(p, pc)}attempt to perform {OperationName(ev)} on a {a.TypeName} value{VarInfo.DescribeOperand(p, pc, true)}");
-        return new MetaCall(tm, a, a, default, 2);
+        if (tm.IsNil) throw new LuaException($"{At(p, pc)}attempt to perform {OperationName(ev)} on a {ObjTypeName(a)} value{VarInfo.DescribeOperand(p, pc, true)}");
+        return new MetaCall(tm, a, a, default, 2, ev);
     }
 
     public static LuaValue Len(LuaState state, LuaValue v, Proto? p, int pc) =>
@@ -230,7 +258,7 @@ internal static class Meta
                 return false;
             }
             result = default;
-            mc = new MetaCall(tm, v, v, default, 2);
+            mc = new MetaCall(tm, v, v, default, 2, TagMethod.Len);
             return true;
         }
         if (v.Ref is byte[] s)
@@ -239,7 +267,7 @@ internal static class Meta
             return false;
         }
         result = default;
-        throw new LuaException($"{At(p, pc)}attempt to get length of a {v.TypeName} value{VarInfo.DescribeOperand(p, pc, true)}");
+        throw new LuaException($"{At(p, pc)}attempt to get length of a {ObjTypeName(v)} value{VarInfo.DescribeOperand(p, pc, true)}");
     }
 
     public static bool Equal(LuaState state, LuaValue a, LuaValue b) =>
@@ -254,7 +282,7 @@ internal static class Meta
         LuaValue tm = ta.Metatable is null ? default : ta.Metatable.GetTagMethod(TagMethod.Eq);
         if (tm.IsNil) tm = tb.Metatable is null ? default : tb.Metatable.GetTagMethod(TagMethod.Eq);
         if (tm.IsNil) return false;
-        mc = new MetaCall(tm, a, b, default, 2);
+        mc = new MetaCall(tm, a, b, default, 2, TagMethod.Eq);
         return true;
     }
 
@@ -276,7 +304,7 @@ internal static class Meta
         LuaValue tm = GetTagMethod(state, a, ev);
         if (tm.IsNil) tm = GetTagMethod(state, b, ev);
         if (tm.IsNil) throw Compare.Error(a, b, p, pc);
-        mc = new MetaCall(tm, a, b, default, 2);
+        mc = new MetaCall(tm, a, b, default, 2, ev);
         return true;
     }
 
@@ -290,7 +318,7 @@ internal static class Meta
         if (tm.IsNil)
         {
             LuaValue bad = a.IsString || a.IsNumber ? b : a;
-            throw new LuaException($"{At(p, pc)}attempt to concatenate a {bad.TypeName} value");
+            throw new LuaException($"{At(p, pc)}attempt to concatenate a {ObjTypeName(bad)} value");
         }
         return Interpreter.Call1(state, tm, a, b, default, 2);
     }

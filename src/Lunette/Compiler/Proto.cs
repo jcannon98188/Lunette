@@ -6,8 +6,8 @@ internal enum OpCode : byte
     LoadK,     // R[A] = K[Bx]
     LoadNil,   // R[A .. A+B] = nil
     LoadBool,  // R[A] = (B != 0)
-    GetGlobal, // R[A] = G[Names[Bx]]
-    SetGlobal, // G[Names[Bx]] = R[A]
+    GetGlobal, // R[A] = Upvalues[B][Constants[C]] (B: the _ENV upvalue; C <= 255)
+    SetGlobal, // Upvalues[B][Constants[C]] = R[A]
     GetUpval,  // R[A] = Upval[B]
     SetUpval,  // Upval[B] = R[A]
     Add,       // R[A] = R[B] + R[C]
@@ -48,6 +48,7 @@ internal enum OpCode : byte
     TForLoop,  // generic for at R[A..A+3], loop variables from R[A+4]: if R[A+4] is not nil, R[A+2] = R[A+4] and run the next instruction (a Jmp back), else skip it
     Tbc,       // mark R[A] to be closed (Names[Bx] is the variable's name for the error message); nil and false are ignored
     Extra,     // operand word of the preceding instruction (Ax)
+    LoadKX,    // R[A] = Constants[Ax of the Extra that follows] (constant indexes beyond what LoadK's Bx reaches)
 }
 
 /// <summary>One 32-bit instruction: op(8) A(8) B(8) C(8); Bx overlays B and C as 16 bits; Ax is the upper 24 bits.</summary>

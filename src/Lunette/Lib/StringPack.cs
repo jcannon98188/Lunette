@@ -249,7 +249,7 @@ internal static class StringPack
         while (pos < fmt.Length)
         {
             Kind opt = GetDetails(fn, ref h, total, fmt, ref pos, out int size, out int toAlign);
-            if (opt is Kind.String or Kind.Zstr) throw ArgError(fn, 1, "variable-size format in packsize");
+            if (opt is Kind.String or Kind.Zstr) throw ArgError(fn, 1, "variable-length format");
             size += toAlign;
             if (total > int.MaxValue - size) throw ArgError(fn, 1, "format result too large");
             total += size;

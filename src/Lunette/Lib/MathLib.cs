@@ -34,6 +34,8 @@ internal sealed class MathLib
         Add("acos", static (_, a) => One(Math.Acos(Num("acos", a, 0))));
         Add("atan", static (_, a) => One(Math.Atan2(Num("atan", a, 0), a.Length > 1 && !a[1].IsNil ? Num("atan", a, 1) : 1.0)));
         Add("log", Log);
+        Add("deg", static (_, a) => One(Num("deg", a, 0) * (180.0 / Math.PI)));
+        Add("rad", static (_, a) => One(Num("rad", a, 0) * (Math.PI / 180.0)));
         Add("tointeger", ToInteger);
         Add("ult", static (_, a) => One(LuaValue.FromBoolean((ulong)Int("ult", a, 0) < (ulong)Int("ult", a, 1))));
         Add("max", static (_, a) => MinMax("max", a, true));
@@ -156,11 +158,12 @@ internal sealed class MathLib
             table.Set(LuaValue.FromString(state.Strings.FromUtf16(name)), value);
         table.Set(LuaValue.FromString(state.Strings.FromUtf16("type")),
             LuaValue.FromObject(new BuiltinFunction(MathType)));
-        state.Globals["math"] = LuaValue.FromTable(table);
+        state.SetGlobal("math", LuaValue.FromTable(table));
     }
 
     private static LuaValue[] MinMax(string fn, ReadOnlySpan<LuaValue> a, bool max)
     {
+        if (a.Length == 0) throw ArgError(fn, 0, "value expected");
         LuaValue best = Number(fn, a, 0);
         for (int i = 1; i < a.Length; i++)
         {
