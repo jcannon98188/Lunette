@@ -23,3 +23,4 @@ Acceptance criteria:
 - [ ] Each item above fixed or explicitly documented as an intentional, reason-coded waiver
 - [ ] errors.lua, db.lua and calls.lua suite assertions touching these pass (or carry reason-coded overlays)
 - [ ] Tests for each
+Added from ticket 35: (a) when a builtin is called directly by `pcall`, the reference names it by global path (`'math.random'`), the engine says `'random'`; (b) parser close-matching messages for `)` and `}` (`(to close '(' at line N)`) are not implemented; (c) restore the removed differential probes for (a) in the corpus once fixed.
