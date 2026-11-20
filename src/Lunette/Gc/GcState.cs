@@ -250,6 +250,16 @@ internal sealed class GcState
 
     // ---- close ----
 
+    /// <summary>Forgets every registered finalizer and weak table without running any Lua code (used for an aborted state).</summary>
+    internal void Discard()
+    {
+        _closed = true;
+        while (_pending.TryDequeue(out _)) { }
+        Volatile.Write(ref _pendingCount, 0);
+        _registry.Clear();
+        _weakTables.Clear();
+    }
+
     /// <summary>Runs every remaining <c>__gc</c> in reverse marking order; errors are swallowed.</summary>
     internal void Close()
     {

@@ -13,6 +13,13 @@ public sealed partial class LuaState
     private int _sliceSize = TickSlice;
     private long _budgetLeft = long.MaxValue;
     private long _allocBaseline;
+    private long _runBudget = long.MaxValue;
+    private bool _budgetIsCumulative;
+    private long _cumulativeUsed;
+    private int _runDepth;
+    private bool _disposed;
+    private LuaAbortKind _abortKind;
+    private long _callInstructionLimit;
     private readonly Dictionary<Type, LuaTable> _typeMetatables = new();
 
     /// <summary>Countdown to the next limit poll; decremented on backward jumps and Lua calls.</summary>
@@ -29,6 +36,40 @@ public sealed partial class LuaState
 
     /// <summary>The limits in force.</summary>
     public LuaLimits Limits => _limits;
+
+    /// <summary>
+    /// Overrides <see cref="LuaLimits.InstructionLimit"/> for each following host call (one hook or event invocation); zero
+    /// falls back to the limit. A run that exhausts it aborts the state (<see cref="LuaAbortException"/>).
+    /// </summary>
+    public long CallInstructionLimit
+    {
+        get => _callInstructionLimit;
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(value);
+            _callInstructionLimit = value;
+        }
+    }
+
+    /// <summary>Instructions (backward jumps and Lua calls) spent by completed host calls since the last <see cref="ResetCumulativeBudget"/>.</summary>
+    public long CumulativeInstructionsUsed => _cumulativeUsed;
+
+    /// <summary>Starts a new <see cref="LuaLimits.CumulativeInstructionLimit"/> window (for example at each tick).</summary>
+    public void ResetCumulativeBudget() => _cumulativeUsed = 0;
+
+    /// <summary>
+    /// True once a budget or memory limit aborted a run. The state is then unusable: every later call throws
+    /// <see cref="InvalidOperationException"/>; discard it with <see cref="Dispose"/>.
+    /// </summary>
+    public bool IsAborted { get; private set; }
+
+    /// <summary>Why the state was aborted; meaningful only when <see cref="IsAborted"/>.</summary>
+    public LuaAbortKind AbortKind => _abortKind;
+
+    private void ThrowIfAborted()
+    {
+        if (IsAborted) throw new InvalidOperationException("The Lua state was aborted by a budget or memory limit and must be discarded.");
+    }
 
     /// <summary>Replaces the limits; the budgets restart at the next top-level run.</summary>
     public void SetLimits(LuaLimits limits)
@@ -51,7 +92,10 @@ public sealed partial class LuaState
     /// <summary>Restarts the budgets for a new top-level run.</summary>
     internal void BeginRun()
     {
-        _budgetLeft = _limits.InstructionLimit > 0 ? _limits.InstructionLimit : long.MaxValue;
+        long perCall = _callInstructionLimit > 0 ? _callInstructionLimit : _limits.InstructionLimit > 0 ? _limits.InstructionLimit : long.MaxValue;
+        long cumulativeLeft = _limits.CumulativeInstructionLimit > 0 ? Math.Max(0, _limits.CumulativeInstructionLimit - _cumulativeUsed) : long.MaxValue;
+        _budgetIsCumulative = cumulativeLeft < perCall;
+        _budgetLeft = _runBudget = Math.Min(perCall, cumulativeLeft);
         _sliceSize = (int)Math.Min(TickSlice, _budgetLeft);
         Ticks = _sliceSize;
         if (_limits.MemoryLimitBytes > 0) _allocBaseline = GC.GetAllocatedBytesForCurrentThread();
@@ -64,19 +108,59 @@ public sealed partial class LuaState
     internal void Poll()
     {
         _budgetLeft -= _sliceSize;
-        string? problem = null;
-        if (Volatile.Read(ref _interrupt) != 0) problem = "interrupted";
-        else if (_budgetLeft <= 0) problem = "instruction limit exceeded";
-        else if (_limits.MemoryLimitBytes > 0 && GC.GetAllocatedBytesForCurrentThread() - _allocBaseline > _limits.MemoryLimitBytes)
-            problem = "memory limit exceeded";
-        if (problem is not null)
+        if (_budgetLeft <= 0) Abort(_budgetIsCumulative ? LuaAbortKind.CumulativeInstructionBudget : LuaAbortKind.InstructionBudget);
+        if (_limits.MemoryLimitBytes > 0 && GC.GetAllocatedBytesForCurrentThread() - _allocBaseline > _limits.MemoryLimitBytes)
+            Abort(LuaAbortKind.MemoryLimit);
+        if (Volatile.Read(ref _interrupt) != 0)
         {
             _sliceSize = 1;
             Ticks = 1;
-            throw LuaErrors.Error(problem);
+            throw LuaErrors.Error("interrupted");
         }
         _sliceSize = (int)Math.Min(TickSlice, _budgetLeft);
         Ticks = _sliceSize;
+    }
+
+    /// <summary>Marks the state aborted and throws the uncatchable exception; later polls fail again so nothing can run on.</summary>
+    [System.Diagnostics.CodeAnalysis.DoesNotReturn]
+    private void Abort(LuaAbortKind kind)
+    {
+        IsAborted = true;
+        _abortKind = kind;
+        _sliceSize = 1;
+        Ticks = 1;
+        throw new LuaAbortException(kind, kind switch
+        {
+            LuaAbortKind.InstructionBudget => "instruction budget exceeded",
+            LuaAbortKind.CumulativeInstructionBudget => "cumulative instruction budget exceeded",
+            _ => "memory limit exceeded",
+        });
+    }
+
+    /// <summary>Drops everything an aborted state holds; no Lua code runs.</summary>
+    private void DiscardAborted()
+    {
+        Gc.Discard();
+        Globals.Clear();
+        _typeMetatables.Clear();
+        Main.Reset();
+        Main.CallTop = 0;
+        Array.Clear(Main.Stack);
+        Output = TextWriter.Null;
+    }
+
+    /// <summary>Opens a host-initiated run; only the outermost one resets the stack and restarts the budgets.</summary>
+    private void BeginHostRun()
+    {
+        if (_runDepth++ == 0) EnterHostCall();
+    }
+
+    /// <summary>Closes a host-initiated run and charges what it spent to the cumulative budget.</summary>
+    private void EndRun()
+    {
+        if (--_runDepth != 0) return;
+        long used = _runBudget - _budgetLeft + (_sliceSize - Ticks);
+        if (used > 0) _cumulativeUsed += used;
     }
 
     /// <summary>When the host calls in with nothing running, resets the stack and restarts the budgets.</summary>
@@ -103,8 +187,10 @@ public sealed partial class LuaState
     public LuaValue[] Call(LuaFunction function, ReadOnlySpan<LuaValue> args)
     {
         ArgumentNullException.ThrowIfNull(function);
-        EnterHostCall();
-        return Interpreter.CallValues(this, LuaValue.FromObject(function), args);
+        ThrowIfAborted();
+        BeginHostRun();
+        try { return Interpreter.CallValues(this, LuaValue.FromObject(function), args); }
+        finally { EndRun(); }
     }
 
     /// <summary>Allocation-free call returning the first result (nil when none).</summary>
@@ -125,8 +211,10 @@ public sealed partial class LuaState
     private LuaValue CallFirst(LuaFunction function, LuaValue a, LuaValue b, LuaValue c, LuaValue d, int nargs)
     {
         ArgumentNullException.ThrowIfNull(function);
-        EnterHostCall();
-        return Interpreter.CallFirst(this, LuaValue.FromObject(function), a, b, c, d, nargs);
+        ThrowIfAborted();
+        BeginHostRun();
+        try { return Interpreter.CallFirst(this, LuaValue.FromObject(function), a, b, c, d, nargs); }
+        finally { EndRun(); }
     }
 
     /// <summary>Wraps a host function as a Lua function value.</summary>

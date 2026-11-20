@@ -57,8 +57,21 @@ public sealed partial class LuaState : IDisposable
         GcLib.Register(this);
     }
 
-    /// <summary>Closes the state: runs every remaining <c>__gc</c> in reverse marking order (errors are swallowed).</summary>
-    public void Dispose() => Gc.Close();
+    /// <summary>
+    /// Closes the state: runs every remaining <c>__gc</c> in reverse marking order (errors are swallowed). An aborted state
+    /// (<see cref="IsAborted"/>) runs no Lua code; it just drops every reference it holds. Safe to call repeatedly.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        if (IsAborted) DiscardAborted();
+        else
+        {
+            BeginRun();
+            Gc.Close();
+        }
+    }
 
     public TextWriter Output { get; set; } = Console.Out;
 
@@ -66,13 +79,21 @@ public sealed partial class LuaState : IDisposable
     public void DoString(string source, string chunkName = "=(load)")
     {
         Proto proto = LuaCompiler.Compile(source, chunkName, Strings);
-        Interpreter.Execute(this, proto);
+        RunTopLevel(proto);
     }
 
     /// <summary>Compiles and runs a chunk of Lua source given as raw bytes.</summary>
     public void DoBytes(byte[] source, string chunkName = "=(load)")
     {
         Proto proto = LuaCompiler.Compile(source, chunkName, Strings);
-        Interpreter.Execute(this, proto);
+        RunTopLevel(proto);
+    }
+
+    private void RunTopLevel(Proto proto)
+    {
+        ThrowIfAborted();
+        BeginHostRun();
+        try { Interpreter.Execute(this, proto); }
+        finally { EndRun(); }
     }
 }

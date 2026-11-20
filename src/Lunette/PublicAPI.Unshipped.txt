@@ -112,3 +112,17 @@ static Lunette.LuaValue.implicit operator Lunette.LuaValue(int v) -> Lunette.Lua
 static Lunette.LuaValue.implicit operator Lunette.LuaValue(long v) -> Lunette.LuaValue
 static Lunette.LuaValue.implicit operator Lunette.LuaValue(string? v) -> Lunette.LuaValue
 static Lunette.LuaValue.Nil.get -> Lunette.LuaValue
+Lunette.LuaAbortException
+Lunette.LuaAbortException.Kind.get -> Lunette.LuaAbortKind
+Lunette.LuaAbortKind
+Lunette.LuaAbortKind.CumulativeInstructionBudget = 1 -> Lunette.LuaAbortKind
+Lunette.LuaAbortKind.InstructionBudget = 0 -> Lunette.LuaAbortKind
+Lunette.LuaAbortKind.MemoryLimit = 2 -> Lunette.LuaAbortKind
+Lunette.LuaLimits.CumulativeInstructionLimit.get -> long
+Lunette.LuaLimits.CumulativeInstructionLimit.init -> void
+Lunette.LuaState.AbortKind.get -> Lunette.LuaAbortKind
+Lunette.LuaState.CallInstructionLimit.get -> long
+Lunette.LuaState.CallInstructionLimit.set -> void
+Lunette.LuaState.CumulativeInstructionsUsed.get -> long
+Lunette.LuaState.IsAborted.get -> bool
+Lunette.LuaState.ResetCumulativeBudget() -> void

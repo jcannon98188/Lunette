@@ -2,17 +2,20 @@ using Xunit;
 
 namespace Lunette.Tests;
 
-/// <summary>Best-effort sandbox limits: a script over a limit fails with a Lua error.</summary>
+/// <summary>Best-effort sandbox limits: the stack depth limit and interrupts fail with a Lua error; budget and memory limits abort the state (see BudgetAbortTests).</summary>
 public class SandboxLimitTests
 {
     private static LuaException Fails(LuaState state, string source) =>
         Assert.Throws<LuaException>(() => state.Call(state.Load(source)));
 
+    private static LuaAbortException Aborts(LuaState state, string source) =>
+        Assert.Throws<LuaAbortException>(() => state.Call(state.Load(source)));
+
     [Fact]
     public void An_endless_loop_exceeds_the_instruction_limit()
     {
         var state = new LuaState(new LuaLimits { InstructionLimit = 10_000 });
-        Assert.Contains("instruction limit exceeded", Fails(state, "while true do end").Message);
+        Assert.Contains("instruction budget exceeded", Aborts(state, "while true do end").Message);
     }
 
     [Fact]
@@ -27,19 +30,9 @@ public class SandboxLimitTests
     public void A_for_loop_and_a_tail_call_loop_are_both_counted()
     {
         var state = new LuaState(new LuaLimits { InstructionLimit = 10_000 });
-        Assert.Contains("instruction limit", Fails(state, "for i = 1, math.maxinteger do end").Message);
-        Assert.Contains("instruction limit", Fails(state, "local function f() return f() end return f()").Message);
-    }
-
-    [Fact]
-    public void Pcall_cannot_swallow_an_exhausted_budget_and_carry_on()
-    {
-        var state = new LuaState(new LuaLimits { InstructionLimit = 5_000 });
-        Fails(state, """
-            pcall(function() while true do end end)
-            for i = 1, 10 do end
-            return 'escaped'
-            """);
+        Aborts(state, "for i = 1, math.maxinteger do end");
+        state = new LuaState(new LuaLimits { InstructionLimit = 10_000 });
+        Aborts(state, "local function f() return f() end return f()");
     }
 
     [Fact]
@@ -55,7 +48,7 @@ public class SandboxLimitTests
     public void Allocating_past_the_memory_limit_fails()
     {
         var state = new LuaState(new LuaLimits { MemoryLimitBytes = 1_000_000 });
-        Assert.Contains("memory limit exceeded", Fails(state, "local t = {} for i = 1, 100000000 do t[i] = i end").Message);
+        Assert.Contains("memory limit exceeded", Aborts(state, "local t = {} for i = 1, 100000000 do t[i] = i end").Message);
     }
 
     [Fact]
