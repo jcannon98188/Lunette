@@ -202,16 +202,34 @@ internal static class Meta
         // observably the same unless the other operand has its own metamethod, which still wins below).
         if (ev is >= TagMethod.Add and <= TagMethod.IDiv
             && StringConv.TryToNumber(a, out LuaValue na) && StringConv.TryToNumber(b, out LuaValue nb))
-            return MetaCall.Done(Vm.Arith.Binary(OpFor(ev), na, nb, p!, pc));
+            return MetaCall.Done(Vm.Arith.Binary(OpFor(ev), na, nb, a.IsString || b.IsString ? null : p, pc));
         LuaValue tm = GetTagMethod(state, a, ev);
         if (tm.IsNil) tm = GetTagMethod(state, b, ev);
         if (tm.IsNil)
         {
+            if (ev is >= TagMethod.Add and <= TagMethod.IDiv && (a.IsString || b.IsString)) throw StringArithError(ev, a, b, p, pc);
             bool left = !a.IsNumber;
             LuaValue bad = left ? a : b;
             throw new LuaException($"{At(p, pc)}attempt to perform {OperationName(ev)} on a {ObjTypeName(bad)} value{VarInfo.DescribeOperand(p, pc, left)}");
         }
         return new MetaCall(tm, a, b, default, 2, ev);
+    }
+
+    /// <summary>lstrlib's trymt: the message PUC's string-arithmetic metamethods raise when a string operand does not convert.</summary>
+    private static LuaException StringArithError(TagMethod ev, LuaValue a, LuaValue b, Proto? p, int pc)
+    {
+        string op = ev switch
+        {
+            TagMethod.Add => "add",
+            TagMethod.Sub => "sub",
+            TagMethod.Mul => "mul",
+            TagMethod.Mod => "mod",
+            TagMethod.Pow => "pow",
+            TagMethod.Div => "div",
+            TagMethod.IDiv => "idiv",
+            _ => "unm",
+        };
+        return new LuaException($"{At(p, pc)}attempt to {op} a '{a.TypeName}' with a '{b.TypeName}'");
     }
 
     private static OpCode OpFor(TagMethod ev) => ev switch
@@ -238,7 +256,11 @@ internal static class Meta
         if (ev == TagMethod.Unm && StringConv.TryToNumber(a, out LuaValue n))
             return MetaCall.Done(Vm.Arith.Negate(n, p!, pc));
         LuaValue tm = GetTagMethod(state, a, ev);
-        if (tm.IsNil) throw new LuaException($"{At(p, pc)}attempt to perform {OperationName(ev)} on a {ObjTypeName(a)} value{VarInfo.DescribeOperand(p, pc, true)}");
+        if (tm.IsNil)
+        {
+            if (ev == TagMethod.Unm && a.IsString) throw StringArithError(ev, a, a, p, pc);
+            throw new LuaException($"{At(p, pc)}attempt to perform {OperationName(ev)} on a {ObjTypeName(a)} value{VarInfo.DescribeOperand(p, pc, true)}");
+        }
         return new MetaCall(tm, a, a, default, 2, ev);
     }
 

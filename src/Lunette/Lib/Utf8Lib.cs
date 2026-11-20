@@ -24,7 +24,7 @@ internal static class Utf8Lib
         {
             LuaString s = CheckString(st, "codes", a, 0);
             bool lax = a.Length > 1 && !a[1].IsFalsy;
-            if (s.Length > 0 && IsCont(s[0])) throw new LuaException("bad argument #1 to 'codes' (invalid UTF-8 code)");
+            if (s.Length > 0 && IsCont(s[0])) throw LuaErrors.Error("bad argument #1 to 'codes' (invalid UTF-8 code)");
             return [LuaValue.FromObject(lax ? laxIter : strictIter), LuaValue.FromString(s), LuaValue.FromInteger(0)];
         });
         ReadOnlySpan<byte> pattern = [(byte)'[', 0, (byte)'-', 0x7F, 0xC2, (byte)'-', 0xFD, (byte)']', (byte)'[', 0x80, (byte)'-', 0xBF, (byte)']', (byte)'*'];
@@ -97,13 +97,13 @@ internal static class Utf8Lib
         if (posi < 1) throw ArgError("codepoint", 2, "out of bounds");
         if (pose > len) throw ArgError("codepoint", 3, "out of bounds");
         if (posi > pose) return [];
-        if (pose - posi >= int.MaxValue) throw new LuaException("string slice too long");
+        if (pose - posi >= int.MaxValue) throw LuaErrors.Error("string slice too long");
         var res = new List<LuaValue>();
         int at = (int)posi - 1;
         while (at < pose)
         {
             int next = Decode(s, at, out uint code, !lax);
-            if (next < 0) throw new LuaException("invalid UTF-8 code");
+            if (next < 0) throw LuaErrors.Error("invalid UTF-8 code");
             res.Add(LuaValue.FromInteger(code));
             at = next;
         }
@@ -164,7 +164,7 @@ internal static class Utf8Lib
         }
         else
         {
-            if (Cont(s, posi)) throw new LuaException("initial position is a continuation byte");
+            if (Cont(s, posi)) throw LuaErrors.Error("initial position is a continuation byte");
             if (n < 0)
             {
                 while (n < 0 && posi > 0)
@@ -198,7 +198,7 @@ internal static class Utf8Lib
         }
         if (n >= (ulong)len) return [default];
         int next = Decode(s, (int)n, out uint code, strict);
-        if (next < 0 || (next < s.Length && IsCont(s[next]))) throw new LuaException("invalid UTF-8 code");
+        if (next < 0 || (next < s.Length && IsCont(s[next]))) throw LuaErrors.Error("invalid UTF-8 code");
         return [LuaValue.FromInteger((long)n + 1), LuaValue.FromInteger(code)];
     }
 }

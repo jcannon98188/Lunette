@@ -6,13 +6,13 @@ namespace Lunette;
 internal static class StringErrors
 {
     [DoesNotReturn, LuaColdThrow]
-    public static void Fail(string message) => throw new LuaException(message);
+    public static void Fail(string message) => throw LuaErrors.Error(message);
 
     [DoesNotReturn, LuaColdThrow]
-    public static void InvalidCapture(int index) => throw new LuaException($"invalid capture index %{index + 1}");
+    public static void InvalidCapture(int index) => throw LuaErrors.Error($"invalid capture index %{index + 1}");
 
     [DoesNotReturn, LuaColdThrow]
-    public static void InvalidCaptureIndex(int index, string where) => throw new LuaException($"invalid capture index %{index}{where}");
+    public static void InvalidCaptureIndex(int index, string where) => throw LuaErrors.Error($"invalid capture index %{index}{where}");
 }
 
 /// <summary>

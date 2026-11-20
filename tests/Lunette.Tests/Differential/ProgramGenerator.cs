@@ -23,11 +23,13 @@ public static class ProgramGenerator
     private static readonly string[] IntArgs =
         ["0", "1", "-1", "2", "7", "255", "1000000", "math.maxinteger", "math.mininteger", "3.0", "-3.0", "65"];
 
-    /// <summary>
-    /// Strings are kept out of arithmetic operands: the engine words string-arithmetic errors differently
-    /// (see corpus/known-string-arith-message.lua), so they only reach the tostring/tonumber/format probes.
-    /// </summary>
     private static readonly string[] Texts = ["'10'", "'0x10'", "' 5 '", "'1e2'", "'abc'", "''"];
+
+    /// <summary>Operands for operators: numbers plus strings, so string coercion and its error messages are compared.</summary>
+    private static readonly string[] Operands = [.. Numbers, .. Texts];
+
+    /// <summary>Arguments of the wrong type or range, for builtins whose argument errors must match the reference.</summary>
+    private static readonly string[] BadArgs = ["nil", "{}", "true", "'x'", "-1", "1.5", "math.maxinteger", "256", "99999"];
 
     private static readonly string[] BinaryOps =
         ["+", "-", "*", "/", "//", "%", "^", "&", "|", "~", "<<", ">>", "..", "==", "~=", "<", "<=", ">", ">=", "and", "or"];
@@ -52,23 +54,22 @@ public static class ProgramGenerator
         string Pick(string[] a) => a[rng.Next(a.Length)];
         string Any() => rng.Next(3) == 0 ? Pick(Texts) : Pick(Numbers);
         var sb = new StringBuilder();
-        // NaN prints as -nan or nan depending on how it was produced (corpus/known-nan-sign.lua), so it is normalised here.
-        sb.Append("local function show(...) local t = table.pack(...) for i = 1, t.n do if t[i] ~= t[i] then t[i] = 'NaN' end end print(table.unpack(t, 1, t.n)) end\n");
+        sb.Append("math.randomseed(42)\n"); // math.random is otherwise seeded randomly at startup
+        sb.Append("local function show(...) print(...) end\n");
         sb.Append("local function try(f, ...) local a, n = {...}, select('#', ...) show(pcall(function() local r = table.pack(f(table.unpack(a, 1, n))) return table.unpack(r, 1, r.n) end)) end\n");
         for (int i = 0; i < statements; i++)
         {
             switch (rng.Next(10))
             {
                 case 0 or 1 or 2:
-                    sb.Append($"try(function() return {Pick(Numbers)} {Pick(BinaryOps)} {Pick(Numbers)} end)\n");
+                    sb.Append($"try(function() return {Pick(Operands)} {Pick(BinaryOps)} {Pick(Operands)} end)\n");
                     break;
                 case 3:
-                    sb.Append($"try(function() return {Pick(UnaryOps)}({Pick(Numbers)}) end)\n");
+                    sb.Append($"try(function() return {Pick(UnaryOps)}({Pick(Operands)}) end)\n");
+                    sb.Append($"try(function() return math.fmod({Pick(Numerics)}, {Pick(Numerics)}), {Pick(Numerics)} % {Pick(Numerics)} end)\n");
                     break;
                 case 4:
                     {
-                        // Argument errors from string builtins lack the caller position in the engine
-                        // (corpus/known-builtin-argument-error-position.lua), so generated calls use valid arguments.
                         string format = Pick(Formats);
                         string arg = format == "%c" ? "65" // bytes above 127 would hit the non-ASCII output divergence
                             : format.Contains('s') || format.Contains('q') ? Pick(Texts)
@@ -77,10 +78,18 @@ public static class ProgramGenerator
                               || format.Contains('c') || format.Contains('i') ? Pick(IntArgs)
                             : Pick(Numerics);
                         sb.Append(Call("string.format", $"'{format}', {arg}"));
+                        // %c of a value above 255 prints a high byte, which the CLI mangles until ticket 28 lands.
+                        if (format != "%c") sb.Append(Call("string.format", $"'{format}', {Pick(BadArgs)}"));
+                        sb.Append(Call("string.format", $"'%{rng.Next(0, 120)}{Pick(["d", "s", "f", "x"])}', 1"));
                     }
                     break;
                 case 5:
                     sb.Append(Call("string.find", $"'{Pick(Words)}', '{Pick(Patterns)}'"));
+                    sb.Append(Call("string.find", $"{Pick(BadArgs)}, {Pick(BadArgs)}, {Pick(BadArgs)}"));
+                    sb.Append(Call("string.char", $"{Pick(BadArgs)}"));
+                    sb.Append(Call("string.byte", $"'{Pick(Words)}', {Pick(BadArgs)}"));
+                    sb.Append(Call("math.random", $"{Pick(BadArgs)}, {Pick(BadArgs)}"));
+                    sb.Append(Call("table.concat", $"{{1, 2, {Pick(BadArgs)}}}, ','"));
                     sb.Append(Call("string.gsub", $"'{Pick(Words)}', '{Pick(Patterns)}', '<%0>'"));
                     break;
                 case 6:
@@ -102,6 +111,9 @@ public static class ProgramGenerator
                 default:
                     sb.Append($"try(function() return tostring({Any()}), tonumber({Any()}), math.tointeger({Any()}), math.type({Any()}) end)\n");
                     sb.Append(Call("string.rep", $"'{Pick(Words)}', {rng.Next(-1, 4)}, '-'"));
+                    sb.Append(Call("string.rep", $"{Pick(BadArgs)}, {Pick(BadArgs)}"));
+                    sb.Append(Call("math.floor", $"{Pick(BadArgs)}"));
+                    sb.Append(Call("math.randomseed", $"{Pick(BadArgs)}"));
                     sb.Append(Call("string.sub", $"'{Pick(Words)}', {rng.Next(-6, 7)}, {rng.Next(-6, 7)}"));
                     break;
             }

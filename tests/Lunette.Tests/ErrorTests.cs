@@ -91,8 +91,8 @@ public class ErrorTests
     [Fact]
     public void Library_errors_get_the_callers_position()
     {
-        Assert.Equal("false\t(load):1: bad argument #1 to 'rawlen' (table or string expected)\n", Run("print(pcall(function() rawlen(1) end))"));
-        Assert.Equal("false\tbad argument #1 to 'rawlen' (table or string expected)\n", Run("print(pcall(rawlen, 1))"));
+        Assert.Equal("false\t(load):1: bad argument #1 to 'rawlen' (table or string expected, got number)\n", Run("print(pcall(function() rawlen(1) end))"));
+        Assert.Equal("false\tbad argument #1 to 'rawlen' (table or string expected, got number)\n", Run("print(pcall(rawlen, 1))"));
     }
 
     [Fact]

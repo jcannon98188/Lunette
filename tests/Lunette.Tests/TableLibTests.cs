@@ -43,7 +43,7 @@ public class TableLibTests
     [Fact]
     public void Concat_reports_the_offending_index()
     {
-        Assert.Contains("invalid value (at index 2) in table for 'concat'", Run("print(pcall(table.concat, {'a', {}}))"));
+        Assert.Contains("invalid value (table) at index 2 in table for 'concat'", Run("print(pcall(table.concat, {'a', {}}))"));
     }
 
     [Fact]

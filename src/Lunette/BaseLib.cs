@@ -17,7 +17,7 @@ internal static class BaseLib
         state.SetGlobal("pairs", LuaValue.FromObject(new BuiltinFunction((st, args) => Pairs(st, args, next), BuiltinKind.Pairs)));
         Add(state, "ipairs", (_, args) =>
         {
-            if (args.Length == 0) throw ArgError(1, "ipairs", "table expected, got no value");
+            if (args.Length == 0) throw ArgError(1, "ipairs", "value expected");
             return [LuaValue.FromObject(ipairsAux), args[0], LuaValue.FromInteger(0)];
         });
         Add(state, "rawget", (_, args) => [CheckTable(args, 1, "rawget").Get(Arg(args, 1))]);
@@ -33,7 +33,7 @@ internal static class BaseLib
             LuaValue v = Arg(args, 0);
             if (v.Ref is LuaTable t) return [LuaValue.FromInteger(t.Length())];
             if (v.Ref is byte[] s) return [LuaValue.FromInteger(new LuaString(s).Length)];
-            throw ArgError(1, "rawlen", "table or string expected");
+            throw ArgError(1, "rawlen", $"table or string expected, got {(args.Length > 0 ? v.TypeName : "no value")}");
         });
         Add(state, "setmetatable", SetMetatable);
         Add(state, "getmetatable", (st, args) =>
@@ -125,7 +125,7 @@ internal static class BaseLib
 
     private static LuaValue[] Pairs(LuaState state, ReadOnlySpan<LuaValue> args, BuiltinFunction next)
     {
-        if (args.Length == 0) throw ArgError(1, "pairs", "table expected, got no value");
+        if (args.Length == 0) throw ArgError(1, "pairs", "value expected");
         var mt = Meta.GetMetatable(state, args[0]);
         LuaValue tm = mt is null ? default : mt.Get(PairsKey);
         if (tm.IsNil) return [LuaValue.FromObject(next), args[0], default];

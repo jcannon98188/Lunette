@@ -4,7 +4,8 @@ namespace Lunette.Vm;
 
 internal static class Arith
 {
-    public static LuaValue Binary(OpCode op, LuaValue a, LuaValue b, Proto p, int pc)
+    /// <summary>With a null <paramref name="p"/> (string operands, which PUC converts inside the string metamethod, a C function) errors carry no position.</summary>
+    public static LuaValue Binary(OpCode op, LuaValue a, LuaValue b, Proto? p, int pc)
     {
         if (a.IsInteger && b.IsInteger)
         {
@@ -18,8 +19,8 @@ internal static class Arith
                 case OpCode.Mod: return LuaValue.FromInteger(IntMod(x, y, p, pc));
             }
         }
-        if (!a.TryToNumber(out double fa)) throw Fail(a, true, p, pc);
-        if (!b.TryToNumber(out double fb)) throw Fail(b, false, p, pc);
+        if (!a.TryToNumber(out double fa)) throw Fail(a, true, p!, pc);
+        if (!b.TryToNumber(out double fb)) throw Fail(b, false, p!, pc);
         return LuaValue.FromFloat(op switch
         {
             OpCode.Add => fa + fb,
@@ -72,18 +73,20 @@ internal static class Arith
         throw Fail(a, true, p, pc);
     }
 
-    private static long IntFloorDiv(long x, long y, Proto p, int pc)
+    private static string Pos(Proto? p, int pc) => p is null ? "" : Interpreter.Where(p, pc) + " ";
+
+    private static long IntFloorDiv(long x, long y, Proto? p, int pc)
     {
-        if (y == 0) throw new LuaException($"{Interpreter.Where(p, pc)} attempt to divide by zero");
+        if (y == 0) throw new LuaException($"{Pos(p, pc)}attempt to divide by zero");
         if (y == -1) return unchecked(-x);
         long q = x / y;
         if ((x ^ y) < 0 && x % y != 0) q--;
         return q;
     }
 
-    private static long IntMod(long x, long y, Proto p, int pc)
+    private static long IntMod(long x, long y, Proto? p, int pc)
     {
-        if (y == 0) throw new LuaException($"{Interpreter.Where(p, pc)} attempt to perform 'n%0'");
+        if (y == 0) throw new LuaException($"{Pos(p, pc)}attempt to perform 'n%0'");
         if (y == -1) return 0;
         long m = x % y;
         if (m != 0 && (m ^ y) < 0) m += y;
@@ -92,7 +95,7 @@ internal static class Arith
 
     private static double FloatMod(double a, double b)
     {
-        double m = a % b;
+        double m = LuaNumber.FMod(a, b);
         if (m != 0 && (m < 0) != (b < 0)) m += b;
         return m;
     }
