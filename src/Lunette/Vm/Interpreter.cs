@@ -131,6 +131,8 @@ internal static partial class Interpreter
                 if (!Unwind(state, co, stop, ex.Value))
                 {
                     DebugLib.NoteFault(co, ex);
+                    // The structured trace is captured at the first point the error leaves every protected frame, host-initiated calls included.
+                    ex.StackFrames ??= DebugLib.CaptureFrames(state, co);
                     if (state.NativeDepth == 0)
                     {
                         ex.Traceback ??= DebugLib.CaptureTraceback(state, co);

@@ -288,6 +288,24 @@ internal static class DebugLib
     internal static string CaptureTraceback(LuaState state, Coroutine co) =>
         Format(state, co, Levels(state, co, default, false), null, 0);
 
+    /// <summary>The structured form of <see cref="CaptureTraceback"/>: every level, innermost first, without the skipping of deep stacks.</summary>
+    internal static LuaStackFrame[] CaptureFrames(LuaState state, Coroutine co)
+    {
+        List<Level> lv = Levels(state, co, default, false);
+        var frames = new LuaStackFrame[lv.Count];
+        for (int i = 0; i < frames.Length; i++)
+        {
+            Level l = lv[i];
+            Proto? p = (l.Fn.Ref as LuaClosure)?.Proto;
+            string? global = l.Fn.IsNil ? null : GlobalFuncName(state, l.Fn);
+            (_, string? name) = NameOf(co, lv, i);
+            frames[i] = p is null
+                ? new LuaStackFrame(global ?? name, "[C]", 0, true)
+                : new LuaStackFrame(global ?? name, ChunkId(p.ChunkName), CurrentLine(co, co.Frames[l.Frame]!, l.Frame), false);
+        }
+        return frames;
+    }
+
     private static string Format(LuaState state, Coroutine co, List<Level> lv, string? msg, int level)
     {
         var sb = new StringBuilder();
