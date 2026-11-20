@@ -1,0 +1,62 @@
+name: bench
+
+# Report-only performance runs (ticket lua-engine-build/19). Never part of ci-gate: nothing here is required by branch
+# protection, the job is continue-on-error, and flags are advisory.
+on:
+  schedule:
+    - cron: "0 4 * * 1" # weekly, Monday 04:00 UTC
+  workflow_dispatch: # on-demand comparison run (a pull request branch can be dispatched)
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest # pinned runner class: compare only runs from the same class
+    timeout-minutes: 60
+    continue-on-error: true
+    permissions:
+      contents: write # append to the perf-history branch
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/cache@v4
+        with:
+          path: .reference
+          key: reference-lua-5.4.9-2335b6c5-${{ runner.os }}-${{ runner.arch }}-ubuntu-latest
+      - name: Build the Reference binary (PUC Lua 5.4.9)
+        run: ci/build-reference.sh .reference
+      - run: dotnet build -c Release src/Lunette.Cli bench/Lunette.Benchmarks
+      - name: Macro benchmarks (whole processes, wall time)
+        run: node bench/run-macro.mjs --runs 7 --out macro.json
+      - name: Micro benchmarks (BenchmarkDotNet in-process vs PUC)
+        run: node bench/run-micro.mjs --out micro.json
+      - name: Fetch perf-history (or start it)
+        run: |
+          if git ls-remote --exit-code --heads origin perf-history >/dev/null 2>&1; then
+            git fetch origin perf-history
+            git worktree add perf-history origin/perf-history
+          else
+            git worktree add --detach perf-history
+            git -C perf-history checkout --orphan perf-history
+            git -C perf-history rm -rf . >/dev/null 2>&1 || true
+          fi
+      - name: Report and append to history
+        run: node bench/report.mjs --history perf-history/history.jsonl --summary "$GITHUB_STEP_SUMMARY" macro.json micro.json
+      - name: Push perf-history
+        run: |
+          cd perf-history
+          git config user.name "lunette-bench"
+          git config user.email "lunette-bench@users.noreply.github.com"
+          git add history.jsonl
+          git commit -m "bench: ${GITHUB_SHA::8} ($(date -u +%F))"
+          git push origin HEAD:perf-history
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: |
+            macro.json
+            micro.json
+          retention-days: 90

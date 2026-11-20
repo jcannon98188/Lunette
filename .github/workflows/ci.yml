@@ -56,6 +56,7 @@ jobs:
       - name: Suppression ratchet (count may only decrease)
         run: node ci/check-suppressions.js ${{ github.base_ref && format('--base-ref origin/{0}', github.base_ref) || '' }}
       - run: node --test ci/check-suppressions.test.js
+      - run: node --test bench/lib/perf.test.mjs
       - name: Analyzer canary (violations of every rule fail the build)
         run: node ci/analyzer-canary.js
 
