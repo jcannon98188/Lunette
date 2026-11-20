@@ -62,6 +62,7 @@ A pure-managed C# (.NET 11) Lua 5.4 engine and minimal CLI, built to the lua-eng
 - [Safe-twin build (LUA_SAFE_ACCESS) for Lunette.Unsafe helpers and nightly variant](tickets/46-safe-twin-build-lua-safe-access-for-lunette-unsafe-helpers-a.md): Safe twin for Lunette.Unsafe (0f80501)
 - [Perf: smaller RunLoop frame, cached closure state, builtin call protocol](tickets/47-perf-smaller-runloop-frame-cached-closure-state-builtin-call.md): RunLoop frame and builtin call protocol (5a4d0e7)
 - [Bench: host-to-Lua call benchmark and CallValues ToArray cost](tickets/49-bench-host-to-lua-call-benchmark-and-callvalues-toarray-cost.md): Host-call benchmark; ToArray not worth fixing (e75cf62)
+- [Bench: coverage gaps (coroutines, closures, metatables/OOP, varargs, pcall/error, GC latency, strings, table lib, startup, footprint)](tickets/50-bench-coverage-gaps-coroutines-closures-metatables-oop-varar.md): Benchmark coverage set and gap analysis (0d9ddbc)
 
 ## Not yet specified
 
