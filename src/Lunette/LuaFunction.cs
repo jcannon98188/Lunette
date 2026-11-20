@@ -28,6 +28,8 @@ internal enum BuiltinKind : byte
     Pairs,
     Collect,
     SetHook,
+    /// <summary><c>dofile</c>: the loaded chunk runs as an ordinary frame so that it can yield.</summary>
+    DoFile,
     /// <summary>A host function made with LuaState.CreateFunction: it may request a yield.</summary>
     Host,
 }

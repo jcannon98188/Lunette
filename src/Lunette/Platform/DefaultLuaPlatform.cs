@@ -34,7 +34,24 @@ public sealed class DefaultLuaPlatform : ILuaPlatform
         else File.Move(from, to, overwrite: true);
     }
 
-    public string CreateTempFile() => Path.GetTempFileName();
+    /// <summary>Creates an empty file named like <c>mkstemp("lua_XXXXXX")</c> (no extension: suites pass it to <c>require</c>).</summary>
+    public string CreateTempFile()
+    {
+        const string alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        string dir = Path.GetTempPath();
+        Span<char> tail = stackalloc char[6];
+        while (true)
+        {
+            for (int i = 0; i < tail.Length; i++) tail[i] = alphabet[Random.Shared.Next(alphabet.Length)];
+            string path = Path.Combine(dir, "lua_" + new string(tail));
+            try
+            {
+                using var f = new FileStream(path, FileMode.CreateNew, FileAccess.Write);
+                return path;
+            }
+            catch (IOException) when (File.Exists(path)) { }
+        }
+    }
 
     public Stream OpenStandardInput() => Console.OpenStandardInput();
 

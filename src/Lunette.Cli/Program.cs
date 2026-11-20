@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace Lunette.Cli;
@@ -9,8 +10,15 @@ public static class Program
 
     public static int Main(string[] args)
     {
+        Console.OutputEncoding = new UTF8Encoding(false);
+        // The name scripts and error messages see as argv[0]: the launcher's own path, unless we are running under the 'dotnet' host.
+        // A wrapper script that launches the dll can name itself through LUNETTE_PROGNAME.
+        string? path = Environment.GetEnvironmentVariable("LUNETTE_PROGNAME") ?? Environment.ProcessPath;
+        string progName = path is not null && !Path.GetFileNameWithoutExtension(path).Equals("dotnet", StringComparison.OrdinalIgnoreCase)
+            ? path
+            : "lunette";
         int code = 1;
-        var worker = new Thread(() => code = Run(args, Console.Out, Console.Error), InterpreterStackBytes);
+        var worker = new Thread(() => code = Run(args, Console.Out, Console.Error, progName), InterpreterStackBytes);
         worker.Start();
         worker.Join();
         return code;
@@ -19,17 +27,20 @@ public static class Program
     private const string Usage = "usage: lunette [options] [script [args]]\n" +
         "Available options are:\n" +
         "  -e stat   execute string 'stat'\n" +
+        "  -i        enter interactive mode after executing 'script'\n" +
         "  -l mod    require library 'mod' into global 'mod'\n" +
+        "  -l g=mod  require library 'mod' into global 'g'\n" +
         "  -v        show version information\n" +
         "  -E        ignore environment variables\n" +
         "  -W        turn warnings on\n" +
         "  --        stop handling options\n" +
         "  -         stop handling options and execute stdin";
 
-    /// <summary>Runs the `lua`-compatible driver: <c>lunette [-e stat] [-l mod] [-v] [-W] [--] [script [args]]</c>.</summary>
-    public static int Run(string[] args, TextWriter stdout, TextWriter stderr)
+    /// <summary>Runs the <c>lua</c>-compatible driver: <c>lunette [options] [script [args]]</c>.</summary>
+    public static int Run(string[] args, TextWriter stdout, TextWriter stderr, string progName = "lunette")
     {
         // Pass 1: find the script and validate options, like lua.c's collectargs.
+        bool hasI = false, hasV = false, hasE = false, noEnv = false;
         int i = 0;
         for (; i < args.Length; i++)
         {
@@ -37,104 +48,96 @@ public static class Program
             if (a.Length == 0 || a[0] != '-') break;
             if (a == "--") { i++; break; }
             if (a == "-") break;
-            if (a is "-e" or "-l")
+            switch (a[1])
             {
-                if (i + 1 >= args.Length) return Fail(stderr, $"'{a}' needs argument");
-                i++;
+                case 'e' or 'l':
+                    if (a[1] == 'e') hasE = true;
+                    if (a.Length == 2)
+                    {
+                        if (i + 1 >= args.Length) return Fail(stderr, progName, $"'{a}' needs argument");
+                        i++;
+                    }
+                    break;
+                case 'i' when a.Length == 2: hasI = hasV = true; break;
+                case 'v' when a.Length == 2: hasV = true; break;
+                case 'E' when a.Length == 2: noEnv = true; break;
+                case 'W' when a.Length == 2: break;
+                default: return Fail(stderr, progName, $"unrecognized option '{a}'");
             }
-            else if (a.StartsWith("-e") || a.StartsWith("-l")) { }
-            else if (a is not ("-v" or "-E" or "-W" or "-i")) return Fail(stderr, $"unrecognized option '{a}'");
         }
         int scriptIndex = i;
         bool hasScript = scriptIndex < args.Length;
 
-        var state = new LuaState { Output = stdout };
-        state.SetCommandLineArgs(["lunette", .. args], hasScript ? scriptIndex + 1 : 0);
-
-        bool ranSomething = false;
+        var actions = new List<(char, string)>();
         for (int j = 0; j < scriptIndex; j++)
         {
             string a = args[j];
             if (a == "--") break;
-            string? value = null;
-            if (a is "-e" or "-l") value = args[++j];
-            else if (a.StartsWith("-e") || a.StartsWith("-l")) value = a[2..];
-            if (a is "-v") { stdout.WriteLine("Lunette (Lua 5.4 compatible)"); ranSomething = true; }
-            else if (a is "-W") state.DoString("warn('@on')");
-            else if (a[1] == 'e')
+            switch (a[1])
             {
-                ranSomething = true;
-                if (!Protected(state, () => state.DoBytes(Encoding.UTF8.GetBytes(value!), "=(command line)"), stderr)) return 1;
-            }
-            else if (a[1] == 'l')
-            {
-                string mod = value!;
-                string global = mod;
-                int eq = mod.IndexOf('=');
-                if (eq >= 0) { global = mod[..eq]; mod = mod[(eq + 1)..]; }
-                string code = $"{global} = require('{mod.Replace("'", "\\'")}')";
-                if (!Protected(state, () => state.DoString(code, "=(command line)"), stderr)) return 1;
+                case 'W': actions.Add(('W', "")); break;
+                case 'e' or 'l': actions.Add((a[1], a.Length > 2 ? a[2..] : args[++j])); break;
             }
         }
 
-        if (!hasScript)
-        {
-            if (ranSomething) return 0;
-            stderr.WriteLine(Usage);
-            return 1;
-        }
+        string? script = hasScript ? args[scriptIndex] : null;
+        bool scriptIsStdin = script == "-" && (scriptIndex == 0 || args[scriptIndex - 1] != "--");
+        bool stdinTty = !Console.IsInputRedirected;
+        var options = new Driver.Options(progName, hasI, hasV, hasE, noEnv, stdinTty, actions, script, scriptIsStdin);
 
-        string path = args[scriptIndex];
-        byte[] source;
+        var state = new LuaState(new CliPlatform(stderr)) { Output = stdout };
+        state.SetCommandLineArgs([progName, .. args], hasScript ? scriptIndex + 1 : 0);
+        // Ctrl-C as in lua.c: the first SIGINT raises one "interrupted" error in the script; a second takes the default action.
+        int sigints = 0;
+        // A shell starts background jobs with SIGINT ignored and .NET honours that; lua.c installs its handler regardless.
+        if (!OperatingSystem.IsWindows()) ResetSigint();
+        using var sigint = PosixSignalRegistration.Create(PosixSignal.SIGINT, context =>
+        {
+            if (Interlocked.Increment(ref sigints) != 1) return;
+            context.Cancel = true;
+            state.RequestInterruptOnce();
+        });
+        bool close = true; // os.exit without its close argument leaves the state open, as C exit() does
         try
         {
-            source = path == "-" ? ReadAll(Console.OpenStandardInput()) : File.ReadAllBytes(path);
+            state.DoBytes(Driver.Build(options), "=lunette");
+            return 0;
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        catch (LuaExitException e)
         {
-            stderr.WriteLine($"lunette: cannot open {path}");
-            return 1;
-        }
-        source = SkipShebang(source);
-        var scriptArgs = args[(scriptIndex + 1)..];
-        string chunk = path == "-" ? "=stdin" : "@" + path;
-        return Protected(state, () => state.RunScript(source, chunk, scriptArgs), stderr) ? 0 : 1;
-    }
-
-    private static int Fail(TextWriter stderr, string message)
-    {
-        stderr.WriteLine($"lunette: {message}");
-        stderr.WriteLine(Usage);
-        return 1;
-    }
-
-    private static bool Protected(LuaState state, Action run, TextWriter stderr)
-    {
-        try
-        {
-            run();
-            return true;
+            close = e.Close;
+            return e.Code;
         }
         catch (LuaException e)
         {
-            stderr.WriteLine($"lunette: {e.Describe(state)}");
-            if (e.Traceback is not null) stderr.WriteLine(e.Traceback);
-            return false;
+            stderr.WriteLine($"{progName}: {e.Describe(state)}");
+            return 1;
+        }
+        finally
+        {
+            stdout.Flush();
+            if (close) state.Dispose();
+            stdout.Flush();
         }
     }
 
-    private static byte[] ReadAll(Stream s)
+    private const int SigInt = 2;
+
+#pragma warning disable SYSLIB1054 // a blittable libc call; the LibraryImport generator would need AllowUnsafeBlocks
+    [DllImport("libc", EntryPoint = "signal")]
+    private static extern IntPtr CSignal(int signum, IntPtr handler);
+#pragma warning restore SYSLIB1054
+
+    private static void ResetSigint()
     {
-        using var ms = new MemoryStream();
-        s.CopyTo(ms);
-        return ms.ToArray();
+        try { CSignal(SigInt, IntPtr.Zero); } // SIG_DFL
+        catch (Exception e) when (e is DllNotFoundException or EntryPointNotFoundException) { }
     }
 
-    /// <summary>A leading '#' line is dropped but its newline kept, so line numbers stay right.</summary>
-    private static byte[] SkipShebang(byte[] source)
+    private static int Fail(TextWriter stderr, string progName, string message)
     {
-        if (source.Length == 0 || source[0] != (byte)'#') return source;
-        int n = Array.IndexOf(source, (byte)'\n');
-        return n < 0 ? [] : source[n..];
+        stderr.WriteLine($"{progName}: {message}");
+        stderr.WriteLine(Usage);
+        return 1;
     }
 }

@@ -97,7 +97,13 @@ internal static partial class Interpreter
             if (!co.Started)
             {
                 co.Started = true;
-                if (co.Body.Ref is not LuaClosure cl)
+                LuaClosure? cl = co.Body.Ref as LuaClosure;
+                if (cl is null && co.Body.Ref is BuiltinFunction { Kind: BuiltinKind.DoFile })
+                {
+                    cl = LoadLib.LoadForDoFile(state, args);
+                    args = [];
+                }
+                if (cl is null)
                 {
                     LuaValue[]? res = ((BuiltinFunction)co.Body.Ref!).Invoke(state, args);
                     co.Status = CoStatus.Dead;

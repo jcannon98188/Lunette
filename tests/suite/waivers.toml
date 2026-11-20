@@ -1,9 +1,10 @@
-# Reason-coded waiver manifest (ticket 09, decision 4). Empty on purpose.
+# Reason-coded waiver manifest (ticket 09, decision 4; platform key added by ticket 13).
 # The vendored suite in tests/lua-suite is never edited; overlays are applied to a temp copy.
 #
 # [[waiver]]
 # file   = "api.lua"        # suite file
 # reason = "host-C-API"     # host-C-API | no-bytecode | gc-accounting | os-env | bug-wontfix
+# platform = "windows"    # optional: windows | linux | macos | unix (linux+macos); omit to apply everywhere
 # line = 120                # optional: omit to waive the whole file
 # end_line = 124            # optional: waive a range
 # anchor = "T.testC"        # required with line: text that must occur on the first waived line
@@ -15,3 +16,133 @@
 file   = "gengc.lua"
 reason = "gc-accounting"
 note   = "Generational-mode accounting (collectgarbage(\"generational\") young/old sizing) has no .NET GC equivalent; collectgarbage accepts the mode switch and reports the previous mode. Waived whole."
+
+[[waiver]]
+file     = "files.lua"
+reason   = "no-bytecode"
+line     = 553
+end_line = 579
+anchor   = "loading binary file"
+note     = "Round-trips string.dump output through loadfile; Lunette has no bytecode format."
+
+[[waiver]]
+file   = "files.lua"
+reason = "os-env"
+platform = "unix"
+line   = 746
+anchor = "exit 129"
+note   = "PUC tells a signalled child from exit(129) via WIFSIGNALED; .NET Process only reports 128+n, so Lunette reads 129..192 as a signal on Unix."
+
+[[waiver]]
+file   = "files.lua"
+reason = "os-env"
+platform = "unix"
+line   = 749
+anchor = "sh -c"
+note   = "Same: a shell exiting with 128+n is indistinguishable from a signalled one."
+
+[[waiver]]
+file     = "main.lua"
+reason   = "host-C-API"
+line     = 230
+end_line = 232
+anchor   = "LUA_CPATH"
+note     = "Loads libs/lib2-v2.so through the C-library searcher; Lunette has no native library loader."
+
+[[waiver]]
+file     = "main.lua"
+reason   = "no-bytecode"
+line     = 430
+end_line = 433
+anchor   = "binary file"
+note     = "Runs a script that is string.dump output; Lunette has no bytecode format."
+
+[[waiver]]
+file     = "files.lua"
+reason   = "os-env"
+platform = "windows"
+line     = 717
+end_line = 767
+anchor   = "if not _port then"
+note     = "popen/execute tests drive a POSIX shell (cat, kill, sh -c, exit codes); Windows has none."
+
+[[waiver]]
+file     = "main.lua"
+reason   = "os-env"
+platform = "windows"
+line     = 14
+end_line = 568
+anchor   = "assert(os.execute())"
+note     = "Every check runs shell pipelines (env, echo, /dev/null, kill); upstream says it assumes a Unix-like shell."
+
+[[waiver]]
+file     = "db.lua"
+reason   = "no-bytecode"
+line     = 54
+end_line = 58
+anchor   = "do"
+note     = "activelines of a stripped string.dump chunk (5.4.4-5.4.6 bug); Lunette has no bytecode format."
+
+[[waiver]]
+file     = "calls.lua"
+reason   = "no-bytecode"
+line     = 331
+end_line = 350
+anchor   = "string.dump"
+note     = "Lunette has no bytecode format: string.dump is unsupported, so loading and inspecting a dumped chunk cannot be tested."
+
+[[waiver]]
+file     = "calls.lua"
+reason   = "no-bytecode"
+line     = 362
+end_line = 372
+anchor   = "_ENV is not first upvalue"
+note     = "Lunette has no bytecode format: string.dump is unsupported, so loading and inspecting a dumped chunk cannot be tested."
+
+[[waiver]]
+file     = "calls.lua"
+reason   = "no-bytecode"
+line     = 390
+end_line = 393
+anchor   = "binary chunk"
+note     = "Lunette has no bytecode format: string.dump is unsupported, so loading and inspecting a dumped chunk cannot be tested."
+
+[[waiver]]
+file     = "calls.lua"
+reason   = "no-bytecode"
+line     = 396
+end_line = 411
+anchor   = "dump/undump with upvalues"
+note     = "Lunette has no bytecode format: string.dump is unsupported, so loading and inspecting a dumped chunk cannot be tested."
+
+[[waiver]]
+file     = "calls.lua"
+reason   = "no-bytecode"
+line     = 413
+end_line = 435
+anchor   = "many upvalues"
+note     = "Lunette has no bytecode format: string.dump is unsupported, so loading and inspecting a dumped chunk cannot be tested."
+
+[[waiver]]
+file     = "calls.lua"
+reason   = "no-bytecode"
+line     = 454
+end_line = 494
+anchor   = "do"
+note     = "Lunette has no bytecode format: string.dump is unsupported, so loading and inspecting a dumped chunk cannot be tested."
+
+[[waiver]]
+file     = "db.lua"
+reason   = "no-bytecode"
+line     = 986
+end_line = 987
+anchor   = "dump/load a function without debug info"
+note     = "Lunette has no bytecode format: string.dump is unsupported, so loading and inspecting a dumped chunk cannot be tested."
+
+[[waiver]]
+file     = "db.lua"
+reason   = "no-bytecode"
+line     = 999
+end_line = 1051
+anchor   = "without debug info"
+note     = "Lunette has no bytecode format: string.dump is unsupported, so loading and inspecting a dumped chunk cannot be tested."

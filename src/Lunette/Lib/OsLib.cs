@@ -80,9 +80,9 @@ internal sealed class OsLib
         try
         {
             ProcessStatus s = _platform.RunShell(command);
-            return [LuaValue.FromBoolean(!s.Signaled && s.Code == 0), Str(s.Signaled ? "signal" : "exit"), LuaValue.FromInteger(s.Code)];
+            return [!s.Signaled && s.Code == 0 ? LuaValue.FromBoolean(true) : default, Str(s.Signaled ? "signal" : "exit"), LuaValue.FromInteger(s.Code)];
         }
-        catch (Exception e) when (IsFileError(e) || e is System.ComponentModel.Win32Exception) { return Failure(e, null); }
+        catch (Exception e) when (IsFileError(e) || e is System.Runtime.InteropServices.ExternalException) { return Failure(e, null); }
     }
 
     private LuaValue[] Exit(LuaState state, ReadOnlySpan<LuaValue> args)

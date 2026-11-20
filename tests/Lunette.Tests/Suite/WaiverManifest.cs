@@ -13,9 +13,13 @@ public sealed record Waiver(
     string? Anchor = null,
     string? Ticket = null,
     DateOnly? Expires = null,
-    string? Note = null)
+    string? Note = null,
+    string? Platform = null)
 {
     public bool IsWholeFile => Line is null;
+
+    /// <summary>True when the waiver has no platform restriction or the restriction names the current OS.</summary>
+    public bool AppliesHere() => Platform is null || WaiverManifest.CurrentPlatforms.Contains(Platform);
 }
 
 /// <summary>
@@ -29,6 +33,15 @@ public sealed class WaiverManifest
     {
         "host-C-API", "no-bytecode", "gc-accounting", "os-env", "bug-wontfix",
     };
+
+    /// <summary>The values a waiver's optional <c>platform</c> key may take; "unix" covers linux and macos.</summary>
+    public static readonly IReadOnlySet<string> PlatformNames = new HashSet<string> { "windows", "linux", "macos", "unix" };
+
+    /// <summary>The platform names that match the running OS (tests may replace it).</summary>
+    public static IReadOnlySet<string> CurrentPlatforms { get; set; } =
+        OperatingSystem.IsWindows() ? new HashSet<string> { "windows" }
+        : OperatingSystem.IsMacOS() ? new HashSet<string> { "macos", "unix" }
+        : new HashSet<string> { "linux", "unix" };
 
     public static WaiverManifest Empty { get; } = new([]);
 
@@ -101,6 +114,9 @@ public sealed class WaiverManifest
         t.TryGetValue("anchor", out var anchor);
         t.TryGetValue("ticket", out var ticket);
         t.TryGetValue("note", out var note);
+        t.TryGetValue("platform", out var platform);
+        if (platform is not null && !PlatformNames.Contains(platform))
+            throw new InvalidWaiverException($"waiver for {file} has unknown platform '{platform}' (windows|linux|macos|unix)");
         DateOnly? expires = null;
         if (t.TryGetValue("expires", out var exp))
         {
@@ -118,16 +134,16 @@ public sealed class WaiverManifest
         if (reason == "bug-wontfix" && (string.IsNullOrEmpty(ticket) || expires is null))
             throw new InvalidWaiverException($"bug-wontfix waiver for {file} needs 'ticket' and 'expires'");
 
-        return new Waiver(file, reason, line, endLine, anchor, ticket, expires, note);
+        return new Waiver(file, reason, line, endLine, anchor, ticket, expires, note, platform);
     }
 
     public Waiver? WholeFileWaiver(string file) =>
-        Waivers.FirstOrDefault(w => w.IsWholeFile && w.File == file);
+        Waivers.FirstOrDefault(w => w.IsWholeFile && w.File == file && w.AppliesHere());
 
     /// <summary>Returns <paramref name="source"/> with this file's per-assertion waivers blanked out, preserving line numbers.</summary>
     public string ApplyOverlays(string file, string source)
     {
-        var mine = Waivers.Where(w => !w.IsWholeFile && w.File == file).ToList();
+        var mine = Waivers.Where(w => !w.IsWholeFile && w.File == file && w.AppliesHere()).ToList();
         if (mine.Count == 0) return source;
         string[] lines = source.Split('\n');
         foreach (var w in mine)

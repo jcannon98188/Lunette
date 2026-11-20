@@ -128,9 +128,9 @@ internal static partial class Interpreter
             {
                 LuaException ex = AsLuaException(e);
                 Locate(co, ex);
+                DebugLib.NoteFault(co, ex);
                 if (!Unwind(state, co, stop, ex.Value))
                 {
-                    DebugLib.NoteFault(co, ex);
                     if (state.NativeDepth == 0)
                     {
                         ex.Traceback ??= DebugLib.CaptureTraceback(state, co);
@@ -140,6 +140,7 @@ internal static partial class Interpreter
                     throw ex;
                 }
             }
+            co.FaultLine = 0;
             f = co.ResumeFrame!;
             top = co.ResumeTop;
         }

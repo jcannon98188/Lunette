@@ -895,6 +895,7 @@ internal sealed class LuaCompiler
         int exit = EmitJmp(line);
 
         int nlocals = _fs.Locals.Count;
+        for (int h = 0; h < 3; h++) _fs.AddLocal("(for state)", a + h); // visible to debug.getlocal like PUC
         int free = _fs.Free; // a + 3
         _fs.AddLocal(name, Alloc());
         var loop = new LoopInfo(free);
@@ -932,7 +933,8 @@ internal sealed class LuaCompiler
         _fs.Blocks[^1].InsideTbc = true;
         Emit(Instruction.ABx(OpCode.Tbc, a + 3, AddName("(for state)")), line);
         int toCall = EmitJmp(line);
-        int nlocals = _fs.Locals.Count;
+        int nlocals = _fs.Locals.Count - 0;
+        for (int h = 0; h < 4; h++) _fs.AddLocal("(for state)", a + h);
         int free = _fs.Free; // a + 4
         foreach (string name in names) _fs.AddLocal(name, Alloc());
         var loop = new LoopInfo(a + 3);

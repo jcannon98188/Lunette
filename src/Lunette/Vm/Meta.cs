@@ -89,6 +89,7 @@ internal static class Meta
     public static string ObjTypeName(in LuaValue v)
     {
         if (v.Ref is LuaTable { Metatable: { } mt } && mt.Get(NameKey).Ref is byte[] n) return new LuaString(n).ToString();
+        if (v.Ref is LuaUserdata { Metatable: { } umt } && umt.Get(NameKey).Ref is byte[] un) return new LuaString(un).ToString();
         return v.TypeName;
     }
 
@@ -267,6 +268,13 @@ internal static class Meta
             return false;
         }
         result = default;
+        LuaTable? omt = GetMetatable(state, v);
+        LuaValue otm = omt is null ? default : omt.GetTagMethod(TagMethod.Len);
+        if (!otm.IsNil)
+        {
+            mc = new MetaCall(otm, v, v, default, 2, TagMethod.Len);
+            return true;
+        }
         throw new LuaException($"{At(p, pc)}attempt to get length of a {ObjTypeName(v)} value{VarInfo.DescribeOperand(p, pc, true)}");
     }
 

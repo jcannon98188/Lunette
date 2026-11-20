@@ -11,13 +11,16 @@ namespace Lunette;
 internal static class LoadLib
 {
     private const string DefaultPath = "./?.lua;./?/init.lua";
+
+    /// <summary>Native modules cannot be loaded; the value only mirrors PUC's layout for scripts that print or extend it.</summary>
+    private const string DefaultCPath = "/usr/local/lib/lua/5.4/?.so;/usr/local/lib/lua/5.4/loadall.so;./?.so";
     private static readonly byte[] BinarySignature = [0x1B, (byte)'L', (byte)'u', (byte)'a'];
 
     public static void Register(LuaState state)
     {
         state.SetGlobal("load", LuaValue.FromObject(new BuiltinFunction(Load)));
         state.SetGlobal("loadfile", LuaValue.FromObject(new BuiltinFunction(LoadFile)));
-        state.SetGlobal("dofile", LuaValue.FromObject(new BuiltinFunction(DoFile)));
+        state.SetGlobal("dofile", LuaValue.FromObject(new BuiltinFunction(DoFile, BuiltinKind.DoFile)));
         state.SetGlobal("require", LuaValue.FromObject(new BuiltinFunction(Require)));
         state.SetGlobal("warn", LuaValue.FromObject(new BuiltinFunction(Warn)));
 
@@ -27,11 +30,14 @@ internal static class LoadLib
         var searchers = new LuaTable(4, 0);
         searchers.SetInt(1, LuaValue.FromObject(new BuiltinFunction(SearcherPreload)));
         searchers.SetInt(2, LuaValue.FromObject(new BuiltinFunction(SearcherLua)));
+        searchers.SetInt(3, LuaValue.FromObject(new BuiltinFunction(SearcherC)));
+        searchers.SetInt(4, LuaValue.FromObject(new BuiltinFunction(SearcherCRoot)));
         Put(state, package, "loaded", LuaValue.FromTable(loaded));
         Put(state, package, "preload", LuaValue.FromTable(preload));
         Put(state, package, "searchers", LuaValue.FromTable(searchers));
-        Put(state, package, "path", LuaValue.FromString(EnvPath("LUA_PATH", DefaultPath)));
-        Put(state, package, "cpath", LuaValue.FromString(EnvPath("LUA_CPATH", "")));
+        // The environment (LUA_PATH and friends) is the command-line driver's business, not the library's.
+        Put(state, package, "path", LuaValue.FromString(DefaultPath));
+        Put(state, package, "cpath", LuaValue.FromString(DefaultCPath));
         Put(state, package, "config", LuaValue.FromString("/\n;\n?\n!\n-\n"));
         Put(state, package, "searchpath", LuaValue.FromObject(new BuiltinFunction(SearchPath)));
         Put(state, package, "loadlib", LuaValue.FromObject(new BuiltinFunction(static (_, _) =>
@@ -43,16 +49,6 @@ internal static class LoadLib
             LuaValue v = state.Globals.Get(LuaValue.FromString(state.Strings.FromUtf16(lib)));
             if (!v.IsNil) Put(state, loaded, lib, v);
         }
-    }
-
-    private static string EnvPath(string name, string dflt)
-    {
-        string? v = Environment.GetEnvironmentVariable(name + "_5_4") ?? Environment.GetEnvironmentVariable(name);
-        if (v is null) return dflt;
-        int i = v.IndexOf(";;", StringComparison.Ordinal);
-        if (i < 0) return v;
-        string head = v[..i], tail = v[(i + 2)..];
-        return (head.Length > 0 ? head + ";" : "") + dflt + (tail.Length > 0 ? ";" + tail : "");
     }
 
     private static void Put(LuaState state, LuaTable t, string key, LuaValue v) =>
@@ -67,7 +63,7 @@ internal static class LoadLib
     /// <summary>Compiles <paramref name="source"/> after checking the mode; a failure is returned as a message, not thrown.</summary>
     private static LuaValue[] Compile(LuaState state, byte[] source, string chunkName, string mode, LuaValue env)
     {
-        bool binary = source.AsSpan().StartsWith(BinarySignature);
+        bool binary = source.Length > 0 && source[0] == BinarySignature[0]; // PUC only checks the first byte
         if (binary)
         {
             if (!mode.Contains('b')) return [default, Str(state, $"attempt to load a binary chunk (mode is '{mode}')")];
@@ -105,7 +101,9 @@ internal static class LoadLib
         var buf = new List<byte>();
         while (true)
         {
-            LuaValue[] piece = Interpreter.CallValues(state, chunk, []);
+            LuaValue[] piece;
+            try { piece = Interpreter.CallValues(state, chunk, []); }
+            catch (LuaException e) { return [default, e.Value]; }
             LuaValue p = piece.Length > 0 ? piece[0] : default;
             if (p.IsNil) break;
             if (p.Ref is not byte[] pb) return [default, Str(state, "reader function must return a string")];
@@ -169,13 +167,17 @@ internal static class LoadLib
         return LoadFileCore(state, filename, mode, env);
     }
 
-    private static LuaValue[] DoFile(LuaState state, ReadOnlySpan<LuaValue> args)
+    /// <summary>Loads the file named by dofile's argument; throws the load error. The interpreter then runs the chunk as a frame.</summary>
+    internal static LuaClosure LoadForDoFile(LuaState state, ReadOnlySpan<LuaValue> args)
     {
         string? filename = args.Length > 0 && !args[0].IsNil ? LibArgs.CheckString(state, "dofile", args, 0).ToString() : null;
         LuaValue[] loaded = LoadFileCore(state, filename, "bt", LuaValue.FromTable(state.Globals));
-        if (loaded[0].IsNil) throw new LuaException(loaded[1]);
-        return Interpreter.CallValues(state, loaded[0], []);
+        if (loaded[0].Ref is not LuaClosure cl) throw new LuaException(loaded[1]);
+        return cl;
     }
+
+    private static LuaValue[] DoFile(LuaState state, ReadOnlySpan<LuaValue> args) =>
+        Interpreter.CallValues(state, LuaValue.FromObject(LoadForDoFile(state, args)), []);
 
     // ---- warn ----
 
@@ -211,16 +213,10 @@ internal static class LoadLib
     private static string? SearchPathCore(LuaState state, string name, string path, string sep, string rep, out string error)
     {
         if (sep.Length > 0) name = name.Replace(sep, rep);
-        var tried = new StringBuilder();
-        foreach (string template in path.Split(';'))
-        {
-            if (template.Length == 0) continue;
-            string file = template.Replace("?", name);
+        string expanded = path.Replace("?", name);
+        foreach (string file in expanded.Split(';'))
             if (Readable(state.Platform, file)) { error = ""; return file; }
-            if (tried.Length > 0) tried.Append("\n\t");
-            tried.Append("no file '").Append(file).Append('\'');
-        }
-        error = tried.ToString();
+        error = "no file '" + expanded.Replace(";", "'\n\tno file '") + "'";
         return null;
     }
 
@@ -265,6 +261,27 @@ internal static class LoadLib
         if (r[0].IsNil)
             throw LuaErrors.Error($"error loading module '{name}' from file '{file}':\n\t{Meta.ToStringValue(state, r[1])}");
         return [r[0], Str(state, file)];
+    }
+
+    /// <summary>
+    /// The C-library searchers search <c>package.cpath</c> so the error text lists the same candidates as PUC, but a native
+    /// library cannot be loaded into a managed engine: finding one is an error.
+    /// </summary>
+    private static LuaValue[] SearcherC(LuaState state, ReadOnlySpan<LuaValue> args) =>
+        SearchNative(state, new LuaString((byte[])args[0].Ref!).ToString(), new LuaString((byte[])args[0].Ref!).ToString());
+
+    private static LuaValue[] SearcherCRoot(LuaState state, ReadOnlySpan<LuaValue> args)
+    {
+        string name = new LuaString((byte[])args[0].Ref!).ToString();
+        int dot = name.IndexOf('.');
+        return dot < 0 ? [] : SearchNative(state, name[..dot], name);
+    }
+
+    private static LuaValue[] SearchNative(LuaState state, string search, string module)
+    {
+        string? file = SearchPathCore(state, search, PackageString(state, "cpath"), ".", "/", out string error);
+        if (file is null) return [Str(state, error)];
+        throw LuaErrors.Error($"error loading module '{module}' from file '{file}':\n\tnative libraries are not supported");
     }
 
     private static LuaValue[] Require(LuaState state, ReadOnlySpan<LuaValue> args)

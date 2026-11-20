@@ -121,11 +121,28 @@ jobs:
           path: /tmp/lunette-jit-*.txt
           retention-days: 14
 
+  # io/os platform interface (ticket 13): files.lua and main.lua on the other operating systems. The platform-specific
+  # shell-dependent parts are waived per OS in tests/suite/waivers.toml (reason os-env, platform key); Linux runs them in full in `test`.
+  platform-suite:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - run: dotnet test -c Release --filter "DisplayName~files.lua|DisplayName~main.lua" tests/Lunette.Tests
+
   # The single aggregate check required by branch protection (ADR/ticket 18).
   # Later tickets add their jobs to `needs`; nightly and benchmark jobs never block.
   ci-gate:
     if: always()
-    needs: [build, test, ratchet, reference, fast-checks, alloc-budget, jit-budget]
+    needs: [build, test, ratchet, reference, fast-checks, alloc-budget, jit-budget, platform-suite]
     runs-on: ubuntu-latest
     steps:
       - name: Require every upstream job to succeed

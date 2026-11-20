@@ -79,6 +79,30 @@ internal static partial class Interpreter
         return error;
     }
 
+    /// <summary>
+    /// <c>lua_close</c>: closes every to-be-closed variable still registered on the main thread (newest first, no error), as
+    /// when the host or <c>os.exit(_, true)</c> ends the state while chunks are still active. Handler errors are ignored.
+    /// </summary>
+    internal static void CloseMainThread(LuaState state)
+    {
+        Coroutine co = state.Main;
+        if (co.Tbc.Count == 0) return;
+        state.Running = co;
+        int depth = co.Depth;
+        if (depth > 0)
+        {
+            Frame top = co.Frames[depth - 1]!;
+            co.CallTop = Math.Max(co.CallTop, top.Base + top.Closure.Proto.MaxStack);
+        }
+        while (co.Tbc.Count > 0)
+        {
+            int idx = co.Tbc[^1];
+            co.Tbc.RemoveAt(co.Tbc.Count - 1);
+            try { CallClose(state, co, idx, NoError); }
+            catch (Exception e) when (IsLuaError(e) || e is LuaExitException) { co.Depth = depth; }
+        }
+    }
+
     private static void CallClose(LuaState state, Coroutine co, int index, LuaValue error)
     {
         LuaValue v = co.Stack[index];

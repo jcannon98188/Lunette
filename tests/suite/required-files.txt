@@ -14,3 +14,15 @@ constructs.lua
 goto.lua
 heavy.lua
 big.lua
+strings.lua
+nextvar.lua
+literals.lua
+tracegc.lua
+sort.lua
+cstack.lua
+verybig.lua
+attrib.lua
+events.lua
+files.lua
+main.lua
+calls.lua

@@ -86,6 +86,12 @@ public sealed partial class LuaState
     /// </summary>
     public void RequestInterrupt() => Volatile.Write(ref _interrupt, 1);
 
+    /// <summary>
+    /// Like <see cref="RequestInterrupt"/> but for a single "interrupted" error: the request clears itself when the error is raised,
+    /// so a script that catches it (pcall) carries on. This is what the standalone interpreter does for Ctrl-C.
+    /// </summary>
+    public void RequestInterruptOnce() => Volatile.Write(ref _interrupt, 2);
+
     /// <summary>Clears a pending <see cref="RequestInterrupt"/>.</summary>
     public void ClearInterrupt() => Volatile.Write(ref _interrupt, 0);
 
@@ -111,8 +117,10 @@ public sealed partial class LuaState
         if (_budgetLeft <= 0) Abort(_budgetIsCumulative ? LuaAbortKind.CumulativeInstructionBudget : LuaAbortKind.InstructionBudget);
         if (_limits.MemoryLimitBytes > 0 && GC.GetAllocatedBytesForCurrentThread() - _allocBaseline > _limits.MemoryLimitBytes)
             Abort(LuaAbortKind.MemoryLimit);
-        if (Volatile.Read(ref _interrupt) != 0)
+        int interrupt = Volatile.Read(ref _interrupt);
+        if (interrupt != 0)
         {
+            if (interrupt == 2) Volatile.Write(ref _interrupt, 0);
             _sliceSize = 1;
             Ticks = 1;
             throw LuaErrors.Error("interrupted");

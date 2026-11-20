@@ -51,6 +51,15 @@ public sealed partial class LuaState : IDisposable
     /// <summary>Host sink for warnings; null writes to standard error.</summary>
     internal Action<string>? Warn;
 
+    /// <summary>A collector warning (a failed <c>__gc</c>): shown like <c>warn</c> output, only while warnings are on.</summary>
+    private void EmitGcWarning(string message)
+    {
+        if (!WarningsOn) return;
+        string text = "Lua warning: " + message;
+        if (Warn is { } sink) sink(text);
+        else Console.Error.WriteLine(text);
+    }
+
     public LuaState() : this(DefaultInternCapacity())
     {
     }
@@ -72,6 +81,7 @@ public sealed partial class LuaState : IDisposable
         Platform = platform ?? new DefaultLuaPlatform();
         Strings = new StringCache(internCapacity);
         Gc = new Gc.GcState(this);
+        Gc.Warn = EmitGcWarning;
         Main.IsMain = true;
         Main.Status = CoStatus.Running;
         Running = Main;
@@ -138,6 +148,7 @@ public sealed partial class LuaState : IDisposable
         else
         {
             BeginRun();
+            Vm.Interpreter.CloseMainThread(this);
             Gc.Close();
         }
     }

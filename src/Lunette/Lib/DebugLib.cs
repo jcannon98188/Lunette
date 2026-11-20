@@ -82,12 +82,14 @@ internal static class DebugLib
     {
         var list = new List<Level>();
         if (includeSelf) list.Add(new Level(-1, self));
-        if (!co.RaisingBuiltin.IsNil && (co.InHandler || !includeSelf)) list.Add(new Level(-1, co.RaisingBuiltin));
+        bool raiseInline = co.InHandler && !co.RaisingBuiltin.IsNil && co.RaisingDepth <= co.Depth;
+        if (!co.RaisingBuiltin.IsNil && !raiseInline && !includeSelf) list.Add(new Level(-1, co.RaisingBuiltin));
         else if (co != state.Running && co.Started && co.Status == CoStatus.Suspended && co.Depth > 0)
             list.Add(new Level(-1, Lookup(state, "coroutine", "yield")));
         bool inHook = !co.AllowHook && co.HookFrameIndex >= 0;
         for (int i = co.Depth - 1; i >= 0; i--)
         {
+            if (raiseInline && i == co.RaisingDepth - 1) list.Add(new Level(-1, co.RaisingBuiltin));
             Frame fr = co.Frames[i]!;
             list.Add(new Level(i, LuaValue.FromObject(fr.Closure)));
             if (inHook && i == co.HookFrameIndex && !co.HookBuiltin.IsNil) list.Add(new Level(-1, co.HookBuiltin));
@@ -118,7 +120,7 @@ internal static class DebugLib
 
     private static int CurrentLine(Coroutine co, Frame fr, int frameIndex)
     {
-        if (co.FaultLine > 0 && co.FaultDepth == frameIndex + 1 && co.Depth == co.FaultDepth) return co.FaultLine;
+        if (co.FaultLine > 0 && co.FaultDepth == frameIndex + 1) return co.FaultLine;
         int[] lines = fr.Closure.Proto.Lines;
         return lines[Math.Clamp(fr.Pc - 1, 0, lines.Length - 1)];
     }

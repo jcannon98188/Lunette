@@ -80,6 +80,8 @@ internal sealed class Coroutine
 
     /// <summary>True while an xpcall message handler runs: the stack may exceed <see cref="StackLimit"/> by <see cref="HandlerHeadroom"/>.</summary>
     public bool InHandler;
+    /// <summary>Depth of the faulting stack while an xpcall message handler runs above it.</summary>
+    public int RaisingDepth;
 
     public bool IsMain;
     public CoStatus Status = CoStatus.Suspended;

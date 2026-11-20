@@ -93,7 +93,7 @@ internal sealed class IoLib
     }
 
     private LuaValue[] ExecResult(ProcessStatus s) =>
-        [LuaValue.FromBoolean(!s.Signaled && s.Code == 0), Str(s.Signaled ? "signal" : "exit"), LuaValue.FromInteger(s.Code)];
+        [!s.Signaled && s.Code == 0 ? LuaValue.FromBoolean(true) : default, Str(s.Signaled ? "signal" : "exit"), LuaValue.FromInteger(s.Code)];
 
     private static bool IsFileError(Exception e) =>
         e is IOException or UnauthorizedAccessException or ErrnoException or NotSupportedException or ArgumentException or ObjectDisposedException;
@@ -163,7 +163,16 @@ internal sealed class IoLib
         return new LuaFile(s, append);
     }
 
-    private LuaUserdata Wrap(LuaFile f) => _state.CreateUserdata(f);
+    // Open files are rooted here until closed: when a script drops its last reference, .NET would otherwise finalize the
+    // FileStream's handle before the Lua-side __gc runs, losing buffered output. __gc (or state close) then closes them in order.
+    private readonly HashSet<LuaFile> _open = [];
+
+    private LuaUserdata Wrap(LuaFile f)
+    {
+        _open.Add(f);
+        f.OnClose = file => _open.Remove(file);
+        return _state.CreateUserdata(f);
+    }
 
     // ---- io.open / tmpfile / popen ----
 
@@ -201,7 +210,7 @@ internal sealed class IoLib
             IPlatformProcess p = _platform.StartProcess(command, mode == "r");
             return [LuaValue.FromObject(Wrap(new LuaFile(p.Stream, process: p)))];
         }
-        catch (Exception e) when (IsFileError(e) || e is System.ComponentModel.Win32Exception)
+        catch (Exception e) when (IsFileError(e) || e is System.Runtime.InteropServices.ExternalException)
         {
             return FileResult(e, command);
         }

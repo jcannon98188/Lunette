@@ -93,6 +93,8 @@ internal static partial class Interpreter
     {
         int depth = co.Depth;
         bool prev = co.InHandler;
+        int prevRaising = co.RaisingDepth;
+        if (!prev) co.RaisingDepth = depth;
         co.InHandler = true;
         try
         {
@@ -119,6 +121,7 @@ internal static partial class Interpreter
         finally
         {
             co.InHandler = prev;
+            co.RaisingDepth = prevRaising;
             // Give back the handler headroom so the next overflow is detected at the normal limit.
             if (!prev && co.Stack.Length > Coroutine.StackLimit) Array.Resize(ref co.Stack, Coroutine.StackLimit);
         }
@@ -209,6 +212,14 @@ internal static partial class Interpreter
                 if (tm.Ref is not LuaClosure cl) return Special.None;
                 st[fa] = tm;
                 Frame nf = Precall(co, cl, fa, 1, wanted, null, proto, pc);
+                co.ResumeFrame = nf;
+                return Special.NewFrame;
+            }
+            case BuiltinKind.DoFile:
+            {
+                LuaClosure chunk = LoadLib.LoadForDoFile(state, st.AsSpan(fa + 1, nargs));
+                st[fa] = LuaValue.FromObject(chunk);
+                Frame nf = Precall(co, chunk, fa, 0, wanted, null, proto, pc);
                 co.ResumeFrame = nf;
                 return Special.NewFrame;
             }

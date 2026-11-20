@@ -14,6 +14,10 @@ public static class SuiteRunner
     public static readonly TimeSpan FileTimeout = TimeSpan.FromMinutes(5);
     private static readonly object CwdLock = new();
 
+    /// <summary>The CLI apphost built next to the test assembly: what a suite file spawns as "the interpreter".</summary>
+    public static string LauncherPath { get; } =
+        Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "Lunette.Cli.exe" : "Lunette.Cli");
+
     public static string RepoRoot { get; } = FindRepoRoot();
     public static string SuiteDir => Path.Combine(RepoRoot, "tests", "lua-suite");
     public static string WaiverPath => Path.Combine(RepoRoot, "tests", "suite", "waivers.toml");
@@ -55,11 +59,15 @@ public static class SuiteRunner
         try
         {
             CopyDirectory(suiteDir ?? SuiteDir, temp);
+            // attrib.lua writes libs/P1/*.lua; upstream ships that directory empty, which a vendored copy cannot carry.
+            Directory.CreateDirectory(Path.Combine(temp, "libs", "P1"));
             // Latin1 maps every byte to one char and back, so the suite's non-UTF-8 sources reach the engine byte for byte.
             string path = Path.Combine(temp, file);
             string source = waivers.ApplyOverlays(file, File.ReadAllText(path, Encoding.Latin1));
             if (source.StartsWith('#')) source = "--" + source; // the standalone interpreter skips a leading '#' line
             if (file == "all.lua") source = "_U=true;" + source;
+            // As the standalone interpreter would: arg[0] is the script and arg[-1] the launcher (files.lua and main.lua spawn it).
+            source = $"arg={{[-1]=[===[{LauncherPath}]===],[0]=[===[{file}]===]}};" + source;
             // big.lua yields 'b' and returns 'a'; all.lua drives it as a coroutine body, so do the same here.
             if (file == "big.lua")
             {

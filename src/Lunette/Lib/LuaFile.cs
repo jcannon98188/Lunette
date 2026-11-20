@@ -34,6 +34,9 @@ internal sealed class LuaFile
     }
 
     public bool IsClosed { get; private set; }
+
+    /// <summary>Called once when the file closes (the library uses it to drop its strong reference).</summary>
+    public Action<LuaFile>? OnClose { get; set; }
     public bool IsStandard { get; }
     public IPlatformProcess? Process { get; }
     public BufferMode Mode { get; private set; }
@@ -245,11 +248,12 @@ internal sealed class LuaFile
     public ProcessStatus? Close()
     {
         if (IsClosed) return null;
-        IsClosed = true;
         ProcessStatus? status = null;
         try { Flush(); }
         finally
         {
+            IsClosed = true;
+            OnClose?.Invoke(this);
             if (Process is { } p)
             {
                 try { status = p.Wait(); }

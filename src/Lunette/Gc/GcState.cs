@@ -94,6 +94,8 @@ internal sealed class GcState
         Interlocked.Increment(ref _pendingCount);
     }
 
+    private bool _closing;
+
     internal bool HasPending => Volatile.Read(ref _pendingCount) != 0;
 
     // ---- finalizer drain (Lua thread) ----
@@ -126,7 +128,11 @@ internal sealed class GcState
             LuaValue tm = mt is null ? default : mt.GetTagMethod(TagMethod.Gc);
             if (tm.IsNil) continue;
             ran++;
-            if (!Interpreter.TryCall1(_state, tm, LuaValue.FromObject(target), out LuaValue error))
+            bool ok;
+            LuaValue error;
+            try { ok = Interpreter.TryCall1(_state, tm, LuaValue.FromObject(target), out error); }
+            catch (LuaExitException) when (_closing) { continue; } // os.exit(_, true) while closing: the rest still run, as lua_close would
+            if (!ok)
                 Warning("error in __gc (" + (error.Ref is byte[] s ? new LuaString(s).ToString() : "error object is not a string") + ")");
         }
         return ran;
@@ -265,6 +271,7 @@ internal sealed class GcState
     {
         if (_closed) return;
         _inCollector = true;
+        _closing = true;
         try
         {
             var batch = new List<FinalizerMark>();
