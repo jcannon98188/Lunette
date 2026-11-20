@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Lunette/Lunette.csproj" />
+    <Project Path="src/Lunette.Analyzers/Lunette.Analyzers.csproj" />
+    <Project Path="src/Lunette.Cli/Lunette.Cli.csproj" />
+    <Project Path="src/Lunette.Interop/Lunette.Interop.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Lunette.Tests/Lunette.Tests.csproj" />
+  </Folder>
+</Solution>

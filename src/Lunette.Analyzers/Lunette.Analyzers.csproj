@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Roslyn requires netstandard2.0 for analyzer assemblies (ADR 0004 exception). Analyzers arrive in a later ticket. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>Lunette.Analyzers</AssemblyName>
+    <RootNamespace>Lunette.Analyzers</RootNamespace>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <ImplicitUsings>disable</ImplicitUsings>
+  </PropertyGroup>
+</Project>

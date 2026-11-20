@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Lunette.Interop</AssemblyName>
+    <RootNamespace>Lunette.Interop</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Lunette\Lunette.csproj" />
+  </ItemGroup>
+</Project>

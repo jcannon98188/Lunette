@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>Lunette.Cli</AssemblyName>
+    <RootNamespace>Lunette.Cli</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Lunette\Lunette.csproj" />
+  </ItemGroup>
+</Project>

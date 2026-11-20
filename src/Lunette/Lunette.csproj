@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Lunette</AssemblyName>
+    <RootNamespace>Lunette</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Lunette.Tests" />
+  </ItemGroup>
+</Project>
