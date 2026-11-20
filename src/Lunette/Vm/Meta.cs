@@ -18,8 +18,16 @@ internal static class Meta
 
     private static string At(Proto? p, int pc) => p is null ? "" : Interpreter.Where(p, pc) + " ";
 
-    private static LuaException IndexError(LuaValue v, Proto? p, int pc) =>
-        new($"{At(p, pc)}attempt to index a {v.TypeName} value");
+    private static LuaException IndexError(LuaValue v, Proto? p, int pc, bool original)
+    {
+        string info = "";
+        if (original && p is not null)
+        {
+            var i = p.Code[pc];
+            info = VarInfo.Describe(p, pc, i.Op == OpCode.SetTable ? i.A : i.B);
+        }
+        return new LuaException($"{At(p, pc)}attempt to index a {v.TypeName} value{info}");
+    }
 
     // ---- indexing ----
 
@@ -41,7 +49,7 @@ internal static class Meta
             else
             {
                 tm = GetTagMethod(t, TagMethod.Index);
-                if (tm.IsNil) throw IndexError(t, p, pc);
+                if (tm.IsNil) throw IndexError(t, p, pc, loop == 0);
             }
             if (tm.IsFunction) return Interpreter.Call1(state, tm, t, key, default, 2);
             t = tm;
@@ -75,7 +83,7 @@ internal static class Meta
             else
             {
                 tm = GetTagMethod(t, TagMethod.NewIndex);
-                if (tm.IsNil) throw IndexError(t, p, pc);
+                if (tm.IsNil) throw IndexError(t, p, pc, loop == 0);
             }
             if (tm.IsFunction)
             {
@@ -113,8 +121,9 @@ internal static class Meta
         if (tm.IsNil) tm = GetTagMethod(b, ev);
         if (tm.IsNil)
         {
-            LuaValue bad = a.IsNumber ? b : a;
-            throw new LuaException($"{At(p, pc)}attempt to perform {OperationName(ev)} on a {bad.TypeName} value");
+            bool left = !a.IsNumber;
+            LuaValue bad = left ? a : b;
+            throw new LuaException($"{At(p, pc)}attempt to perform {OperationName(ev)} on a {bad.TypeName} value{VarInfo.DescribeOperand(p, pc, left)}");
         }
         return Interpreter.Call1(state, tm, a, b, default, 2);
     }
@@ -127,7 +136,7 @@ internal static class Meta
     public static LuaValue Unary(LuaState state, TagMethod ev, LuaValue a, Proto? p, int pc)
     {
         LuaValue tm = GetTagMethod(a, ev);
-        if (tm.IsNil) throw new LuaException($"{At(p, pc)}attempt to perform {OperationName(ev)} on a {a.TypeName} value");
+        if (tm.IsNil) throw new LuaException($"{At(p, pc)}attempt to perform {OperationName(ev)} on a {a.TypeName} value{VarInfo.DescribeOperand(p, pc, true)}");
         return Interpreter.Call1(state, tm, a, a, default, 2);
     }
 
@@ -142,7 +151,7 @@ internal static class Meta
             return Interpreter.Call1(state, tm, v, v, default, 2);
         }
         if (v.Ref is string s) return LuaValue.FromInteger(s.Length);
-        throw new LuaException($"{At(p, pc)}attempt to get length of a {v.TypeName} value");
+        throw new LuaException($"{At(p, pc)}attempt to get length of a {v.TypeName} value{VarInfo.DescribeOperand(p, pc, true)}");
     }
 
     public static bool Equal(LuaState state, LuaValue a, LuaValue b)

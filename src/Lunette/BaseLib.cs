@@ -33,7 +33,7 @@ internal static class BaseLib
             LuaValue v = Arg(args, 0);
             if (v.Ref is LuaTable t) return [LuaValue.FromInteger(t.Length())];
             if (v.Ref is string s) return [LuaValue.FromInteger(s.Length)];
-            throw new LuaException("table or string expected");
+            throw ArgError(1, "rawlen", "table or string expected");
         });
         Add(state, "setmetatable", SetMetatable);
         Add(state, "getmetatable", (_, args) =>
@@ -51,7 +51,7 @@ internal static class BaseLib
 
     private static LuaValue Arg(ReadOnlySpan<LuaValue> args, int i) => i < args.Length ? args[i] : default;
 
-    private static LuaException ArgError(int n, string fn, string msg) => new($"bad argument #{n} to '{fn}' ({msg})");
+    private static LuaException ArgError(int n, string fn, string msg) => LuaErrors.ArgError(n, fn, msg);
 
     private static LuaTable CheckTable(ReadOnlySpan<LuaValue> args, int n, string fn)
     {
@@ -96,7 +96,7 @@ internal static class BaseLib
         LuaValue m = Arg(args, 1);
         if (!(m.IsNil || m.Ref is LuaTable)) throw ArgError(2, "setmetatable", "nil or table expected");
         if (t.Metatable is not null && !t.Metatable.Get(ProtectedKey).IsNil)
-            throw new LuaException("cannot change a protected metatable");
+            throw LuaErrors.Error("cannot change a protected metatable");
         t.Metatable = m.Ref as LuaTable;
         return [args[0]];
     }

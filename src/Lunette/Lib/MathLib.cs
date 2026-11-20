@@ -52,7 +52,7 @@ internal sealed class MathLib
     // ---- argument checking (messages follow luaL_argerror / luaL_typeerror) ----
 
     private static LuaException ArgError(string fn, int index, string msg) =>
-        new($"bad argument #{index + 1} to '{fn}' ({msg})");
+        LuaErrors.ArgError(index + 1, fn, msg);
 
     private static LuaException TypeError(string fn, LuaValue[] args, int index, string expected) =>
         ArgError(fn, index, $"{expected} expected, got {(index < args.Length ? args[index].TypeName : "no value")}");
@@ -208,7 +208,7 @@ internal sealed class MathLib
                 up = Int("random", a, 1);
                 break;
             default:
-                throw new LuaException("wrong number of arguments");
+                throw LuaErrors.Error("wrong number of arguments");
         }
         if (low > up) throw ArgError("random", a.Length - 1, "interval is empty");
         return One(LuaValue.FromInteger(unchecked((long)(Project(rv, (ulong)up - (ulong)low) + (ulong)low))));

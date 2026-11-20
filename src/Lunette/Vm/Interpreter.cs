@@ -6,7 +6,7 @@ namespace Lunette.Vm;
 /// The VM loop. Lua-to-Lua calls push heap Frames and continue in this one loop; the .NET
 /// stack never grows with Lua call depth (ADR 0002).
 /// </summary>
-internal static class Interpreter
+internal static partial class Interpreter
 {
     private const double Two63 = 9223372036854775808.0;
 
@@ -85,7 +85,7 @@ internal static class Interpreter
         {
             LuaValue tm = Meta.GetTagMethod(co.Stack[fa], TagMethod.Call);
             if (tm.IsNil || guard > 100)
-                throw new LuaException($"{(p is null ? "" : Where(p, pc) + " ")}attempt to call a {co.Stack[fa].TypeName} value");
+                throw new LuaException($"{(p is null ? "" : Where(p, pc) + " ")}attempt to call a {co.Stack[fa].TypeName} value{VarInfo.DescribeCallee(p, pc)}");
             co.EnsureStack(fa + nargs + 2, p, pc);
             var st = co.Stack;
             Array.Copy(st, fa, st, fa + 1, nargs + 1);
@@ -95,7 +95,35 @@ internal static class Interpreter
         return nargs;
     }
 
+    /// <summary>
+    /// Runs the dispatch loop. The only <c>try</c> lives here, outside the loop method: a thrown LuaException
+    /// is converted to pending-error state, unwound to the nearest protected Frame and the loop re-entered (ADR 0003).
+    /// </summary>
     private static int Run(LuaState state, Coroutine co, Frame f, int stop)
+    {
+        int top = 0;
+        while (true)
+        {
+            try
+            {
+                return RunLoop(state, co, f, stop, top);
+            }
+            catch (Exception e) when (IsLuaError(e))
+            {
+                LuaException ex = AsLuaException(e);
+                Locate(co, ex);
+                if (!Unwind(state, co, stop, ex.Value))
+                {
+                    if (ReferenceEquals(ex, e)) throw;
+                    throw ex;
+                }
+            }
+            f = co.ResumeFrame!;
+            top = co.ResumeTop;
+        }
+    }
+
+    private static int RunLoop(LuaState state, Coroutine co, Frame f, int stop, int top)
     {
         LuaClosure cl;
         Proto proto;
@@ -103,7 +131,6 @@ internal static class Interpreter
         LuaValue[] k;
         LuaValue[] r;
         int bs, pc;
-        int top = 0;
 
     newframe:
         cl = f.Closure;
@@ -254,6 +281,23 @@ internal static class Interpreter
                         f = Precall(co, callee, fa, nargs, wanted, null, proto, pc - 1);
                         goto newframe;
                     }
+                    var bf = (BuiltinFunction)r[fa].Ref!;
+                    if (bf.Kind != BuiltinKind.None)
+                    {
+                        Special sp = CallSpecial(state, co, bf.Kind, fa, nargs, wanted, stop, proto, pc - 1);
+                        if (sp == Special.NewFrame)
+                        {
+                            f = co.ResumeFrame!;
+                            top = co.ResumeTop;
+                            goto newframe;
+                        }
+                        if (sp == Special.Done)
+                        {
+                            r = co.Stack;
+                            if (wanted < 0) top = co.ResumeTop;
+                            break;
+                        }
+                    }
                     int end = CallBuiltin(state, co, fa, nargs, wanted, proto, pc - 1);
                     r = co.Stack;
                     if (wanted < 0) top = end;
@@ -276,6 +320,24 @@ internal static class Interpreter
                         goto newframe;
                     }
                     // Builtins cannot be tail-called in place: run it and let the Return that follows pass on its results.
+                    f.Pc = pc;
+                    var tbf = (BuiltinFunction)r[fa].Ref!;
+                    if (tbf.Kind != BuiltinKind.None)
+                    {
+                        Special sp = CallSpecial(state, co, tbf.Kind, fa, nargs, -1, stop, proto, pc - 1);
+                        if (sp == Special.NewFrame)
+                        {
+                            f = co.ResumeFrame!;
+                            top = co.ResumeTop;
+                            goto newframe;
+                        }
+                        if (sp == Special.Done)
+                        {
+                            r = co.Stack;
+                            top = co.ResumeTop;
+                            break;
+                        }
+                    }
                     top = CallBuiltin(state, co, fa, nargs, -1, proto, pc - 1);
                     r = co.Stack;
                     break;
@@ -287,6 +349,13 @@ internal static class Interpreter
                     if (co.OpenUpvals.Count > 0) co.Close(bs);
                     int dst = f.FuncIdx;
                     int wanted = f.Wanted;
+                    if (f.PcallKind != 0)
+                    {
+                        // A protected call's results are (true, ...) at its own base; wanted counts the status too.
+                        dst = f.PcallBase;
+                        r[dst++] = LuaValue.FromBoolean(true);
+                        if (wanted > 0) wanted--;
+                    }
                     if (wanted < 0)
                     {
                         Array.Copy(r, ra, r, dst, n);

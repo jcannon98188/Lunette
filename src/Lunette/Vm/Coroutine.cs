@@ -31,6 +31,12 @@ internal sealed class Frame
     public int Wanted;
     public int VarargBase;
     public int VarargCount;
+    /// <summary>Non-zero when this Frame is the target of a pcall (1) or xpcall (2): errors below it stop here.</summary>
+    public byte PcallKind;
+    /// <summary>Stack index where a protected call puts its status (true/false); its results follow.</summary>
+    public int PcallBase;
+    /// <summary>The xpcall message handler.</summary>
+    public LuaValue Handler;
 }
 
 /// <summary>A growable value stack plus its Frames and open upvalues.</summary>
@@ -39,9 +45,19 @@ internal sealed class Coroutine
     /// <summary>Largest stack, in slots, matching PUC's LUAI_MAXSTACK.</summary>
     public const int StackLimit = 1_000_000;
 
+    /// <summary>Extra slots granted to a message handler running after a stack overflow (PUC's ERRORSTACKSIZE).</summary>
+    public const int HandlerHeadroom = 200;
+
+    /// <summary>True while an xpcall message handler runs: the stack may exceed <see cref="StackLimit"/> by <see cref="HandlerHeadroom"/>.</summary>
+    public bool InHandler;
+
     public LuaValue[] Stack = new LuaValue[256];
     public Frame?[] Frames = new Frame?[16];
     public int Depth;
+    /// <summary>Where the dispatch loop resumes after a handled error or a recognised builtin: the Frame...</summary>
+    public Frame? ResumeFrame;
+    /// <summary>...and the value of its <c>top</c> (the end of a variable result list).</summary>
+    public int ResumeTop;
     /// <summary>First stack index free for calls made on behalf of metamethods and builtins.</summary>
     public int CallTop;
     /// <summary>Open upvalues, ascending by stack index.</summary>
@@ -50,24 +66,28 @@ internal sealed class Coroutine
     public void Reset()
     {
         Depth = 0;
+        InHandler = false;
         OpenUpvals.Clear();
     }
 
     public void EnsureStack(int size, Proto? where, int pc)
     {
         if (size <= Stack.Length) return;
-        if (size > StackLimit)
+        if (size > StackLimit + (InHandler ? HandlerHeadroom : 0))
         {
+            if (InHandler) throw new LuaException("error in error handling");
             string prefix = where is null ? "" : Interpreter.Where(where, pc) + " ";
             throw new LuaException(prefix + "stack overflow");
         }
-        Array.Resize(ref Stack, Math.Max(size, Math.Min(Stack.Length * 2, StackLimit)));
+        Array.Resize(ref Stack, Math.Max(size, Math.Min(Stack.Length * 2, InHandler ? StackLimit + HandlerHeadroom : StackLimit)));
     }
 
     public Frame PushFrame()
     {
         if (Depth == Frames.Length) Array.Resize(ref Frames, Frames.Length * 2);
-        return Frames[Depth++] ??= new Frame();
+        Frame f = Frames[Depth++] ??= new Frame();
+        f.PcallKind = 0;
+        return f;
     }
 
     public UpVal FindUpval(int index)

@@ -18,8 +18,8 @@ internal static class Arith
                 case OpCode.Mod: return LuaValue.FromInteger(IntMod(x, y, p, pc));
             }
         }
-        if (!a.TryToNumber(out double fa)) throw Fail(a, p, pc);
-        if (!b.TryToNumber(out double fb)) throw Fail(b, p, pc);
+        if (!a.TryToNumber(out double fa)) throw Fail(a, true, p, pc);
+        if (!b.TryToNumber(out double fb)) throw Fail(b, false, p, pc);
         return LuaValue.FromFloat(op switch
         {
             OpCode.Add => fa + fb,
@@ -57,8 +57,9 @@ internal static class Arith
         if (LuaNumber.TryToInteger(v, out long n)) return n;
         if (!a.IsNumber || !b.IsNumber)
         {
-            LuaValue bad = a.IsNumber ? b : a;
-            throw new LuaException($"{Interpreter.Where(p, pc)} attempt to perform bitwise operation on a {bad.TypeName} value");
+            bool left = !a.IsNumber;
+            LuaValue bad = left ? a : b;
+            throw new LuaException($"{Interpreter.Where(p, pc)} attempt to perform bitwise operation on a {bad.TypeName} value{VarInfo.DescribeOperand(p, pc, left)}");
         }
         throw new LuaException($"{Interpreter.Where(p, pc)} number has no integer representation");
     }
@@ -67,7 +68,7 @@ internal static class Arith
     {
         if (a.IsInteger) return LuaValue.FromInteger(unchecked(-a.AsInteger));
         if (a.IsFloat) return LuaValue.FromFloat(-a.AsFloat);
-        throw Fail(a, p, pc);
+        throw Fail(a, true, p, pc);
     }
 
     private static long IntFloorDiv(long x, long y, Proto p, int pc)
@@ -95,6 +96,6 @@ internal static class Arith
         return m;
     }
 
-    private static LuaException Fail(LuaValue v, Proto p, int pc) =>
-        new($"{Interpreter.Where(p, pc)} attempt to perform arithmetic on a {v.TypeName} value");
+    private static LuaException Fail(LuaValue v, bool left, Proto p, int pc) =>
+        new($"{Interpreter.Where(p, pc)} attempt to perform arithmetic on a {v.TypeName} value{VarInfo.DescribeOperand(p, pc, left)}");
 }
