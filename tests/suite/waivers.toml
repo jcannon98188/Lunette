@@ -10,3 +10,8 @@
 # ticket = "..."            # required for bug-wontfix
 # expires = "2027-01-01"    # required for bug-wontfix
 # note = "..."
+
+[[waiver]]
+file   = "gengc.lua"
+reason = "gc-accounting"
+note   = "Generational-mode accounting (collectgarbage(\"generational\") young/old sizing) has no .NET GC equivalent; collectgarbage accepts the mode switch and reports the previous mode. Waived whole."

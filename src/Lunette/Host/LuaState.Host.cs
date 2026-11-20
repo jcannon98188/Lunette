@@ -201,6 +201,8 @@ public sealed partial class LuaState
         LuaTable? mt = null;
         for (Type? t = value.GetType(); t is not null && mt is null; t = t.BaseType)
             _typeMetatables.TryGetValue(t, out mt);
-        return new LuaUserdata(value, mt);
+        var userdata = new LuaUserdata(value, mt);
+        Gc.OnSetMetatable(userdata, mt);
+        return userdata;
     }
 }

@@ -262,6 +262,19 @@ public class GcTests
     }
 
     [Fact]
+    public void Host_userdata_with_a_gc_metamethod_is_finalized_on_Dispose()
+    {
+        var output = new StringWriter { NewLine = "\n" };
+        var state = new LuaState { Output = output };
+        state.DoString("""Mt = {__gc = function(o) print("userdata gc") end}""");
+        state.RegisterMetatable<List<int>>((LuaTable)state.GetGlobal("Mt").Ref!);
+        state.SetGlobal("U", LuaValue.FromObject(state.CreateUserdata(new List<int>())));
+        Assert.Equal("", output.ToString());
+        state.Dispose();
+        Assert.Equal("userdata gc\n", output.ToString());
+    }
+
+    [Fact]
     public void Dispose_swallows_finalizer_errors()
     {
         var state = new LuaState { Output = new StringWriter() };

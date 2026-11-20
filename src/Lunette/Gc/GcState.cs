@@ -17,7 +17,7 @@ internal sealed class GcState
     private const long MinCycleBytes = 16L << 20;
 
     private readonly LuaState _state;
-    private readonly ConditionalWeakTable<LuaTable, FinalizerMark> _marks = new();
+    private readonly ConditionalWeakTable<object, FinalizerMark> _marks = new();
     private readonly ConcurrentQueue<FinalizerMark> _pending = new();
     private readonly List<WeakReference<FinalizerMark>> _registry = [];
     private readonly List<WeakReference<LuaTable>> _weakTables = [];
@@ -43,15 +43,15 @@ internal sealed class GcState
 
     // ---- marking ----
 
-    /// <summary>Called whenever <c>setmetatable</c> installs <paramref name="mt"/> on <paramref name="t"/>.</summary>
-    internal void OnSetMetatable(LuaTable t, LuaTable? mt)
+    /// <summary>Called whenever a metatable is installed on a table or userdata (<c>setmetatable</c>, userdata creation).</summary>
+    internal void OnSetMetatable(object target, LuaTable? mt)
     {
         if (mt is null) return;
-        if (!mt.GetTagMethod(TagMethod.Gc).IsNil) Mark(t);
-        if (!mt.GetTagMethod(TagMethod.Mode).IsNil) RegisterWeak(t);
+        if (!mt.GetTagMethod(TagMethod.Gc).IsNil) Mark(target);
+        if (target is LuaTable t && !mt.GetTagMethod(TagMethod.Mode).IsNil) RegisterWeak(t);
     }
 
-    private void Mark(LuaTable t)
+    private void Mark(object t)
     {
         if (_closed) return;
         if (_marks.TryGetValue(t, out FinalizerMark? old))
@@ -120,12 +120,13 @@ internal sealed class GcState
             if (m.Done) continue;
             m.Done = true;
             GC.SuppressFinalize(m);
-            var target = (LuaTable)m.Target;
+            object target = m.Target;
             if (_marks.TryGetValue(target, out FinalizerMark? current) && ReferenceEquals(current, m)) _marks.Remove(target);
-            LuaValue tm = target.Metatable is null ? default : target.Metatable.GetTagMethod(TagMethod.Gc);
+            LuaTable? mt = target is LuaTable tt ? tt.Metatable : ((LuaUserdata)target).Metatable;
+            LuaValue tm = mt is null ? default : mt.GetTagMethod(TagMethod.Gc);
             if (tm.IsNil) continue;
             ran++;
-            if (!Interpreter.TryCall1(_state, tm, LuaValue.FromTable(target), out LuaValue error))
+            if (!Interpreter.TryCall1(_state, tm, LuaValue.FromObject(target), out LuaValue error))
                 Warning("error in __gc (" + (error.Ref is byte[] s ? new LuaString(s).ToString() : "error object is not a string") + ")");
         }
         return ran;
