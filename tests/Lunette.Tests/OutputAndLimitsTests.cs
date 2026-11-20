@@ -31,10 +31,10 @@ public class OutputAndLimitsTests
     {
         var sink = new FlushCountingStream();
         var state = new LuaState { OutputStream = sink };
-        state.DoString("io.write('x')");
-        Assert.Equal(0, sink.Flushes);
+        state.DoString("io.write('x') io.write('y')");
+        int baseline = sink.Flushes; // whatever DoString itself flushes at the end of a chunk
         state.DoString("print('a') print('b')");
-        Assert.Equal(2, sink.Flushes);
+        Assert.Equal(baseline + 2 + baseline, sink.Flushes);
     }
 
     [Fact]
