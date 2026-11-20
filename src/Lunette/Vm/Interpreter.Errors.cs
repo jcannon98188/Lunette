@@ -244,6 +244,14 @@ internal static partial class Interpreter
             {
                 // A Lua __pairs metamethod runs as an ordinary Frame so that it can yield; its first three results are pairs' results.
                 if (nargs == 0 || wanted < 0) return Special.None;
+                if (st[fa + 1].Ref is LuaTable { Metatable: null } plain && state.NextFunction is { } nextFn)
+                {
+                    // No __pairs is possible: hand back next, the table and nil in place.
+                    st[fa] = LuaValue.FromObject(nextFn);
+                    st[fa + 1] = LuaValue.FromTable(plain);
+                    for (int j = 2; j < wanted; j++) st[fa + j] = default;
+                    return Special.Done;
+                }
                 LuaTable? mt = Meta.GetMetatable(state, st[fa + 1]);
                 LuaValue tm = mt is null ? default : mt.Get(LuaValue.FromString(state.Strings.FromUtf16("__pairs")));
                 if (tm.Ref is not LuaClosure cl) return Special.None;
@@ -251,6 +259,22 @@ internal static partial class Interpreter
                 Frame nf = Precall(co, cl, fa, 1, wanted, null, proto, pc);
                 co.ResumeFrame = nf;
                 return Special.NewFrame;
+            }
+            case BuiltinKind.Next:
+            {
+                if (nargs == 0 || st[fa + 1].Ref is not LuaTable nt) return Special.None;
+                bool more = nt.Next(nargs > 1 ? st[fa + 2] : default, out LuaValue nk, out LuaValue nv);
+                if (!more) { nk = default; nv = default; }
+                return Deliver(st, co, fa, wanted, nk, nv, more ? 2 : 1);
+            }
+            case BuiltinKind.IpairsAux:
+            {
+                if (nargs < 2 || st[fa + 1].Ref is not LuaTable it || !st[fa + 2].IsInteger) return Special.None;
+                long idx = unchecked(st[fa + 2].AsInteger + 1);
+                ref readonly LuaValue iv = ref it.GetIntRef(idx);
+                if (!iv.IsNil) return Deliver(st, co, fa, wanted, LuaValue.FromInteger(idx), iv, 2);
+                if (!it.NoIndex) return Special.None;
+                return Deliver(st, co, fa, wanted, default, default, 1);
             }
             case BuiltinKind.DoFile:
             {
@@ -284,6 +308,21 @@ internal static partial class Interpreter
             default:
                 return Special.None;
         }
+    }
+
+    /// <summary>Places a builtin's one or two results at <paramref name="fa"/> the way CallBuiltin would: padded or trimmed to <paramref name="wanted"/>, or all of them (setting the top) when it is negative.</summary>
+    private static Special Deliver(LuaValue[] st, Coroutine co, int fa, int wanted, in LuaValue a, in LuaValue b, int n)
+    {
+        st[fa] = a;
+        if (wanted < 0)
+        {
+            if (n > 1) st[fa + 1] = b;
+            co.ResumeTop = fa + n;
+            return Special.Done;
+        }
+        if (wanted > 1) st[fa + 1] = n > 1 ? b : default;
+        for (int j = 2; j < wanted; j++) st[fa + j] = default;
+        return Special.Done;
     }
 
     /// <summary>

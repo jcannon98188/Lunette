@@ -58,7 +58,7 @@ internal static class Meta
         if (original && p is not null)
         {
             var i = p.Code[pc];
-            info = VarInfo.Describe(p, pc, i.Op == OpCode.SetTable ? i.A : i.B);
+            info = VarInfo.Describe(p, pc, i.Op is OpCode.SetTable or OpCode.SetField ? i.A : i.B);
         }
         return new LuaException($"{At(p, pc)}attempt to index a {ObjTypeName(v)} value{info}");
     }

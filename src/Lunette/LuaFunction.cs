@@ -32,6 +32,10 @@ internal enum BuiltinKind : byte
     DoFile,
     /// <summary>A host function made with LuaState.CreateFunction: it may request a yield.</summary>
     Host,
+    /// <summary><c>next</c>: the interpreter steps a plain table without going through the builtin's argument span and result array.</summary>
+    Next,
+    /// <summary>The iterator <c>ipairs</c> returns: a hit in a table's array part is delivered in place.</summary>
+    IpairsAux,
 }
 
 internal sealed class BuiltinFunction(BuiltinBody body, BuiltinKind kind = BuiltinKind.None) : LuaFunction

@@ -468,6 +468,12 @@ internal sealed class LuaCompiler
         int save2 = _fs.Free;
         int envR = env.Reg;
         if (env.IsFolded) { envR = Alloc(); EmitFolded(env.Folded, envR, line); }
+        if (k <= 255)
+        {
+            Emit(Instruction.Abc(OpCode.GetField, target, envR, k), line);
+            _fs.Free = save2;
+            return;
+        }
         int key = Alloc();
         EmitLoadK(key, k, line);
         Emit(Instruction.Abc(OpCode.GetTable, target, envR, key), line);
@@ -498,6 +504,12 @@ internal sealed class LuaCompiler
         int save2 = _fs.Free;
         int envR = env.Reg;
         if (env.IsFolded) { envR = Alloc(); EmitFolded(env.Folded, envR, line); }
+        if (k <= 255)
+        {
+            Emit(Instruction.Abc(OpCode.SetField, envR, k, source), line);
+            _fs.Free = save2;
+            return;
+        }
         int key = Alloc();
         EmitLoadK(key, k, line);
         Emit(Instruction.Abc(OpCode.SetTable, envR, key, source), line);
@@ -765,9 +777,14 @@ internal sealed class LuaCompiler
             {
                 if (field.Length > 0)
                 {
-                    int kk = Alloc();
-                    EmitLoadK(kk, AddConst(NameConst(field)), line);
-                    Emit(Instruction.Abc(OpCode.GetTable, obj, obj, kk), line);
+                    int fk = ConstOperand(NameConst(field));
+                    if (fk >= 0) Emit(Instruction.Abc(OpCode.GetField, obj, obj, fk), line);
+                    else
+                    {
+                        int kk = Alloc();
+                        EmitLoadK(kk, StringConst(field), line);
+                        Emit(Instruction.Abc(OpCode.GetTable, obj, obj, kk), line);
+                    }
                     _fs.Free = obj + 1;
                 }
                 isMethod = _tok.Kind == Tok.Colon;
@@ -775,11 +792,17 @@ internal sealed class LuaCompiler
                 field = ExpectName();
                 if (isMethod) break;
             }
-            int key = Alloc();
-            EmitLoadK(key, AddConst(NameConst(field)), line);
+            int sk = ConstOperand(NameConst(field));
+            int key = -1;
+            if (sk < 0)
+            {
+                key = Alloc();
+                EmitLoadK(key, StringConst(field), line);
+            }
             int fnReg = Alloc();
             FunctionBody(fnReg, line, isMethod);
-            Emit(Instruction.Abc(OpCode.SetTable, obj, key, fnReg), line);
+            if (sk >= 0) Emit(Instruction.Abc(OpCode.SetField, obj, sk, fnReg), line);
+            else Emit(Instruction.Abc(OpCode.SetTable, obj, key, fnReg), line);
         }
         else
         {
@@ -878,6 +901,7 @@ internal sealed class LuaCompiler
         public string Name;
         public int Table;
         public int Key;
+        public bool KeyIsK; // Key is a constant index (SetField), not a register
         public int CallIdx;
         public int Line;
     }
@@ -939,7 +963,7 @@ internal sealed class LuaCompiler
             var p = places[i];
             if (p.Kind == 0 && places.Count == 1 && n == 1 && open < 0 && TryRetargetLocal(p.Name, exprStart, baseReg)) continue;
             if (p.Kind == 0) StoreVariable(p.Name, baseReg + i, storeLine);
-            else Emit(Instruction.Abc(OpCode.SetTable, p.Table, p.Key, baseReg + i), storeLine);
+            else Emit(Instruction.Abc(p.KeyIsK ? OpCode.SetField : OpCode.SetTable, p.Table, p.Key, baseReg + i), storeLine);
         }
         _fs.Free = save;
     }
@@ -956,11 +980,11 @@ internal sealed class LuaCompiler
             for (int i = 0; i < places.Count; i++)
             {
                 var p = places[i];
-                if (p.Kind != 1 || (p.Table != local.Reg && p.Key != local.Reg)) continue;
+                if (p.Kind != 1 || (p.Table != local.Reg && (p.KeyIsK || p.Key != local.Reg))) continue;
                 int tmp = Alloc();
                 Emit(Instruction.Abc(OpCode.Move, tmp, local.Reg, 0), _lastLine);
                 if (p.Table == local.Reg) p.Table = tmp;
-                if (p.Key == local.Reg) p.Key = tmp;
+                if (!p.KeyIsK && p.Key == local.Reg) p.Key = tmp;
                 places[i] = p;
             }
         }
@@ -968,7 +992,7 @@ internal sealed class LuaCompiler
 
     private static bool Retargetable(OpCode op) =>
         op is OpCode.Move or OpCode.LoadK or OpCode.LoadBool or OpCode.GetGlobal or OpCode.GetUpval or OpCode.Unm or OpCode.Not
-            or OpCode.BNot or OpCode.Len or OpCode.Concat or OpCode.GetTable or OpCode.Eq or OpCode.Lt or OpCode.Le
+            or OpCode.BNot or OpCode.Len or OpCode.Concat or OpCode.GetTable or OpCode.GetField or OpCode.Eq or OpCode.Lt or OpCode.Le
         || Lunette.Vm.Meta.IsBinaryArith(op);
 
     /// <summary>
@@ -1004,23 +1028,32 @@ internal sealed class LuaCompiler
                     src = -1;
                     int key = _fs.Free;
                     int keyReg = key;
+                    int kc = -1; // constant index of a string key reachable by a K operand
                     if (_tok.Kind == Tok.Dot)
                     {
                         Advance();
                         string name = ExpectName();
-                        int k = Alloc();
-                        EmitLoadK(k, AddConst(NameConst(name)), l);
+                        kc = ConstOperand(NameConst(name));
+                        if (kc < 0) EmitLoadK(Alloc(), StringConst(name), l);
                     }
                     else
                     {
                         Advance();
-                        if (TryOperand(0, false, false, out var kind, out int idx) && kind == OperandKind.Reg) keyReg = idx;
-                        else Expr(Alloc(), 0);
+                        if (_tok.Kind == Tok.String && Peek().Kind == Tok.RBracket && (kc = ConstOperand(LuaValue.FromString(_tok.Str))) >= 0)
+                        {
+                            Advance();
+                        }
+                        else
+                        {
+                            kc = -1;
+                            if (TryOperand(0, false, false, out var kind, out int idx) && kind == OperandKind.Reg) keyReg = idx;
+                            else Expr(Alloc(), 0);
+                        }
                         Expect(Tok.RBracket, "]");
                     }
                     if (place && !IsSuffixStart(_tok.Kind))
-                        return new Place { Kind = 1, Table = tbl, Key = keyReg, Line = l };
-                    Emit(Instruction.Abc(OpCode.GetTable, reg, tbl, keyReg), l);
+                        return new Place { Kind = 1, Table = tbl, Key = kc >= 0 ? kc : keyReg, KeyIsK = kc >= 0, Line = l };
+                    Emit(kc >= 0 ? Instruction.Abc(OpCode.GetField, reg, tbl, kc) : Instruction.Abc(OpCode.GetTable, reg, tbl, keyReg), l);
                     _fs.Free = Math.Max(key, reg + 1);
                     _openIdx = -1;
                     break;
@@ -1476,9 +1509,9 @@ internal sealed class LuaCompiler
     /// </summary>
     private void RelabelPendingLeft(int start, int opLine)
     {
-        if (Here <= start || _fs.Code[Here - 1].Op is not (OpCode.GetGlobal or OpCode.GetUpval or OpCode.GetTable)) return;
+        if (Here <= start || _fs.Code[Here - 1].Op is not (OpCode.GetGlobal or OpCode.GetUpval or OpCode.GetTable or OpCode.GetField)) return;
         for (int pc = start; pc < Here; pc++)
-            if (_fs.Code[pc].Op is not (OpCode.Move or OpCode.LoadK or OpCode.GetGlobal or OpCode.GetUpval or OpCode.GetTable)) return;
+            if (_fs.Code[pc].Op is not (OpCode.Move or OpCode.LoadK or OpCode.GetGlobal or OpCode.GetUpval or OpCode.GetTable or OpCode.GetField)) return;
         for (int pc = start; pc < Here; pc++) _fs.Lines[pc] = opLine;
     }
 
@@ -1598,9 +1631,14 @@ internal sealed class LuaCompiler
         if (method is not null)
         {
             Alloc(); // fn + 1 receives the receiver
-            int k = Alloc();
-            EmitLoadK(k, AddConst(NameConst(method)), line);
-            Emit(Instruction.Abc(OpCode.Self, fn, fromSrc ? src : fn, k), line);
+            int mk = ConstOperand(NameConst(method));
+            if (mk >= 0) Emit(Instruction.Abc(OpCode.SelfK, fn, fromSrc ? src : fn, mk), line);
+            else
+            {
+                int k = Alloc();
+                EmitLoadK(k, StringConst(method), line);
+                Emit(Instruction.Abc(OpCode.Self, fn, fromSrc ? src : fn, k), line);
+            }
             _fs.Free = fn + 2;
             extra = 1;
         }
@@ -1674,13 +1712,25 @@ internal sealed class LuaCompiler
             int itemSave = _fs.Free;
             if (_tok.Kind == Tok.Name && Peek().Kind == Tok.Assign)
             {
-                int k = Alloc();
-                EmitLoadK(k, AddConst(LuaValue.FromString(_tok.Str)), _tok.Line);
-                Advance();
-                Advance();
-                int v = Alloc();
-                Expr(v, 0);
-                Emit(Instruction.Abc(OpCode.SetTable, t, k, v), line);
+                int fk = ConstOperand(LuaValue.FromString(_tok.Str));
+                if (fk >= 0)
+                {
+                    Advance();
+                    Advance();
+                    int fv = Alloc();
+                    Expr(fv, 0);
+                    Emit(Instruction.Abc(OpCode.SetField, t, fk, fv), line);
+                }
+                else
+                {
+                    int k = Alloc();
+                    EmitLoadK(k, AddConst(LuaValue.FromString(_tok.Str)), _tok.Line);
+                    Advance();
+                    Advance();
+                    int v = Alloc();
+                    Expr(v, 0);
+                    Emit(Instruction.Abc(OpCode.SetTable, t, k, v), line);
+                }
                 _fs.Free = itemSave;
                 hashSize++;
             }

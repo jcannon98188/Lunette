@@ -192,3 +192,42 @@ Remaining gap: the loop is one method with a 0x958-byte frame and the JIT keeps 
 `newframe` plus 8 Frame stores. Next steps toward 2.5x: shrink the loop's frame (move cold case bodies and their struct temporaries out of line, which also cuts the 2.3 KB prologue
 zeroing paid by every native-to-Lua callback), cache open-upvalue slots, and a struct-of-arrays frame stack. The builtin protocol (span in, `LuaValue[]` out) is untouched; writing results
 straight to the stack needs a signature change across the libraries.
+
+## 7. After ticket 43 (tables, field access, pairs/ipairs, string-receiver SELF)
+
+Interleaved against the commit before ticket 43 (which already has 41 and 42), 7 rounds, median wall ms in WSL (startup about 100 ms; ratio = net of startup against PUC 5.4.9):
+
+| benchmark | before | after | ratio before | ratio after |
+|---|---:|---:|---:|---:|
+| n-body | 1187 | 824 | 3.2x | 2.1x |
+| nsieve | 1466 | 1220 | 1.87x | 1.53x |
+| fannkuch | 474 | 401 | 3.1x | 2.5x |
+| k-nucleotide | 411 | 338 | 2.6x | 2.0x |
+| binary-trees | 653 | 633 | 1.24x | 1.20x |
+| spectral-norm | 497 | 483 | 3.0x | 2.9x |
+| fib, mandelbrot, string-heavy | unchanged within noise | | | |
+
+A pairs/ipairs micro loop (100-element array and hash, 60k rounds) went 1050 -> 850 ms (PUC 476).
+
+Kept:
+- **Constant-key opcodes.** `GetField`, `SetField` and `SelfK` take the name as a K operand (first 256 constants; a name beyond that falls back to a `LoadK` plus `GetTable`/`SetTable`/`Self`).
+  `t.x`, `t["x"]`, `t.x = v`, constructor `x = v`, `function a.b.c()`, `obj:m()` and globals through a local `_ENV` use them, so a field access is one dispatch with no key load.
+  `VarInfo`, `Meta.IndexError` and `DebugLib.MetaName` know the new shapes, so variable names in errors ("field 'x'", "method 'm'", "global 'g'") and metamethod naming are unchanged.
+- **Table fast paths.** Reference-returning lookups (`GetStrRef`, `GetIntRef`, `GetRef`), so a read copies straight from the node or array slot; string keys hash by mask using the cached
+  header hash (no `%`); integer keys in the hash part use a 32-bit modulo when the key fits; a string-key compare is a reference test before the byte compare; the sized constructor allocates
+  the array and node vectors directly; `SetList` is one `Array.Copy` (`SetRange`); integer stores no longer clear the metamethod-absence cache. `NoIndex`/`NoNewIndex` read the cached
+  absent-metamethod bits, so a store to a table whose metatable has no `__newindex` (for example an object with a class metatable) stays on the raw path.
+- **Interpreter.** `GetTable`/`SetTable` take integer and string keys inline; the metamethod and error paths moved to out-of-line `IndexSlow`/`SetSlow` (the run loop got smaller, not larger);
+  `SelfK` on a string receiver reads the `string` table through `StringMethod` instead of `Meta.PrepareIndex`.
+- **Iteration.** `next` and the `ipairs` iterator run inside `CallSpecial` (arguments and results in place, no span and no result array), `pairs` of a plain table returns `next, t, nil` in
+  place (it used to intern `"__pairs"` on every call). Misses, `__index` tables and every error go to the builtin bodies, so messages are the same. These are only taken for `Special.Done` results, so
+  call/return hooks still see the builtin events.
+
+No new `Lunette.Unsafe` helpers (`Regs.At` and `Regs.Copy` only), so the safe twin needed nothing new.
+
+Not done, and why: the generic `for` still costs three `Move`s, a `Call` and a `TForLoop` per iteration (a fused `TForCall` would also have to change the "for iterator" call-site naming and the
+hook instruction counts); `CallValues` still copies its argument span (it is not on the path of any benchmark here); `GetI`/`SetI` constant-integer forms (nsieve and fannkuch index with
+variables, so the register-key path they use is already the inline integer branch).
+
+Remaining gap: field-heavy float code is now dominated by the 16-byte value copies and the per-instruction dispatch (n-body 2.1x), and the `Call`/`Return` pair (fib, spectral-norm) is untouched by
+this ticket.

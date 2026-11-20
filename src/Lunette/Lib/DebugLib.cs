@@ -195,8 +195,8 @@ internal static class DebugLib
             OpCode.Le or OpCode.JLe or OpCode.JLeK or OpCode.JGeK => TagMethod.Le,
             OpCode.Concat => TagMethod.Concat,
             OpCode.Len => TagMethod.Len,
-            OpCode.GetTable or OpCode.Self => TagMethod.Index,
-            OpCode.SetTable => TagMethod.NewIndex,
+            OpCode.GetTable or OpCode.GetField or OpCode.Self or OpCode.SelfK => TagMethod.Index,
+            OpCode.SetTable or OpCode.SetField => TagMethod.NewIndex,
             OpCode.Close or OpCode.Return => TagMethod.Close,
             _ => null,
         };

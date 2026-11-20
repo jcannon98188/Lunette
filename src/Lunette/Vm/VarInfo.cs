@@ -59,8 +59,14 @@ internal static class VarInfo
             case OpCode.GetTable:
                 name = KeyName(p, setreg, i.C);
                 return IsEnvLocal(p, setreg, i.B) ? "global" : "field";
+            case OpCode.GetField:
+                name = KeyConstName(p, i.C);
+                return IsEnvLocal(p, setreg, i.B) ? "global" : "field";
             case OpCode.Self:
                 name = KeyName(p, setreg, i.C);
+                return "method";
+            case OpCode.SelfK:
+                name = KeyConstName(p, i.C);
                 return "method";
             case OpCode.LoadK:
                 if (p.Constants[i.Bx].Ref is byte[] s)
@@ -104,6 +110,7 @@ internal static class VarInfo
             case OpCode.Vararg:
                 return reg >= i.A && (i.C == 0 || reg < i.A + i.C - 1);
             case OpCode.Self:
+            case OpCode.SelfK:
                 return reg == i.A || reg == i.A + 1;
             case OpCode.ForPrep:
             case OpCode.ForLoop:
@@ -125,6 +132,7 @@ internal static class VarInfo
             case OpCode.Closure:
             case OpCode.NewTable:
             case OpCode.GetTable:
+            case OpCode.GetField:
             case OpCode.Len:
                 return reg == i.A;
             default:

@@ -27,6 +27,9 @@ internal static class TagMethods
 
     public static readonly LuaValue[] Names = BuildNames();
 
+    /// <summary>The headered string backing of each name in <see cref="Names"/>, for lookups by string key.</summary>
+    public static readonly byte[][] Backing = Array.ConvertAll(Names, n => (byte[])n.Ref!);
+
     private static LuaValue[] BuildNames()
     {
         var names = new LuaValue[Spelling.Length];
@@ -69,10 +72,24 @@ public sealed partial class LuaTable
     {
     }
 
+    /// <summary>A table whose array part has <paramref name="arraySize"/> slots and whose hash part holds <paramref name="hashSize"/> entries, with nothing to move.</summary>
     public LuaTable(int arraySize, int hashSize)
     {
-        if (arraySize != 0 || hashSize != 0) Resize(arraySize, hashSize);
+        if (arraySize != 0)
+        {
+            _arr = new LuaValue[arraySize];
+            _limit = arraySize;
+        }
+        if (hashSize != 0)
+        {
+            int size = 1 << CeilLog2((uint)hashSize);
+            _nodes = new Node[size];
+            _lastFree = size;
+        }
     }
+
+    /// <summary>The nil that lookups of absent keys return a reference to; never written.</summary>
+    private static readonly LuaValue s_nil = default;
 
     // ---- metamethod cache ----
 
@@ -83,11 +100,11 @@ public sealed partial class LuaTable
         {
             byte bit = (byte)(1 << (int)e);
             if ((Flags & bit) != 0) return default;
-            LuaValue v = Get(TagMethods.Names[(int)e]);
+            LuaValue v = GetStrRef(TagMethods.Backing[(int)e]);
             if (v.IsNil) Flags |= bit;
             return v;
         }
-        return Get(TagMethods.Names[(int)e]);
+        return GetStrRef(TagMethods.Backing[(int)e]);
     }
 
     internal bool AbsentTagMethod(TagMethod e) => GetTagMethod(e).IsNil;
@@ -99,18 +116,27 @@ public sealed partial class LuaTable
     private int MainPosition(in LuaValue key)
     {
         int size = _nodes.Length;
-        if (key.IsInteger)
-        {
-            ulong ui = (ulong)key.Bits;
-            return (int)(ui % (ulong)((size - 1) | 1));
-        }
+        if (key.IsInteger) return IntPosition(key.Bits, size);
+        if (key.Ref is byte[] str) return StrPosition(str, size);
         if (key.IsFloat) return HashMod(HashFloat(key.AsFloat), size);
         if (key.IsBoolean) return (key.AsBooleanBit & (size - 1));
-        if (key.Ref is byte[] str) return HashMod((uint)new LuaString(str).Hash, size);
         return HashMod((uint)key.Ref!.GetHashCode(), size);
     }
 
     private static int HashMod(uint h, int size) => (int)(h % (uint)((size - 1) | 1));
+
+    /// <summary>Main position of an integer key: key modulo an odd size (PUC's hashint), as a 32-bit division when the key fits.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int IntPosition(long key, int size)
+    {
+        ulong ui = (ulong)key;
+        uint m = (uint)((size - 1) | 1);
+        return ui <= uint.MaxValue ? (int)((uint)ui % m) : (int)(ui % m);
+    }
+
+    /// <summary>Main position of a string key: its hash masked to the power-of-two node count (PUC's lmod), with no division.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int StrPosition(byte[] str, int size) => (int)((uint)new LuaString(str).Hash & (uint)(size - 1));
 
     private static uint HashFloat(double n)
     {
@@ -161,7 +187,7 @@ public sealed partial class LuaTable
     {
         Node[] nodes = _nodes;
         if (nodes.Length == 0) return -1;
-        int n = (int)((ulong)k % (ulong)((nodes.Length - 1) | 1));
+        int n = IntPosition(k, nodes.Length);
         while (true)
         {
             ref Node nd = ref nodes[n];
@@ -169,6 +195,74 @@ public sealed partial class LuaTable
             if (nd.Next == 0) return -1;
             n += nd.Next;
         }
+    }
+
+    /// <summary>Index of the node holding string key <paramref name="key"/> or -1: reference equality first, then length, cached hash and bytes.</summary>
+    [LuaHotPath]
+    private int FindNodeStr(byte[] key)
+    {
+        Node[] nodes = _nodes;
+        if (nodes.Length == 0) return -1;
+        int n = StrPosition(key, nodes.Length);
+        while (true)
+        {
+            ref Node nd = ref nodes[n];
+            object? kr = nd.Key.Ref;
+            if (ReferenceEquals(kr, key) || (kr is byte[] other && new LuaString(key).Equals(new LuaString(other)))) return n;
+            if (nd.Next == 0) return -1;
+            n += nd.Next;
+        }
+    }
+
+    /// <summary>Reference to the value stored under string key <paramref name="key"/> (a headered string backing), or to a nil when absent. Never write through it.</summary>
+    [LuaHotPath]
+    internal ref readonly LuaValue GetStrRef(byte[] key)
+    {
+        int n = FindNodeStr(key);
+        if (n >= 0) return ref _nodes[n].Value;
+        return ref s_nil;
+    }
+
+    /// <summary>Reference to the value stored under integer key <paramref name="k"/>, or to a nil when absent. Never write through it.</summary>
+    [LuaHotPath]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal ref readonly LuaValue GetIntRef(long k)
+    {
+        LuaValue[] a = _arr;
+        ulong idx = (ulong)k - 1;
+        if (idx < (ulong)_limit && idx < (ulong)a.Length) return ref a[idx];
+        return ref GetIntRefSlow(k);
+    }
+
+    [LuaHotPath]
+    private ref readonly LuaValue GetIntRefSlow(long k)
+    {
+        int i = ArrayIndex(k);
+        if (i >= 0) return ref _arr[i];
+        int n = FindNodeInt(k);
+        if (n >= 0) return ref _nodes[n].Value;
+        return ref s_nil;
+    }
+
+    /// <summary>Reference to the value stored under any key (nil and NaN find nothing; floats with an integer value find the integer), or to a nil. Never write through it.</summary>
+    [LuaHotPath]
+    internal ref readonly LuaValue GetRef(in LuaValue key)
+    {
+        if (key.IsInteger) return ref GetIntRef(key.Bits);
+        if (key.Ref is byte[] s) return ref GetStrRef(s);
+        return ref GetRefOther(key);
+    }
+
+    [LuaHotPath]
+    private ref readonly LuaValue GetRefOther(in LuaValue key)
+    {
+        if (key.Ref is null) return ref s_nil;
+        LuaValue nk = Normalize(key);
+        if (nk.IsInteger) return ref GetIntRef(nk.Bits);
+        if (nk.IsFloat && double.IsNaN(nk.AsFloat)) return ref s_nil;
+        int n = FindNode(nk);
+        if (n >= 0) return ref _nodes[n].Value;
+        return ref s_nil;
     }
 
     private int FindNode(in LuaValue key)
@@ -185,31 +279,34 @@ public sealed partial class LuaTable
     }
 
     [LuaHotPath]
-    public LuaValue GetInt(long k)
-    {
-        int i = ArrayIndex(k);
-        if (i >= 0) return _arr[i];
-        int n = FindNodeInt(k);
-        return n >= 0 ? _nodes[n].Value : default;
-    }
+    public LuaValue GetInt(long k) => GetIntRef(k);
 
     [LuaHotPath]
-    public LuaValue Get(LuaValue key)
-    {
-        if (key.IsInteger) return GetInt(key.Bits);
-        if (key.Ref is null) return default;
-        key = Normalize(key);
-        if (key.IsInteger) return GetInt(key.Bits);
-        if (key.IsFloat && double.IsNaN(key.AsFloat)) return default;
-        int n = FindNode(key);
-        return n >= 0 ? _nodes[n].Value : default;
-    }
+    public LuaValue Get(LuaValue key) => GetRef(in key);
 
     // ---- store ----
 
-    public void SetInt(long k, LuaValue value)
+    [LuaHotPath]
+    public void SetInt(long k, LuaValue value) => SetInt(k, in value);
+
+    /// <summary>Raw store under integer key <paramref name="k"/>: straight into the array part when the key is inside it.</summary>
+    [LuaHotPath]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void SetInt(long k, in LuaValue value)
     {
-        Flags = 0;
+        LuaValue[] a = _arr;
+        ulong idx = (ulong)k - 1;
+        if (idx < (ulong)_limit && idx < (ulong)a.Length)
+        {
+            a[idx] = value;
+            return;
+        }
+        SetIntSlow(k, in value);
+    }
+
+    [LuaHotPath]
+    private void SetIntSlow(long k, in LuaValue value)
+    {
         int i = ArrayIndex(k);
         if (i >= 0) { _arr[i] = value; return; }
         int n = FindNodeInt(k);
@@ -217,10 +314,58 @@ public sealed partial class LuaTable
         NewKey(LuaValue.FromInteger(k), value);
     }
 
+    /// <summary>Raw store under string key <paramref name="key"/> (a headered string backing).</summary>
+    [LuaHotPath]
+    internal void SetStr(byte[] key, in LuaValue value)
+    {
+        Flags = 0;
+        int n = FindNodeStr(key);
+        if (n >= 0) { _nodes[n].Value = value; return; }
+        NewKey(LuaValue.FromObject(key), value);
+    }
+
+    /// <summary>
+    /// Stores <paramref name="count"/> values from <paramref name="src"/> at <paramref name="srcIndex"/> under keys <paramref name="offset"/> + 1 onwards
+    /// (a constructor's SetList): the array part is grown once, then the values are copied straight in.
+    /// </summary>
+    internal void SetRange(int offset, LuaValue[] src, int srcIndex, int count)
+    {
+        EnsureArray(offset + count);
+        if (_limit == _arr.Length && (uint)(offset + count) <= (uint)_arr.Length)
+        {
+            Array.Copy(src, srcIndex, _arr, offset, count);
+            return;
+        }
+        for (int j = 1; j <= count; j++) SetInt(offset + j, in src[srcIndex + j - 1]);
+    }
+
+    /// <summary>True when stores to this table never need the <c>__newindex</c> metamethod: it has no metatable, or the metatable lacks the event.</summary>
+    internal bool NoNewIndex
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get
+        {
+            LuaTable? mt = Metatable;
+            return mt is null || (mt.Flags & (1 << (int)TagMethod.NewIndex)) != 0 || mt.GetTagMethod(TagMethod.NewIndex).IsNil;
+        }
+    }
+
+    /// <summary>True when reads that miss in this table never need the <c>__index</c> metamethod (no metatable, or the metatable lacks the event).</summary>
+    internal bool NoIndex
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get
+        {
+            LuaTable? mt = Metatable;
+            return mt is null || (mt.Flags & (1 << (int)TagMethod.Index)) != 0 || mt.GetTagMethod(TagMethod.Index).IsNil;
+        }
+    }
+
     /// <summary>Raw set; throws for nil and NaN keys.</summary>
     public void Set(LuaValue key, LuaValue value)
     {
-        if (key.IsInteger) { SetInt(key.Bits, value); return; }
+        if (key.IsInteger) { SetInt(key.Bits, in value); return; }
+        if (key.Ref is byte[] s) { SetStr(s, in value); return; }
         key = Normalize(key);
         if (key.IsInteger) { SetInt(key.Bits, value); return; }
         if (key.Ref is null) ThrowBadKey("table index is nil");

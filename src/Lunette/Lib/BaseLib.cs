@@ -11,8 +11,9 @@ internal static class BaseLib
 
     public static void Register(LuaState state)
     {
-        var next = new BuiltinFunction(Next);
-        var ipairsAux = new BuiltinFunction(IpairsAux);
+        var next = new BuiltinFunction(Next, BuiltinKind.Next);
+        state.NextFunction = next;
+        var ipairsAux = new BuiltinFunction(IpairsAux, BuiltinKind.IpairsAux);
         Add(state, "type", Type);
         state.Define("next", LuaValue.FromObject(next));
         state.Define("pairs", LuaValue.FromObject(new BuiltinFunction((st, args) => Pairs(st, args, next), BuiltinKind.Pairs)));

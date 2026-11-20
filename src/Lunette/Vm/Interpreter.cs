@@ -781,58 +781,79 @@ internal static partial class Interpreter
                 }
                 case OpCode.GetTable:
                 {
-                    LuaValue obj = r[bs + i.B], key = r[bs + i.C];
-                    if (obj.Ref is LuaTable t)
+                    if (Regs.At(r, bs + i.B).Ref is LuaTable t)
                     {
-                        LuaValue v = t.Get(key);
-                        if (!v.IsNil || t.Metatable is null)
+                        ref readonly LuaValue v = ref t.GetRef(in Regs.At(r, bs + i.C));
+                        if (!v.IsNil || t.NoIndex)
                         {
-                            r[bs + i.A] = v;
+                            Regs.Copy(ref Regs.At(r, bs + i.A), in v);
                             break;
                         }
                     }
-                    if (Meta.PrepareIndex(state, obj, key, proto, pc - 1, out LuaValue res, out MetaCall mc))
+                    goto indexslow;
+                }
+                case OpCode.GetField:
+                {
+                    if (Regs.At(r, bs + i.B).Ref is LuaTable t)
                     {
-                        Frame? nf = StartMeta(state, co, f, in mc, Continuation.Value, bs + i.A, pc, proto, out res);
-                        if (nf is not null)
+                        ref readonly LuaValue v = ref t.GetStrRef((byte[])Regs.At(k, i.C).Ref!);
+                        if (!v.IsNil || t.NoIndex)
                         {
-                            f = nf;
-                            goto newframe;
+                            Regs.Copy(ref Regs.At(r, bs + i.A), in v);
+                            break;
                         }
-                        r = co.Stack;
                     }
-                    r[bs + i.A] = res;
-                    break;
+                    goto indexslow;
                 }
                 case OpCode.SetTable:
                 {
-                    LuaValue obj = r[bs + i.A];
-                    if (obj.Ref is LuaTable t && t.Metatable is null) Meta.RawSet(t, r[bs + i.B], r[bs + i.C], proto, pc - 1);
-                    else
+                    if (Regs.At(r, bs + i.A).Ref is LuaTable t && t.NoNewIndex)
                     {
-                        if (Meta.PrepareSetIndex(state, obj, r[bs + i.B], r[bs + i.C], proto, pc - 1, out MetaCall mc))
+                        ref LuaValue key = ref Regs.At(r, bs + i.B);
+                        if (ReferenceEquals(key.Ref, LuaValue.IntegerTag))
                         {
-                            Frame? nf = StartMeta(state, co, f, in mc, Continuation.Discard, 0, pc, proto, out LuaValue res);
-                        if (nf is not null)
+                            t.SetInt(key.Bits, in Regs.At(r, bs + i.C));
+                            break;
+                        }
+                        if (key.Ref is byte[] s)
                         {
-                            f = nf;
-                            goto newframe;
+                            t.SetStr(s, in Regs.At(r, bs + i.C));
+                            break;
                         }
-                        r = co.Stack;
-                        }
-                        r = co.Stack;
                     }
-                    break;
+                    goto setslow;
+                }
+                case OpCode.SetField:
+                {
+                    if (Regs.At(r, bs + i.A).Ref is LuaTable t && t.NoNewIndex)
+                    {
+                        t.SetStr((byte[])Regs.At(k, i.B).Ref!, in Regs.At(r, bs + i.C));
+                        break;
+                    }
+                    goto setslow;
                 }
                 case OpCode.SetList:
                 {
                     int offset = code[pc++].Ax;
                     int ra = bs + i.A;
                     int n = i.B != 0 ? i.B : top - ra - 1;
-                    var t = (LuaTable)r[ra].Ref!;
-                    t.EnsureArray(offset + n);
-                    for (int j = 1; j <= n; j++) t.SetInt(offset + j, r[ra + j]);
+                    ((LuaTable)r[ra].Ref!).SetRange(offset, r, ra + 1, n);
                     break;
+                }
+                case OpCode.SelfK:
+                {
+                    ref LuaValue obj = ref Regs.At(r, bs + i.B);
+                    byte[] key = (byte[])Regs.At(k, i.C).Ref!;
+                    ref readonly LuaValue v = ref s_nilValue;
+                    if (obj.Ref is LuaTable t) v = ref t.GetStrRef(key);
+                    else if (obj.Ref is byte[]) v = ref StringMethod(state, key);
+                    if (!v.IsNil)
+                    {
+                        Regs.Copy(ref Regs.At(r, bs + i.A + 1), in obj);
+                        Regs.Copy(ref Regs.At(r, bs + i.A), in v);
+                        break;
+                    }
+                    goto indexslow;
                 }
                 case OpCode.Self:
                 {
@@ -905,6 +926,28 @@ internal static partial class Interpreter
                     r = co.Stack;
                     break;
                 }
+                indexslow:
+                {
+                    Frame? nf = IndexSlow(state, co, f, i, bs, pc, proto, k);
+                    if (nf is not null)
+                    {
+                        f = nf;
+                        goto newframe;
+                    }
+                    r = co.Stack;
+                    break;
+                }
+                setslow:
+                {
+                    Frame? nf = SetSlow(state, co, f, i, bs, pc, proto, k);
+                    if (nf is not null)
+                    {
+                        f = nf;
+                        goto newframe;
+                    }
+                    r = co.Stack;
+                    break;
+                }
                 condslow:
                 {
                     Frame? nf = CondSlow(state, co, f, i, bs, pc, proto, k, out bool take);
@@ -924,6 +967,48 @@ internal static partial class Interpreter
                 }
             }
         }
+    }
+
+    private static readonly LuaValue s_nilValue = default;
+
+    /// <summary>The entry for <paramref name="key"/> in the table the string metatable's __index names (the <c>string</c> library), or nil when there is none.</summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static ref readonly LuaValue StringMethod(LuaState state, byte[] key)
+    {
+        LuaTable? smt = state.StringMetatable;
+        if (smt is not null && smt.GetTagMethod(TagMethod.Index).Ref is LuaTable idx) return ref idx.GetStrRef(key);
+        return ref s_nilValue;
+    }
+
+    /// <summary>
+    /// GetTable, GetField, Self and SelfK when the inline lookup did not settle it: a miss on a table with a metatable, a non-table receiver, or an error.
+    /// Returns the Frame of an __index function that finishes the instruction, or null when the result is stored.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static Frame? IndexSlow(LuaState state, Coroutine co, Frame f, Instruction i, int bs, int pc, Proto proto, LuaValue[] k)
+    {
+        LuaValue[] r = co.Stack;
+        OpCode op = i.Op;
+        LuaValue obj = r[bs + i.B];
+        LuaValue key = op is OpCode.GetField or OpCode.SelfK ? k[i.C] : r[bs + i.C];
+        if (op is OpCode.Self or OpCode.SelfK) r[bs + i.A + 1] = obj;
+        if (Meta.PrepareIndex(state, obj, key, proto, pc - 1, out LuaValue res, out MetaCall mc))
+        {
+            Frame? nf = StartMeta(state, co, f, in mc, Continuation.Value, bs + i.A, pc, proto, out res);
+            if (nf is not null) return nf;
+        }
+        co.Stack[bs + i.A] = res;
+        return null;
+    }
+
+    /// <summary>SetTable and SetField when the inline store did not apply: a metatable with __newindex, a non-table, an unusual key, or an error.</summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static Frame? SetSlow(LuaState state, Coroutine co, Frame f, Instruction i, int bs, int pc, Proto proto, LuaValue[] k)
+    {
+        LuaValue[] r = co.Stack;
+        LuaValue key = i.Op == OpCode.SetField ? k[i.B] : r[bs + i.B];
+        if (!Meta.PrepareSetIndex(state, r[bs + i.A], key, r[bs + i.C], proto, pc - 1, out MetaCall mc)) return null;
+        return StartMeta(state, co, f, in mc, Continuation.Discard, 0, pc, proto, out _);
     }
 
     /// <summary>

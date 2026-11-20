@@ -17,6 +17,8 @@ public sealed partial class LuaState : IDisposable
     internal readonly StringCache Strings;
     /// <summary>The metatable shared by all string values; its __index is the string library table.</summary>
     internal LuaTable? StringMetatable;
+    /// <summary>The <c>next</c> builtin that <c>pairs</c> returns, kept so the interpreter can hand it back without calling pairs' body.</summary>
+    internal BuiltinFunction? NextFunction;
     /// <summary>The registry table (debug.getregistry).</summary>
     internal LuaTable? Registry;
     /// <summary>Metatables shared by all values of nil, boolean, number, function, thread and userdata (debug.setmetatable).</summary>
