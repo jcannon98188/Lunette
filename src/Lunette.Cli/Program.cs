@@ -30,7 +30,8 @@ public static class Program
         }
         catch (LuaException e)
         {
-            stderr.WriteLine($"lunette: {e.Message}");
+            stderr.WriteLine($"lunette: {e.Describe(state)}");
+            if (e.Traceback is not null) stderr.WriteLine(e.Traceback);
             return 1;
         }
         return 0;

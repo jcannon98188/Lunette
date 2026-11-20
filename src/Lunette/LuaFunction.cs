@@ -26,6 +26,7 @@ internal enum BuiltinKind : byte
     Xpcall,
     Yield,
     Collect,
+    SetHook,
     /// <summary>A host function made with LuaState.CreateFunction: it may request a yield.</summary>
     Host,
 }

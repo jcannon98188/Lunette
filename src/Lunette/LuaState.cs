@@ -16,6 +16,28 @@ public sealed partial class LuaState : IDisposable
     internal readonly StringCache Strings;
     /// <summary>The metatable shared by all string values; its __index is the string library table.</summary>
     internal LuaTable? StringMetatable;
+    /// <summary>The registry table (debug.getregistry).</summary>
+    internal LuaTable? Registry;
+    /// <summary>Metatables shared by all values of nil, boolean, number, function, thread and userdata (debug.setmetatable).</summary>
+    private LuaTable?[]? _primitiveMetatables;
+
+    internal LuaTable? TypeMetatable(LuaValue v) => _primitiveMetatables?[TypeSlot(v)];
+
+    internal void SetTypeMetatable(LuaValue v, LuaTable? mt)
+    {
+        _primitiveMetatables ??= new LuaTable?[6];
+        _primitiveMetatables[TypeSlot(v)] = mt;
+    }
+
+    private static int TypeSlot(LuaValue v) => v.TypeName switch
+    {
+        "nil" => 0,
+        "boolean" => 1,
+        "number" => 2,
+        "function" => 3,
+        "thread" => 4,
+        _ => 5,
+    };
     internal readonly Coroutine Main = new();
     /// <summary>The coroutine currently executing.</summary>
     internal Coroutine Running;
@@ -55,6 +77,7 @@ public sealed partial class LuaState : IDisposable
         ErrorLib.Register(this);
         CoroutineLib.Register(this);
         GcLib.Register(this);
+        DebugLib.Register(this);
     }
 
     /// <summary>

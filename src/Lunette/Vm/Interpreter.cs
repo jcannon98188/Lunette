@@ -69,6 +69,7 @@ internal static partial class Interpreter
             {
                 int stop = co.Depth;
                 Frame f = Precall(co, cl, fa, nargs, -1, null, null, 0);
+                f.Native = true;
                 return Run(state, co, f, stop) - fa;
             }
             return CallBuiltin(state, co, fa, nargs, -1, null, 0) - fa;
@@ -107,10 +108,18 @@ internal static partial class Interpreter
         {
             try
             {
-                int result = RunLoop(state, co, f, stop, top);
-                if (!co.CollectPending) return result;
-                top = RunCollect(state, co);
-                f = co.Frames[co.Depth - 1]!;
+                int result = co.Traced ? RunLoop<TracedLoop>(state, co, f, stop, top) : RunLoop<FastLoop>(state, co, f, stop, top);
+                if (co.CollectPending)
+                {
+                    top = RunCollect(state, co);
+                    f = co.Frames[co.Depth - 1]!;
+                    continue;
+                }
+                if (!co.Reenter) return result;
+                // sethook switched this coroutine between the fast and the traced loop: continue where it stopped.
+                co.Reenter = false;
+                f = co.ResumeFrame!;
+                top = co.ResumeTop;
                 continue;
             }
             catch (Exception e) when (IsLuaError(e))
@@ -119,6 +128,12 @@ internal static partial class Interpreter
                 Locate(co, ex);
                 if (!Unwind(state, co, stop, ex.Value))
                 {
+                    DebugLib.NoteFault(co, ex);
+                    if (state.NativeDepth == 0)
+                    {
+                        ex.Traceback ??= DebugLib.CaptureTraceback(state, co);
+                        co.RaisingBuiltin = default;
+                    }
                     if (ReferenceEquals(ex, e)) throw;
                     throw ex;
                 }
@@ -130,7 +145,8 @@ internal static partial class Interpreter
 
     [LuaInterpreterLoop]
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
-    private static int RunLoop(LuaState state, Coroutine co, Frame f, int stop, int top)
+    private static int RunLoop<TMode>(LuaState state, Coroutine co, Frame f, int stop, int top)
+        where TMode : struct, ILoopMode
     {
         LuaClosure cl;
         Proto proto;
@@ -148,9 +164,19 @@ internal static partial class Interpreter
         bs = f.Base;
         pc = f.Pc;
         co.CallTop = bs + proto.MaxStack;
+        if (TMode.Traced)
+        {
+            TraceEnter(state, co, f, pc, top);
+            r = co.Stack;
+        }
 
         while (true)
         {
+            if (TMode.Traced)
+            {
+                TraceInstruction(state, co, f, pc, top);
+                r = co.Stack;
+            }
             Instruction i = code[pc++];
             switch (i.Op)
             {
@@ -363,6 +389,7 @@ internal static partial class Interpreter
                         goto newframe;
                     }
                     var bf = (BuiltinFunction)r[fa].Ref!;
+                    if (TMode.Traced) TraceBuiltin(state, co, bf, Math.Max(top, fa + nargs + 1), true);
                     if (bf.Kind != BuiltinKind.None)
                     {
                         Special sp = CallSpecial(state, co, bf.Kind, fa, nargs, wanted, stop, proto, pc - 1);
@@ -373,16 +400,30 @@ internal static partial class Interpreter
                             goto newframe;
                         }
                         if (sp is Special.Yield or Special.Collect) return top;
+                        if (sp == Special.Reenter)
+                        {
+                            if (wanted < 0) top = co.ResumeTop;
+                            co.ResumeFrame = f;
+                            co.ResumeTop = top;
+                            return top;
+                        }
                         if (sp == Special.Done)
                         {
                             r = co.Stack;
                             if (wanted < 0) top = co.ResumeTop;
+                            if (TMode.Traced) TraceBuiltin(state, co, bf, top, false);
+                            r = co.Stack;
                             break;
                         }
                     }
                     int end = CallBuiltin(state, co, fa, nargs, wanted, proto, pc - 1);
                     r = co.Stack;
                     if (wanted < 0) top = end;
+                    if (TMode.Traced)
+                    {
+                        TraceBuiltin(state, co, bf, Math.Max(top, end), false);
+                        r = co.Stack;
+                    }
                     break;
                 }
                 case OpCode.TailCall:
@@ -401,11 +442,13 @@ internal static partial class Interpreter
                         if (co.OpenUpvals.Count > 0) co.Close(bs);
                         Array.Copy(r, fa, r, f.FuncIdx, nargs + 1);
                         f = Precall(co, callee, f.FuncIdx, nargs, f.Wanted, f, proto, pc - 1);
+                        f.IsTail = true;
                         goto newframe;
                     }
                     // Builtins cannot be tail-called in place: run it and let the Return that follows pass on its results.
                     f.Pc = pc;
                     var tbf = (BuiltinFunction)r[fa].Ref!;
+                    if (TMode.Traced) TraceBuiltin(state, co, tbf, Math.Max(top, fa + nargs + 1), true);
                     if (tbf.Kind != BuiltinKind.None)
                     {
                         Special sp = CallSpecial(state, co, tbf.Kind, fa, nargs, -1, stop, proto, pc - 1);
@@ -416,6 +459,11 @@ internal static partial class Interpreter
                             goto newframe;
                         }
                         if (sp is Special.Yield or Special.Collect) return top;
+                        if (sp == Special.Reenter)
+                        {
+                            co.ResumeFrame = f;
+                            return top;
+                        }
                         if (sp == Special.Done)
                         {
                             r = co.Stack;
@@ -424,6 +472,7 @@ internal static partial class Interpreter
                         }
                     }
                     top = CallBuiltin(state, co, fa, nargs, -1, proto, pc - 1);
+                    if (TMode.Traced) TraceBuiltin(state, co, tbf, top, false);
                     r = co.Stack;
                     break;
                 }
@@ -431,6 +480,11 @@ internal static partial class Interpreter
                 {
                     int ra = bs + i.A;
                     int n = i.B != 0 ? i.B - 1 : top - ra;
+                    if (TMode.Traced)
+                    {
+                        TraceReturn(state, co, f, pc, Math.Max(top, ra + n));
+                        r = co.Stack;
+                    }
                     if (co.OpenUpvals.Count > 0) co.Close(bs);
                     if (co.Tbc.Count > 0 && co.Tbc[^1] >= bs)
                     {
@@ -780,8 +834,6 @@ internal static partial class Interpreter
 
     internal static string Where(Proto p, int pc)
     {
-        string n = p.ChunkName;
-        string name = n.Length > 0 && (n[0] is '=' or '@') ? n[1..] : $"[string \"{n}\"]";
-        return $"{name}:{p.Lines[pc]}:";
+        return $"{DebugLib.ChunkId(p.ChunkName)}:{p.Lines[pc]}:";
     }
 }

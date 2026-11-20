@@ -11,6 +11,8 @@ Lunette.HostContinuation
 Lunette.HostFunction
 Lunette.LuaException
 Lunette.LuaException.LuaException(string! message) -> void
+Lunette.LuaException.Traceback.get -> string?
+Lunette.LuaException.Describe(Lunette.LuaState! state) -> string!
 Lunette.LuaFunction
 Lunette.LuaLimits
 Lunette.LuaLimits.InstructionLimit.get -> long
