@@ -191,6 +191,22 @@ jobs:
           global-json-file: global.json
       - run: dotnet test -c Release --filter "DisplayName~files.lua|DisplayName~main.lua" tests/Lunette.Tests
 
+  # The upstream driver all.lua in ONE standalone-CLI process (every file shares one global state, catching cross-file
+  # bleed). It follows the suite ratchet: blocking once all.lua is in tests/suite/required-files.txt, which needs gc, locals,
+  # closure, errors and db to pass first; until then it runs and reports. See tests/Lunette.Tests/Suite/AllLuaTests.cs.
+  all-lua:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      LUNETTE_ALL_LUA: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - run: dotnet test -c Release --filter "FullyQualifiedName~Lunette.Tests.Suite.AllLuaTests" tests/Lunette.Tests
+
   # Native AOT + trimming gate: publish the CLI with ILC (TreatWarningsAsErrors makes any trim/AOT warning fail the
   # publish), then run the pinned core-language suite subset and a smoke script through the native binary.
   aot:
@@ -219,9 +235,14 @@ jobs:
 
   # The single aggregate check required by branch protection (ADR/ticket 18).
   # Later tickets add their jobs to `needs`; nightly and benchmark jobs never block.
+  # Explicit waivers of spec items not in this workflow (lua-engine-build/36, from ticket 29):
+  #   - LUA_SAFE_ACCESS scheduled variant (spec 17/18: whole suite on bounds-checked helpers): waived, the define and the
+  #     bounds-checked twins of the Unsafe helpers do not exist yet; add a nightly job when they land.
+  #   - multi-name constant folding (several <const> names folded in one declaration): waived, a compiler optimisation
+  #     with no CI gate of its own; behaviour is covered by tests/Lunette.Tests/ConstFoldingTests.cs.
   ci-gate:
     if: always()
-    needs: [build, test, suite, ratchet, reference, differential, fast-checks, alloc-budget, jit-budget, aot, platform-suite]
+    needs: [build, test, suite, ratchet, reference, differential, fast-checks, alloc-budget, jit-budget, aot, platform-suite, all-lua]
     runs-on: ubuntu-latest
     steps:
       - name: Require every upstream job to succeed
