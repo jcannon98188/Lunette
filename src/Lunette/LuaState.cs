@@ -55,12 +55,21 @@ public sealed partial class LuaState : IDisposable
     {
     }
 
+    /// <summary>A state whose <c>io</c>, <c>os</c> and file loading run over <paramref name="platform"/> (a sandbox removes capabilities).</summary>
+    public LuaState(ILuaPlatform platform) : this(DefaultInternCapacity(), platform)
+    {
+    }
+
+    /// <summary>The host platform under <c>io</c>, <c>os</c>, <c>loadfile</c>, <c>dofile</c> and <c>require</c>.</summary>
+    public ILuaPlatform Platform { get; }
+
     /// <summary>CI variant hook: LUNETTE_INTERN_CAPACITY=1 proves the engine is correct without interning.</summary>
     private static int DefaultInternCapacity() =>
         int.TryParse(Environment.GetEnvironmentVariable("LUNETTE_INTERN_CAPACITY"), out int n) && n > 0 ? n : StringCache.DefaultCapacity;
 
-    internal LuaState(int internCapacity)
+    internal LuaState(int internCapacity, ILuaPlatform? platform = null)
     {
+        Platform = platform ?? new DefaultLuaPlatform();
         Strings = new StringCache(internCapacity);
         Gc = new Gc.GcState(this);
         Main.IsMain = true;
@@ -88,6 +97,8 @@ public sealed partial class LuaState : IDisposable
         TableLib.Register(this);
         GcLib.Register(this);
         DebugLib.Register(this);
+        IoLib.Register(this);
+        OsLib.Register(this);
         LoadLib.Register(this);
     }
 

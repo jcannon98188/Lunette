@@ -130,3 +130,54 @@ Lunette.LuaState.CallInstructionLimit.set -> void
 Lunette.LuaState.CumulativeInstructionsUsed.get -> long
 Lunette.LuaState.IsAborted.get -> bool
 Lunette.LuaState.ResetCumulativeBudget() -> void
+Lunette.DefaultLuaPlatform
+Lunette.DefaultLuaPlatform.Capabilities.get -> Lunette.PlatformCapabilities
+Lunette.DefaultLuaPlatform.CpuTimeSeconds() -> double
+Lunette.DefaultLuaPlatform.CreateTempFile() -> string!
+Lunette.DefaultLuaPlatform.DefaultLuaPlatform() -> void
+Lunette.DefaultLuaPlatform.DefaultLuaPlatform(Lunette.PlatformCapabilities capabilities) -> void
+Lunette.DefaultLuaPlatform.GetEnvironmentVariable(string! name) -> string?
+Lunette.DefaultLuaPlatform.HasShell.get -> bool
+Lunette.DefaultLuaPlatform.OpenFile(string! path, System.IO.FileMode mode, System.IO.FileAccess access) -> System.IO.Stream!
+Lunette.DefaultLuaPlatform.OpenStandardError() -> System.IO.Stream!
+Lunette.DefaultLuaPlatform.OpenStandardInput() -> System.IO.Stream!
+Lunette.DefaultLuaPlatform.Remove(string! path) -> void
+Lunette.DefaultLuaPlatform.Rename(string! from, string! to) -> void
+Lunette.DefaultLuaPlatform.RunShell(string! command) -> Lunette.ProcessStatus
+Lunette.DefaultLuaPlatform.StartProcess(string! command, bool forReading) -> Lunette.IPlatformProcess!
+Lunette.DefaultLuaPlatform.TimeZone.get -> System.TimeZoneInfo!
+Lunette.DefaultLuaPlatform.UtcNow.get -> System.DateTimeOffset
+Lunette.ILuaPlatform
+Lunette.ILuaPlatform.Capabilities.get -> Lunette.PlatformCapabilities
+Lunette.ILuaPlatform.CpuTimeSeconds() -> double
+Lunette.ILuaPlatform.CreateTempFile() -> string!
+Lunette.ILuaPlatform.GetEnvironmentVariable(string! name) -> string?
+Lunette.ILuaPlatform.HasShell.get -> bool
+Lunette.ILuaPlatform.OpenFile(string! path, System.IO.FileMode mode, System.IO.FileAccess access) -> System.IO.Stream!
+Lunette.ILuaPlatform.OpenStandardError() -> System.IO.Stream!
+Lunette.ILuaPlatform.OpenStandardInput() -> System.IO.Stream!
+Lunette.ILuaPlatform.Remove(string! path) -> void
+Lunette.ILuaPlatform.Rename(string! from, string! to) -> void
+Lunette.ILuaPlatform.RunShell(string! command) -> Lunette.ProcessStatus
+Lunette.ILuaPlatform.StartProcess(string! command, bool forReading) -> Lunette.IPlatformProcess!
+Lunette.ILuaPlatform.TimeZone.get -> System.TimeZoneInfo!
+Lunette.ILuaPlatform.UtcNow.get -> System.DateTimeOffset
+Lunette.IPlatformProcess
+Lunette.IPlatformProcess.Stream.get -> System.IO.Stream!
+Lunette.IPlatformProcess.Wait() -> Lunette.ProcessStatus
+Lunette.LuaExitException
+Lunette.LuaExitException.Close.get -> bool
+Lunette.LuaExitException.Code.get -> int
+Lunette.LuaState.LuaState(Lunette.ILuaPlatform! platform) -> void
+Lunette.LuaState.Platform.get -> Lunette.ILuaPlatform!
+Lunette.PlatformCapabilities
+Lunette.PlatformCapabilities.Clock = 8 -> Lunette.PlatformCapabilities
+Lunette.PlatformCapabilities.Environment = 4 -> Lunette.PlatformCapabilities
+Lunette.PlatformCapabilities.Files = 1 -> Lunette.PlatformCapabilities
+Lunette.PlatformCapabilities.None = 0 -> Lunette.PlatformCapabilities
+Lunette.PlatformCapabilities.Processes = 2 -> Lunette.PlatformCapabilities
+Lunette.ProcessStatus
+Lunette.ProcessStatus.Code.get -> int
+Lunette.ProcessStatus.ProcessStatus() -> void
+Lunette.ProcessStatus.ProcessStatus(bool signaled, int code) -> void
+Lunette.ProcessStatus.Signaled.get -> bool

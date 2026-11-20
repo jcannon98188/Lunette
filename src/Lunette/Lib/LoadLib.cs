@@ -117,17 +117,17 @@ internal static class LoadLib
     }
 
     /// <summary>Reads a source file, dropping a UTF-8 BOM and a leading '#' line (the newline stays so line numbers hold).</summary>
-    private static byte[]? ReadSource(string path, out string error)
+    private static byte[]? ReadSource(LuaState state, string path, out string error)
     {
         error = "";
         byte[] data;
         try
         {
-            data = path.Length == 0 ? ReadStdin() : File.ReadAllBytes(path);
+            data = path.Length == 0 ? ReadStream(state.Platform.OpenStandardInput()) : ReadFile(state.Platform, path);
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ErrnoException or NotSupportedException or ArgumentException)
         {
-            error = $"cannot open {path}: {(e is FileNotFoundException or DirectoryNotFoundException ? "No such file or directory" : e.Message)}";
+            error = $"cannot open {path}: {Errno.From(e).Message}";
             return null;
         }
         int start = 0;
@@ -139,16 +139,24 @@ internal static class LoadLib
         return start == 0 ? data : data[start..];
     }
 
-    private static byte[] ReadStdin()
+    private static byte[] ReadStream(Stream s)
     {
         using var ms = new MemoryStream();
-        Console.OpenStandardInput().CopyTo(ms);
+        s.CopyTo(ms);
         return ms.ToArray();
+    }
+
+    /// <summary>Reads a whole file through the platform; no Files capability means no file loading at all.</summary>
+    private static byte[] ReadFile(ILuaPlatform platform, string path)
+    {
+        if ((platform.Capabilities & PlatformCapabilities.Files) == 0) throw new ErrnoException(Errno.ENOSYS);
+        using Stream s = platform.OpenFile(path, FileMode.Open, FileAccess.Read);
+        return ReadStream(s);
     }
 
     private static LuaValue[] LoadFileCore(LuaState state, string? filename, string mode, LuaValue env)
     {
-        byte[]? src = ReadSource(filename ?? "", out string error);
+        byte[]? src = ReadSource(state, filename ?? "", out string error);
         if (src is null) return [default, Str(state, error)];
         return Compile(state, src, filename is null ? "=stdin" : "@" + filename, mode, env);
     }
@@ -200,7 +208,7 @@ internal static class LoadLib
     }
 
     /// <summary>Returns the first readable file of <paramref name="path"/> for <paramref name="name"/>, else null with the "no file" list.</summary>
-    private static string? SearchPathCore(string name, string path, string sep, string rep, out string error)
+    private static string? SearchPathCore(LuaState state, string name, string path, string sep, string rep, out string error)
     {
         if (sep.Length > 0) name = name.Replace(sep, rep);
         var tried = new StringBuilder();
@@ -208,12 +216,24 @@ internal static class LoadLib
         {
             if (template.Length == 0) continue;
             string file = template.Replace("?", name);
-            if (File.Exists(file)) { error = ""; return file; }
+            if (Readable(state.Platform, file)) { error = ""; return file; }
             if (tried.Length > 0) tried.Append("\n\t");
             tried.Append("no file '").Append(file).Append('\'');
         }
         error = tried.ToString();
         return null;
+    }
+
+    /// <summary>PUC's <c>readable</c>: whether the file can be opened for reading.</summary>
+    private static bool Readable(ILuaPlatform platform, string file)
+    {
+        if ((platform.Capabilities & PlatformCapabilities.Files) == 0) return false;
+        try
+        {
+            using Stream s = platform.OpenFile(file, FileMode.Open, FileAccess.Read);
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException) { return false; }
     }
 
     private static LuaValue[] SearchPath(LuaState state, ReadOnlySpan<LuaValue> args)
@@ -222,7 +242,7 @@ internal static class LoadLib
         string path = LibArgs.CheckString(state, "searchpath", args, 1).ToString();
         string sep = args.Length > 2 && !args[2].IsNil ? LibArgs.CheckString(state, "searchpath", args, 2).ToString() : ".";
         string rep = args.Length > 3 && !args[3].IsNil ? LibArgs.CheckString(state, "searchpath", args, 3).ToString() : "/";
-        string? file = SearchPathCore(name, path, sep, rep, out string error);
+        string? file = SearchPathCore(state, name, path, sep, rep, out string error);
         return file is null ? [default, Str(state, error)] : [Str(state, file)];
     }
 
@@ -239,7 +259,7 @@ internal static class LoadLib
     private static LuaValue[] SearcherLua(LuaState state, ReadOnlySpan<LuaValue> args)
     {
         string name = new LuaString((byte[])args[0].Ref!).ToString();
-        string? file = SearchPathCore(name, PackageString(state, "path"), ".", "/", out string error);
+        string? file = SearchPathCore(state, name, PackageString(state, "path"), ".", "/", out string error);
         if (file is null) return [Str(state, error)];
         LuaValue[] r = LoadFileCore(state, file, "bt", LuaValue.FromTable(state.Globals));
         if (r[0].IsNil)
