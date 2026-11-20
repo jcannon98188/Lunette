@@ -17,6 +17,7 @@ Report-only. Nothing here fails a build or blocks `ci-gate`; performance is stee
   (in-process toolchain, MemoryDiagnoser). `node bench/run-micro.mjs [--filter "*call*"] [--out micro.json]` joins the means with
   the same snippets timed inside PUC by `puc-micro-harness.lua`. Add a snippet by dropping a `.lua` file in `micro/`
   that does a fixed amount of work and returns.
+- `Lunette.Benchmarks/HostCallBenchmarks.cs` + `embed-puc.c`: host-to-Lua call cost (C# `LuaState.Call` vs C `lua_call`); results in `PROFILE.md` (ticket 49).
 - Headline number: ratio = Lunette time / PUC time, same machine, same run (above 1 means slower than PUC).
   Without a Reference binary (Windows, no C compiler) the runners still report absolute Lunette times.
 - `report.mjs` + `.github/workflows/bench.yml`: weekly (and on-demand) run on a pinned runner class; appends JSON lines to
