@@ -5,7 +5,7 @@ using Lunette.Vm;
 namespace Lunette;
 
 /// <summary>The single-threaded embedding root: owns globals and the output sink.</summary>
-public sealed class LuaState
+public sealed partial class LuaState
 {
     internal readonly Dictionary<string, LuaValue> Globals = new();
     /// <summary>Best-effort intern cache for short strings (ADR 0005).</summary>

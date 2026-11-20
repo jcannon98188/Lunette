@@ -172,6 +172,8 @@ internal static partial class Interpreter
             }
             case BuiltinKind.Yield:
                 return DoYield(state, co, st.AsSpan(fa + 1, nargs), fa, wanted, false);
+            case BuiltinKind.Host:
+                return CallHost(state, co, (BuiltinFunction)st[fa].Ref!, fa, nargs, wanted, proto, pc);
             default:
                 return Special.None;
         }

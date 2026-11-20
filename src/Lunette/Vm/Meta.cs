@@ -34,7 +34,7 @@ internal static class Meta
     private const int MaxTagLoop = 2000;
 
     public static LuaTable? GetMetatable(LuaState state, LuaValue v) =>
-        v.Ref is LuaTable t ? t.Metatable : v.Ref is byte[] ? state.StringMetatable : null;
+        v.Ref is LuaTable t ? t.Metatable : v.Ref is byte[] ? state.StringMetatable : v.Ref is LuaUserdata u ? u.Metatable : null;
 
     public static LuaValue GetTagMethod(LuaState state, LuaValue v, TagMethod e)
     {
