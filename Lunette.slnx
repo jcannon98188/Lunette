@@ -6,6 +6,7 @@
     <Project Path="src/Lunette.Interop/Lunette.Interop.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Lunette.JitProbe/Lunette.JitProbe.csproj" />
     <Project Path="tests/Lunette.Tests/Lunette.Tests.csproj" />
     <Project Path="tests/Lunette.Analyzers.Tests/Lunette.Analyzers.Tests.csproj" />
   </Folder>
