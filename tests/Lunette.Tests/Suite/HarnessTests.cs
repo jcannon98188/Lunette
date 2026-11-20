@@ -24,7 +24,7 @@ public class HarnessTests : IDisposable
         var bad = SuiteRunner.Run("bad.lua", WaiverManifest.Empty, _dir);
         Assert.Equal(SuiteStatus.Passed, ok.Status);
         Assert.Equal(SuiteStatus.Failed, bad.Status);
-        Assert.Contains("n//0", bad.Detail);
+        Assert.Contains("divide by zero", bad.Detail);
     }
 
     [Fact]

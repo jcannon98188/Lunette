@@ -67,7 +67,7 @@ public class ArithmeticTests
     public void Integer_division_by_zero_raises_a_lua_error()
     {
         var ex = Assert.Throws<LuaException>(() => Run("print(1 // 0)"));
-        Assert.Contains("attempt to perform 'n//0'", ex.Message);
+        Assert.Contains("attempt to divide by zero", ex.Message);
     }
 
     [Fact]

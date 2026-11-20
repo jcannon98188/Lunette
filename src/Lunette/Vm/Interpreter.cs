@@ -10,13 +10,15 @@ internal static partial class Interpreter
 {
     private const double Two63 = 9223372036854775808.0;
 
-    public static void Execute(LuaState state, Proto proto)
+    public static void Execute(LuaState state, Proto proto, ReadOnlySpan<LuaValue> args = default)
     {
         var co = state.Main;
         co.Reset();
-        var main = new LuaClosure(proto, []);
+        var main = state.NewMainClosure(proto, LuaValue.FromTable(state.Globals));
+        co.EnsureStack(args.Length + 2, null, 0);
         co.Stack[0] = LuaValue.FromObject(main);
-        Frame entry = Precall(co, main, 0, 0, 0, null, null, 0);
+        args.CopyTo(new Span<LuaValue>(co.Stack, 1, args.Length));
+        Frame entry = Precall(co, main, 0, args.Length, 0, null, null, 0);
         Run(state, co, entry, 0);
     }
 
@@ -87,7 +89,7 @@ internal static partial class Interpreter
         {
             LuaValue tm = co.Stack[fa].Ref is LuaTable { Metatable: { } callMt } ? callMt.GetTagMethod(TagMethod.Call) : default;
             if (tm.IsNil || guard > 100)
-                throw new LuaException($"{(p is null ? "" : Where(p, pc) + " ")}attempt to call a {co.Stack[fa].TypeName} value{VarInfo.DescribeCallee(p, pc)}");
+                throw new LuaException($"{(p is null ? "" : Where(p, pc) + " ")}attempt to call a {Meta.ObjTypeName(co.Stack[fa])} value{VarInfo.DescribeCallee(p, pc)}");
             co.EnsureStack(fa + nargs + 2, p, pc);
             var st = co.Stack;
             Array.Copy(st, fa, st, fa + 1, nargs + 1);
@@ -154,6 +156,9 @@ internal static partial class Interpreter
                 case OpCode.LoadK:
                     r[bs + i.A] = k[i.Bx];
                     break;
+                case OpCode.LoadKX:
+                    r[bs + i.A] = k[code[pc++].Ax];
+                    break;
                 case OpCode.LoadNil:
                     for (int j = 0; j <= i.B; j++) r[bs + i.A + j] = default;
                     break;
@@ -161,11 +166,46 @@ internal static partial class Interpreter
                     r[bs + i.A] = LuaValue.FromBoolean(i.B != 0);
                     break;
                 case OpCode.GetGlobal:
-                    r[bs + i.A] = state.Globals.GetValueOrDefault(proto.Names[i.Bx]);
+                {
+                    LuaValue obj = cl.Upvals[i.B].Get(), key = k[i.C];
+                    if (obj.Ref is LuaTable t)
+                    {
+                        LuaValue v = t.Get(key);
+                        if (!v.IsNil || t.Metatable is null)
+                        {
+                            r[bs + i.A] = v;
+                            break;
+                        }
+                    }
+                    if (Meta.PrepareIndex(state, obj, key, proto, pc - 1, out LuaValue res, out MetaCall mc))
+                    {
+                        Frame? nf = StartMeta(state, co, f, in mc, Continuation.Value, bs + i.A, pc, proto, out res);
+                        if (nf is not null)
+                        {
+                            f = nf;
+                            goto newframe;
+                        }
+                        r = co.Stack;
+                    }
+                    r[bs + i.A] = res;
                     break;
+                }
                 case OpCode.SetGlobal:
-                    state.Globals[proto.Names[i.Bx]] = r[bs + i.A];
+                {
+                    LuaValue obj = cl.Upvals[i.B].Get();
+                    if (obj.Ref is LuaTable t && t.Metatable is null) Meta.RawSet(t, k[i.C], r[bs + i.A], proto, pc - 1);
+                    else if (Meta.PrepareSetIndex(state, obj, k[i.C], r[bs + i.A], proto, pc - 1, out MetaCall mc))
+                    {
+                        Frame? nf = StartMeta(state, co, f, in mc, Continuation.Discard, 0, pc, proto, out LuaValue res);
+                        if (nf is not null)
+                        {
+                            f = nf;
+                            goto newframe;
+                        }
+                        r = co.Stack;
+                    }
                     break;
+                }
                 case OpCode.GetUpval:
                     r[bs + i.A] = cl.Upvals[i.B].Get();
                     break;
@@ -654,7 +694,7 @@ internal static partial class Interpreter
     private static int CallBuiltin(LuaState state, Coroutine co, int fa, int nargs, int wanted, Proto? proto, int pc)
     {
         if (co.Stack[fa].Ref is not BuiltinFunction fn)
-            throw new LuaException($"{(proto is null ? "" : Where(proto, pc) + " ")}attempt to call a {co.Stack[fa].TypeName} value");
+            throw new LuaException($"{(proto is null ? "" : Where(proto, pc) + " ")}attempt to call a {Meta.ObjTypeName(co.Stack[fa])} value");
         int savedTop = co.CallTop;
         co.CallTop = fa + 1 + nargs;
         var res = fn.Invoke(state, new ReadOnlySpan<LuaValue>(co.Stack, fa + 1, nargs));
@@ -690,9 +730,9 @@ internal static partial class Interpreter
             r[ra + 3] = init;
             return true;
         }
-        if (!limit.TryToNumber(out double fl)) throw new LuaException($"{Where(p, pc)} 'for' limit must be a number");
-        if (!step.TryToNumber(out double fs)) throw new LuaException($"{Where(p, pc)} 'for' step must be a number");
-        if (!init.TryToNumber(out double fi)) throw new LuaException($"{Where(p, pc)} 'for' initial value must be a number");
+        if (!ForNumber(limit, out double fl)) throw new LuaException($"{Where(p, pc)} bad 'for' limit (number expected, got {Meta.ObjTypeName(limit)})");
+        if (!ForNumber(step, out double fs)) throw new LuaException($"{Where(p, pc)} bad 'for' step (number expected, got {Meta.ObjTypeName(step)})");
+        if (!ForNumber(init, out double fi)) throw new LuaException($"{Where(p, pc)} bad 'for' initial value (number expected, got {Meta.ObjTypeName(init)})");
         if (fs == 0) throw new LuaException($"{Where(p, pc)} 'for' step is zero");
         if (fs > 0 ? fl < fi : fi < fl) return false;
         r[ra] = LuaValue.FromFloat(fi);
@@ -700,6 +740,17 @@ internal static partial class Interpreter
         r[ra + 2] = LuaValue.FromFloat(fs);
         r[ra + 3] = r[ra];
         return true;
+    }
+
+    private static bool ForNumber(in LuaValue v, out double d)
+    {
+        if (v.TryToNumber(out d)) return true;
+        if (StringConv.TryToNumber(v, out LuaValue n))
+        {
+            d = n.IsInteger ? n.AsInteger : n.AsFloat;
+            return true;
+        }
+        return false;
     }
 
     /// <summary>Converts the loop limit to an integer; returns true when the loop must be skipped.</summary>
@@ -711,7 +762,16 @@ internal static partial class Interpreter
             lim = limit.AsInteger;
             return false;
         }
-        if (!limit.IsFloat) throw new LuaException($"{Where(p, pc)} 'for' limit must be a number");
+        if (!limit.IsFloat)
+        {
+            if (!StringConv.TryToNumber(limit, out LuaValue conv)) throw new LuaException($"{Where(p, pc)} bad 'for' limit (number expected, got {Meta.ObjTypeName(limit)})");
+            if (conv.IsInteger)
+            {
+                lim = conv.AsInteger;
+                return false;
+            }
+            limit = conv;
+        }
         double f = limit.AsFloat;
         if (double.IsNaN(f)) return true;
         f = step < 0 ? Math.Ceiling(f) : Math.Floor(f);
@@ -755,8 +815,6 @@ internal static partial class Interpreter
 
     internal static string Where(Proto p, int pc)
     {
-        string n = p.ChunkName;
-        string name = n.Length > 0 && (n[0] is '=' or '@') ? n[1..] : $"[string \"{n}\"]";
-        return $"{name}:{p.Lines[pc]}:";
+        return $"{ChunkId.Display(p.ChunkName)}:{p.Lines[pc]}:";
     }
 }

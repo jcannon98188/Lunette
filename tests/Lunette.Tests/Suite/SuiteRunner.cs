@@ -55,16 +55,17 @@ public static class SuiteRunner
         try
         {
             CopyDirectory(suiteDir ?? SuiteDir, temp);
-            // Latin1 maps every byte to one char, so non-UTF-8 suite sources survive until the string model lands.
+            // Latin1 maps every byte to one char and back, so the suite's non-UTF-8 sources reach the engine byte for byte.
             string path = Path.Combine(temp, file);
             string source = waivers.ApplyOverlays(file, File.ReadAllText(path, Encoding.Latin1));
+            if (source.StartsWith('#')) source = "--" + source; // the standalone interpreter skips a leading '#' line
             if (file == "all.lua") source = "_U=true;" + source;
 
             var output = new StringWriter { NewLine = "\n" };
             string? error = null;
             var worker = new Thread(() =>
             {
-                try { new LuaState { Output = output }.DoString(source, "@" + file); }
+                try { new LuaState { Output = output }.DoBytes(Encoding.Latin1.GetBytes(source), "@" + file); }
                 catch (Exception e) { error = e.Message; }
             }, 256 * 1024 * 1024) { IsBackground = true };
 

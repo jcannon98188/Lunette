@@ -50,7 +50,7 @@ internal sealed class Lexer(byte[] bytes, string chunkName, StringCache cache)
 
     public LuaException Error(string msg, int line) => new($"{DisplayName(ChunkName)}:{line}: {msg}");
 
-    private static string DisplayName(string n) => n.Length > 0 && (n[0] is '=' or '@') ? n[1..] : $"[string \"{n}\"]";
+    private static string DisplayName(string n) => ChunkId.Display(n);
 
     public Token Next()
     {
@@ -165,7 +165,7 @@ internal sealed class Lexer(byte[] bytes, string chunkName, StringCache cache)
         while (true)
         {
             if (_pos >= src.Length)
-                throw Error(isComment ? $"unfinished long comment (starting at line {startLine}) near '<eof>'" : $"unfinished long string (starting at line {startLine}) near '<eof>'", _line);
+                throw Error(isComment ? $"unfinished long comment (starting at line {startLine}) near <eof>" : $"unfinished long string (starting at line {startLine}) near <eof>", _line);
             char c = src[_pos++];
             if (c == ']')
             {
@@ -219,12 +219,12 @@ internal sealed class Lexer(byte[] bytes, string chunkName, StringCache cache)
         _bufLen = 0;
         while (true)
         {
-            if (_pos >= src.Length) throw Error("unfinished string near '<eof>'", _line);
+            if (_pos >= src.Length) throw Error("unfinished string near <eof>", _line);
             char c = src[_pos++];
             if (c == quote) break;
             if (c == '\n' || c == '\r') throw Error("unfinished string", _line);
             if (c != '\\') { Put((byte)c); continue; }
-            if (_pos >= src.Length) throw Error("unfinished string near '<eof>'", _line);
+            if (_pos >= src.Length) throw Error("unfinished string near <eof>", _line);
             char e = src[_pos++];
             switch (e)
             {

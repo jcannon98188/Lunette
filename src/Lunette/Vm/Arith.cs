@@ -59,9 +59,10 @@ internal static class Arith
         {
             bool left = !a.IsNumber;
             LuaValue bad = left ? a : b;
-            throw new LuaException($"{Interpreter.Where(p, pc)} attempt to perform bitwise operation on a {bad.TypeName} value{VarInfo.DescribeOperand(p, pc, left)}");
+            throw new LuaException($"{Interpreter.Where(p, pc)} attempt to perform bitwise operation on a {Meta.ObjTypeName(bad)} value{VarInfo.DescribeOperand(p, pc, left)}");
         }
-        throw new LuaException($"{Interpreter.Where(p, pc)} number has no integer representation");
+        bool leftBad = !LuaNumber.TryToInteger(a, out _);
+        throw new LuaException($"{Interpreter.Where(p, pc)} number{VarInfo.DescribeOperand(p, pc, leftBad)} has no integer representation");
     }
 
     public static LuaValue Negate(LuaValue a, Proto p, int pc)
@@ -73,7 +74,7 @@ internal static class Arith
 
     private static long IntFloorDiv(long x, long y, Proto p, int pc)
     {
-        if (y == 0) throw new LuaException($"{Interpreter.Where(p, pc)} attempt to perform 'n//0'");
+        if (y == 0) throw new LuaException($"{Interpreter.Where(p, pc)} attempt to divide by zero");
         if (y == -1) return unchecked(-x);
         long q = x / y;
         if ((x ^ y) < 0 && x % y != 0) q--;
@@ -97,5 +98,5 @@ internal static class Arith
     }
 
     private static LuaException Fail(LuaValue v, bool left, Proto p, int pc) =>
-        new($"{Interpreter.Where(p, pc)} attempt to perform arithmetic on a {v.TypeName} value{VarInfo.DescribeOperand(p, pc, left)}");
+        new($"{Interpreter.Where(p, pc)} attempt to perform arithmetic on a {Meta.ObjTypeName(v)} value{VarInfo.DescribeOperand(p, pc, left)}");
 }

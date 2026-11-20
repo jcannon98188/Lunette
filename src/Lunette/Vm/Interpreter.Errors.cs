@@ -25,6 +25,9 @@ internal static partial class Interpreter
     /// <summary>How many times a failing xpcall handler is retried on its own error before "error in error handling".</summary>
     private const int HandlerRetries = 200;
 
+    /// <summary>Nested pcall/xpcall levels allowed per coroutine (LUAI_MAXCCALLS).</summary>
+    private const int MaxProtectedDepth = 200;
+
     private static readonly LuaValue AssertMessage = LuaValue.FromString("assertion failed!");
 
     internal static bool IsLuaError(Exception e) =>
@@ -159,11 +162,29 @@ internal static partial class Interpreter
                 LuaValue fn = st[fa + 1];
                 if (fn.Ref is BuiltinFunction { Kind: BuiltinKind.Yield })
                     return DoYield(state, co, st.AsSpan(fa + 1 + fixedArgs, nargs - fixedArgs), fa, wanted, true);
-                if (fn.Ref is not LuaClosure cl) return Special.None;
+                LuaClosure? cl = fn.Ref as LuaClosure;
+                if (cl is null && fn.Ref is BuiltinFunction { Kind: BuiltinKind.Pcall or BuiltinKind.Xpcall } inner
+                    && nargs - fixedArgs >= (inner.Kind == BuiltinKind.Xpcall ? 2 : 1))
+                {
+                    cl = state.Trampoline(inner, inner.Kind == BuiltinKind.Pcall ? "pcall" : "xpcall");
+                    fn = LuaValue.FromObject(cl);
+                }
+                if (cl is null) return Special.None;
                 LuaValue handler = x ? st[fa + 2] : default;
+                int level = co.Depth > 0 ? co.Frames[co.Depth - 1]!.PcallLevel : 0;
+                if (level >= MaxProtectedDepth)
+                {
+                    // PUC runs the protected function through a C call, so nesting is limited to LUAI_MAXCCALLS levels.
+                    st[fa] = LuaValue.FromBoolean(false);
+                    st[fa + 1] = LuaValue.FromString("C stack overflow");
+                    if (wanted < 0) co.ResumeTop = fa + 2;
+                    else for (int j = 2; j < wanted; j++) st[fa + j] = default;
+                    return Special.Done;
+                }
                 int ci = fa + fixedArgs;
                 st[ci] = fn;
                 Frame nf = Precall(co, cl, ci, nargs - fixedArgs, wanted, null, proto, pc);
+                nf.PcallLevel = level + 1;
                 nf.PcallKind = x ? (byte)2 : (byte)1;
                 nf.PcallBase = fa;
                 nf.Handler = handler;
@@ -172,6 +193,18 @@ internal static partial class Interpreter
             }
             case BuiltinKind.Yield:
                 return DoYield(state, co, st.AsSpan(fa + 1, nargs), fa, wanted, false);
+            case BuiltinKind.Pairs:
+            {
+                // A Lua __pairs metamethod runs as an ordinary Frame so that it can yield; its first three results are pairs' results.
+                if (nargs == 0 || wanted < 0) return Special.None;
+                LuaTable? mt = Meta.GetMetatable(state, st[fa + 1]);
+                LuaValue tm = mt is null ? default : mt.Get(LuaValue.FromString(state.Strings.FromUtf16("__pairs")));
+                if (tm.Ref is not LuaClosure cl) return Special.None;
+                st[fa] = tm;
+                Frame nf = Precall(co, cl, fa, 1, wanted, null, proto, pc);
+                co.ResumeFrame = nf;
+                return Special.NewFrame;
+            }
             default:
                 return Special.None;
         }

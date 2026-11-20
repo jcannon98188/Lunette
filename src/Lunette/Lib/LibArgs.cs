@@ -9,7 +9,7 @@ internal static class LibArgs
         new($"bad argument #{index1} to '{fn}' ({msg})");
 
     public static LuaException TypeError(string fn, ReadOnlySpan<LuaValue> args, int i, string expected) =>
-        ArgError(fn, i + 1, $"{expected} expected, got {(i < args.Length ? args[i].TypeName : "no value")}");
+        ArgError(fn, i + 1, $"{expected} expected, got {(i < args.Length ? Vm.Meta.ObjTypeName(args[i]) : "no value")}");
 
     /// <summary>A string argument; numbers are converted (and interned) as Lua's string coercion does.</summary>
     public static LuaString CheckString(LuaState state, string fn, ReadOnlySpan<LuaValue> args, int i)

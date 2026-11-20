@@ -6,7 +6,7 @@ namespace Lunette;
 /// <summary>A callable Lua function value.</summary>
 public abstract class LuaFunction
 {
-    public override string ToString() => "function";
+    public override string ToString() => $"function: 0x{System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(this):x8}";
 }
 
 internal delegate LuaValue[]? BuiltinBody(LuaState state, ReadOnlySpan<LuaValue> args);
@@ -20,6 +20,7 @@ internal enum BuiltinKind : byte
     Pcall,
     Xpcall,
     Yield,
+    Pairs,
 }
 
 internal sealed class BuiltinFunction(BuiltinBody body, BuiltinKind kind = BuiltinKind.None) : LuaFunction

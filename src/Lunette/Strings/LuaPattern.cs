@@ -83,6 +83,7 @@ internal ref struct MatchState
             case 'u': res = IsUpper(c); break;
             case 'w': res = IsAlnum(c); break;
             case 'x': res = IsXDigit(c); break;
+            case 'z': res = c == 0; break;
             default: return cl == c;
         }
         return IsUpper(cl) ? !res : res;

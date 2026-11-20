@@ -114,9 +114,10 @@ internal sealed class LuaCompiler
     {
         var c = new LuaCompiler(source, chunkName, cache ?? new StringCache());
         c._fs.IsVararg = true;
+        c._fs.Upvals.Add(("_ENV", new UpvalDesc(true, 0)));
         c.EnterBlock();
         c.Block();
-        if (c._tok.Kind != Tok.Eof) throw c.Err("'<eof>' expected");
+        if (c._tok.Kind != Tok.Eof) throw c.Err("<eof> expected");
         c.LeaveBlock();
         c.Emit(Instruction.Abc(OpCode.Return, 0, 1, 0), c._tok.Line);
         return c.Finish(c._fs);
@@ -168,7 +169,7 @@ internal sealed class LuaCompiler
         return _ahead;
     }
 
-    private LuaException Err(string msg) => _lex.Error($"{msg} near '{_tok.Text}'", _tok.Line);
+    private LuaException Err(string msg) => _lex.Error(_tok.Kind == Tok.Eof ? $"{msg} near <eof>" : $"{msg} near '{_tok.Text}'", _tok.Line);
 
     private void Expect(Tok kind, string what)
     {
@@ -222,6 +223,18 @@ internal sealed class LuaCompiler
         return _fs.Consts.Count - 1;
     }
 
+    /// <summary>Loads a constant into a register: LoadK reaches 65536 constants, LoadKX (with an Extra word) any number.</summary>
+    private void EmitLoadK(int reg, int index, int line)
+    {
+        if (index <= 0xFFFF)
+        {
+            Emit(Instruction.ABx(OpCode.LoadK, reg, index), line);
+            return;
+        }
+        Emit(Instruction.Abc(OpCode.LoadKX, reg, 0, 0), line);
+        Emit(Instruction.Extra(index), line);
+    }
+
     private int AddName(string n)
     {
         int i = _fs.Names.IndexOf(n);
@@ -263,7 +276,72 @@ internal sealed class LuaCompiler
         if (local is not null) { Emit(Instruction.Abc(OpCode.Move, target, local.Reg, 0), line); return; }
         int up = FindUpval(_fs, name);
         if (up >= 0) Emit(Instruction.Abc(OpCode.GetUpval, target, up, 0), line);
-        else Emit(Instruction.ABx(OpCode.GetGlobal, target, AddName(name)), line);
+        else LoadGlobal(name, target, line);
+    }
+
+    private int StringConst(string name)
+    {
+        LuaValue v = NameConst(name);
+        for (int i = 0; i < _fs.Consts.Count; i++)
+            if (LuaValue.RawEquals(_fs.Consts[i], v)) return i;
+        return AddConst(v);
+    }
+
+    /// <summary>A global name is a field of the <c>_ENV</c> variable in scope (a local or an upvalue).</summary>
+    private void LoadGlobal(string name, int target, int line)
+    {
+        int k = StringConst(name);
+        var env = FindLocal(_fs, "_ENV");
+        if (env is null)
+        {
+            int up = FindUpval(_fs, "_ENV");
+            if (k <= 255)
+            {
+                Emit(Instruction.Abc(OpCode.GetGlobal, target, up, k), line);
+                return;
+            }
+            int save = _fs.Free;
+            int envReg = Alloc();
+            int keyReg = Alloc();
+            Emit(Instruction.Abc(OpCode.GetUpval, envReg, up, 0), line);
+            EmitLoadK(keyReg, k, line);
+            Emit(Instruction.Abc(OpCode.GetTable, target, envReg, keyReg), line);
+            _fs.Free = save;
+            return;
+        }
+        int save2 = _fs.Free;
+        int key = Alloc();
+        EmitLoadK(key, k, line);
+        Emit(Instruction.Abc(OpCode.GetTable, target, env.Reg, key), line);
+        _fs.Free = save2;
+    }
+
+    private void StoreGlobal(string name, int source, int line)
+    {
+        int k = StringConst(name);
+        var env = FindLocal(_fs, "_ENV");
+        if (env is null)
+        {
+            int up = FindUpval(_fs, "_ENV");
+            if (k <= 255)
+            {
+                Emit(Instruction.Abc(OpCode.SetGlobal, source, up, k), line);
+                return;
+            }
+            int save = _fs.Free;
+            int envReg = Alloc();
+            int keyReg = Alloc();
+            Emit(Instruction.Abc(OpCode.GetUpval, envReg, up, 0), line);
+            EmitLoadK(keyReg, k, line);
+            Emit(Instruction.Abc(OpCode.SetTable, envReg, keyReg, source), line);
+            _fs.Free = save;
+            return;
+        }
+        int save2 = _fs.Free;
+        int key = Alloc();
+        EmitLoadK(key, k, line);
+        Emit(Instruction.Abc(OpCode.SetTable, env.Reg, key, source), line);
+        _fs.Free = save2;
     }
 
     /// <summary>Kind of the variable <paramref name="name"/> resolves to from the current function, or Regular for a global.</summary>
@@ -282,7 +360,7 @@ internal sealed class LuaCompiler
         if (local is not null) { Emit(Instruction.Abc(OpCode.Move, local.Reg, source, 0), line); return; }
         int up = FindUpval(_fs, name);
         if (up >= 0) Emit(Instruction.Abc(OpCode.SetUpval, source, up, 0), line);
-        else Emit(Instruction.ABx(OpCode.SetGlobal, source, AddName(name)), line);
+        else StoreGlobal(name, source, line);
     }
 
     // ---- statements ----
@@ -485,7 +563,7 @@ internal sealed class LuaCompiler
             else Emit(Instruction.Abc(OpCode.Return, first, n + 1, 0), line);
         }
         if (_tok.Kind == Tok.Semi) Advance();
-        if (!BlockFollow()) throw Err("'<eof>' expected");
+        if (!BlockFollow()) throw Err("<eof> expected");
         _fs.Free = first;
     }
 
@@ -516,7 +594,7 @@ internal sealed class LuaCompiler
                 if (field.Length > 0)
                 {
                     int kk = Alloc();
-                    Emit(Instruction.ABx(OpCode.LoadK, kk, AddConst(NameConst(field))), line);
+                    EmitLoadK(kk, AddConst(NameConst(field)), line);
                     Emit(Instruction.Abc(OpCode.GetTable, obj, obj, kk), line);
                     _fs.Free = obj + 1;
                 }
@@ -526,7 +604,7 @@ internal sealed class LuaCompiler
                 if (isMethod) break;
             }
             int key = Alloc();
-            Emit(Instruction.ABx(OpCode.LoadK, key, AddConst(NameConst(field))), line);
+            EmitLoadK(key, AddConst(NameConst(field)), line);
             int fnReg = Alloc();
             FunctionBody(fnReg, line, isMethod);
             Emit(Instruction.Abc(OpCode.SetTable, obj, key, fnReg), line);
@@ -670,7 +748,7 @@ internal sealed class LuaCompiler
                         Advance();
                         string name = ExpectName();
                         int k = Alloc();
-                        Emit(Instruction.ABx(OpCode.LoadK, k, AddConst(NameConst(name))), l);
+                        EmitLoadK(k, AddConst(NameConst(name)), l);
                     }
                     else
                     {
@@ -806,7 +884,7 @@ internal sealed class LuaCompiler
             Advance();
             Expr(stepReg, 0);
         }
-        else Emit(Instruction.ABx(OpCode.LoadK, stepReg, AddConst(LuaValue.FromInteger(1))), line);
+        else EmitLoadK(stepReg, AddConst(LuaValue.FromInteger(1)), line);
         Expect(Tok.Do, "do");
         Emit(Instruction.Abc(OpCode.ForPrep, a, 0, 0), line);
         int exit = EmitJmp(line);
@@ -888,9 +966,8 @@ internal sealed class LuaCompiler
         Expect(Tok.LParen, "(");
         if (_tok.Kind != Tok.RParen)
         {
-            do
+            while (true)
             {
-                if (_tok.Kind == Tok.Comma) Advance();
                 if (_tok.Kind == Tok.Ellipsis)
                 {
                     Advance();
@@ -900,7 +977,9 @@ internal sealed class LuaCompiler
                 string p = ExpectName();
                 child.AddLocal(p, Alloc());
                 child.NumParams++;
-            } while (_tok.Kind == Tok.Comma);
+                if (_tok.Kind != Tok.Comma) break;
+                Advance();
+            }
         }
         Expect(Tok.RParen, ")");
         EnterBlock();
@@ -1045,11 +1124,11 @@ internal sealed class LuaCompiler
         switch (_tok.Kind)
         {
             case Tok.Integer:
-                Emit(Instruction.ABx(OpCode.LoadK, target, AddConst(LuaValue.FromInteger(_tok.Int))), line);
+                EmitLoadK(target, AddConst(LuaValue.FromInteger(_tok.Int)), line);
                 Advance();
                 return;
             case Tok.Float:
-                Emit(Instruction.ABx(OpCode.LoadK, target, AddConst(LuaValue.FromFloat(_tok.Float))), line);
+                EmitLoadK(target, AddConst(LuaValue.FromFloat(_tok.Float)), line);
                 Advance();
                 return;
             case Tok.Nil:
@@ -1075,7 +1154,7 @@ internal sealed class LuaCompiler
                 _openIdx = -1; // the body's last call is not an open call of this expression
                 return;
             case Tok.String:
-                Emit(Instruction.ABx(OpCode.LoadK, target, AddConst(LuaValue.FromString(_tok.Str))), line);
+                EmitLoadK(target, AddConst(LuaValue.FromString(_tok.Str)), line);
                 Advance();
                 return;
             case Tok.LBrace:
@@ -1113,7 +1192,7 @@ internal sealed class LuaCompiler
         {
             Alloc(); // fn + 1 receives the receiver
             int k = Alloc();
-            Emit(Instruction.ABx(OpCode.LoadK, k, AddConst(NameConst(method))), line);
+            EmitLoadK(k, AddConst(NameConst(method)), line);
             Emit(Instruction.Abc(OpCode.Self, fn, fn, k), line);
             _fs.Free = fn + 2;
             extra = 1;
@@ -1122,7 +1201,7 @@ internal sealed class LuaCompiler
         switch (_tok.Kind)
         {
             case Tok.String:
-                Emit(Instruction.ABx(OpCode.LoadK, Alloc(), AddConst(LuaValue.FromString(_tok.Str))), line);
+                EmitLoadK(Alloc(), AddConst(LuaValue.FromString(_tok.Str)), line);
                 Advance();
                 b++;
                 break;
@@ -1188,7 +1267,7 @@ internal sealed class LuaCompiler
             if (_tok.Kind == Tok.Name && Peek().Kind == Tok.Assign)
             {
                 int k = Alloc();
-                Emit(Instruction.ABx(OpCode.LoadK, k, AddConst(LuaValue.FromString(_tok.Str))), _tok.Line);
+                EmitLoadK(k, AddConst(LuaValue.FromString(_tok.Str)), _tok.Line);
                 Advance();
                 Advance();
                 int v = Alloc();

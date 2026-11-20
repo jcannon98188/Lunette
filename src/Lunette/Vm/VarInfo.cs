@@ -50,14 +50,14 @@ internal static class VarInfo
             case OpCode.Move:
                 return i.B == reg ? null : ObjName(p, setreg, i.B, out name);
             case OpCode.GetGlobal:
-                name = p.Names[i.Bx];
+                name = KeyConstName(p, i.C);
                 return "global";
             case OpCode.GetUpval:
                 name = p.UpvalNames[i.B];
                 return "upvalue";
             case OpCode.GetTable:
                 name = KeyName(p, setreg, i.C);
-                return "field";
+                return IsEnvLocal(p, setreg, i.B) ? "global" : "field";
             case OpCode.Self:
                 name = KeyName(p, setreg, i.C);
                 return "method";
@@ -73,10 +73,22 @@ internal static class VarInfo
         }
     }
 
+    private static bool IsEnvLocal(Proto p, int pc, int reg)
+    {
+        foreach (var lv in p.LocVars)
+            if (lv.Reg == reg && lv.StartPc <= pc && pc < lv.EndPc) return lv.Name == "_ENV";
+        int set = FindSetReg(p, pc, reg);
+        return set >= 0 && p.Code[set].Op == OpCode.GetUpval && p.UpvalNames[p.Code[set].B] == "_ENV";
+    }
+
+    private static string KeyConstName(Proto p, int k) =>
+        p.Constants[k].Ref is byte[] s ? new LuaString(s).ToString() : "?";
+
     private static string KeyName(Proto p, int pc, int reg)
     {
         int set = FindSetReg(p, pc, reg);
         if (set >= 0 && p.Code[set].Op == OpCode.LoadK && p.Constants[p.Code[set].Bx].Ref is byte[] s) return new LuaString(s).ToString();
+        if (set >= 0 && p.Code[set].Op == OpCode.LoadKX && p.Constants[p.Code[set + 1].Ax].Ref is byte[] sx) return new LuaString(sx).ToString();
         return "?";
     }
 
@@ -97,6 +109,7 @@ internal static class VarInfo
                 return reg >= i.A && reg <= i.A + 3;
             case OpCode.Move:
             case OpCode.LoadK:
+            case OpCode.LoadKX:
             case OpCode.LoadBool:
             case OpCode.GetGlobal:
             case OpCode.GetUpval:

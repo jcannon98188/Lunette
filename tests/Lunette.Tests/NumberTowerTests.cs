@@ -91,7 +91,7 @@ public class NumberTowerTests
 
     [Theory]
     [InlineData("print(1 % 0)", "attempt to perform 'n%0'")]
-    [InlineData("print(1 // 0)", "attempt to perform 'n//0'")]
+    [InlineData("print(1 // 0)", "attempt to divide by zero")]
     public void Integer_division_by_zero_messages_match_puc(string source, string fragment)
     {
         var ex = Assert.Throws<LuaException>(() => Run(source));
