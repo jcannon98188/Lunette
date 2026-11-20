@@ -4,7 +4,10 @@ namespace Lunette;
 /// Deny-by-default construction options for an embedder that gives each script pack its own state (see
 /// <see cref="LuaState(LuaStateOptions)"/>). Only the names passed to <see cref="Allow"/> (base functions such as
 /// <c>print</c> or <c>load</c>, and libraries such as <c>math</c>, <c>io</c> or <c>os</c>) exist in the new state; the
-/// <c>package</c> table never does, and <c>require</c> resolves only <see cref="AddModule"/> registrations.
+/// <c>package</c> table never does, and <c>require</c> resolves only <see cref="AddModule"/> registrations. Withheld names are never
+/// constructed, so nothing reachable from the new state (globals, registry, per-type metatables) refers to them.
+/// <c>dofile</c> and <c>loadfile</c>, when allowlisted, read files through <see cref="Platform"/>, so the host confines or replaces file
+/// access there. <c>load</c> accepts text chunks only: a binary chunk is rejected with "precompiled chunks are not supported" in every state.
 /// </summary>
 public sealed class LuaStateOptions
 {
@@ -13,6 +16,12 @@ public sealed class LuaStateOptions
     private readonly Dictionary<string, Func<LuaState, LuaValue>> _modules = new(StringComparer.Ordinal);
     private long? _seed1;
     private long _seed2;
+
+    /// <summary>
+    /// The host platform under <c>io</c>, <c>os</c>, <c>loadfile</c> and <c>dofile</c>; null is the full <see cref="DefaultLuaPlatform"/>.
+    /// Supply a confined or replacement platform to control file access.
+    /// </summary>
+    public ILuaPlatform? Platform { get; init; }
 
     /// <summary>Sandbox limits applied to the new state; null leaves it unlimited.</summary>
     public LuaLimits? Limits { get; init; }

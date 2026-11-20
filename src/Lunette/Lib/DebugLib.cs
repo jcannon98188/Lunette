@@ -19,6 +19,7 @@ internal static class DebugLib
 
     public static void Register(LuaState state)
     {
+        if (!state.Wants("debug")) return;
         var t = new LuaTable(0, 20);
         Add(t, "getinfo", GetInfo);
         Add(t, "traceback", Traceback);

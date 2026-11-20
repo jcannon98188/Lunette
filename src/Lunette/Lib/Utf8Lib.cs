@@ -10,6 +10,7 @@ internal static class Utf8Lib
 
     public static void Register(LuaState state)
     {
+        if (!state.Wants("utf8")) return;
         var lib = new LuaTable();
         void Add(string name, BuiltinBody body) =>
             lib.Set(LuaValue.FromString(state.Strings.FromUtf16(name)), LuaValue.FromObject(new BuiltinFunction(body)));

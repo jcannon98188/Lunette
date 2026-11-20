@@ -14,7 +14,10 @@ internal sealed class OsLib
         _platform = state.Platform;
     }
 
-    public static void Register(LuaState state) => new OsLib(state).Install();
+    public static void Register(LuaState state)
+    {
+        if (state.Wants("os")) new OsLib(state).Install();
+    }
 
     private LuaValue Str(string s) => LuaValue.FromString(_state.Strings.FromUtf16(s));
 
