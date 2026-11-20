@@ -71,8 +71,7 @@ public class AllLuaTests(ITestOutputHelper log)
             bool passed = timeout is null && proc.ExitCode == 0;
             string detail = timeout ?? $"exited {proc.ExitCode}{Environment.NewLine}stderr: {stderr}{Environment.NewLine}stdout tail: {tail}";
             log.WriteLine($"all.lua: {(passed ? "passed" : "failed")}{Environment.NewLine}{(passed ? tail : detail)}");
-            // Same ratchet as the per-file run: all.lua becomes blocking when it is listed in required-files.txt, which
-            // it can only be once every file it drives is itself required (gc, locals, closure, errors and db are not yet).
+            // Same ratchet as the per-file run: all.lua is listed in required-files.txt, so a failure here is blocking.
             var result = new SuiteResult("all.lua", passed ? SuiteStatus.Passed : SuiteStatus.Failed, 0, detail);
             Assert.False(RequiredFiles.Violates(SuiteRunner.LoadRequiredFiles(), result), $"required file all.lua did not pass: {detail}");
         }

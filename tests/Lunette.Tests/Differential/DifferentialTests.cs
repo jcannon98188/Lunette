@@ -121,7 +121,9 @@ public class GeneratedDifferentialTests(ITestOutputHelper log)
 /// </summary>
 public class SuiteChunkDifferentialTests(ITestOutputHelper log)
 {
-    private static readonly HashSet<string> Excluded = ["all.lua", "big.lua", "heavy.lua"];
+    // main.lua: PUC Lua 5.4.9 from a plain `make linux` (no readline) fails the file's own interactive-prompt check
+    // (main.lua:385), so the Reference is no oracle for it; the engine passes it per file in SuiteTests.
+    private static readonly HashSet<string> Excluded = ["all.lua", "big.lua", "heavy.lua", "main.lua"];
 
     public static IEnumerable<object[]> Files()
     {
@@ -139,11 +141,12 @@ public class SuiteChunkDifferentialTests(ITestOutputHelper log)
         try
         {
             CopyDirectory(SuiteRunner.SuiteDir, temp);
+            Directory.CreateDirectory(Path.Combine(temp, "libs", "P1")); // attrib.lua writes here; the vendored copy cannot ship it empty
             string path = Path.Combine(temp, file);
             string source = SuiteRunner.LoadWaivers().ApplyOverlays(file, File.ReadAllText(path, Encoding.Latin1));
             File.WriteAllText(path, source, Encoding.Latin1);
             DiffSupport.Compare("suite/" + file, temp, file, source, log,
-                preArgs: ["-e", "_U=true"], extra: DiffNormalizer.MaskNumbers);
+                preArgs: ["-e", "_U=true"], extra: DiffNormalizer.SuiteChatter);
         }
         finally { try { Directory.Delete(temp, recursive: true); } catch (IOException) { } }
     }

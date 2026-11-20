@@ -106,6 +106,7 @@ public sealed partial class LuaState : IDisposable
                     raw.Write(Meta.ToStringValue(state, args[i]).Bytes);
                 }
                 raw.WriteByte((byte)'\n');
+                raw.Flush(); // as lua_writeline's fflush: a pipe reader sees each print while the script keeps running
                 return null;
             }
             var o = state.Output;

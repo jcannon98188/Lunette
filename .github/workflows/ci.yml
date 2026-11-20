@@ -192,8 +192,8 @@ jobs:
       - run: dotnet test -c Release --filter "DisplayName~files.lua|DisplayName~main.lua" tests/Lunette.Tests
 
   # The upstream driver all.lua in ONE standalone-CLI process (every file shares one global state, catching cross-file
-  # bleed). It follows the suite ratchet: blocking once all.lua is in tests/suite/required-files.txt, which needs gc, locals,
-  # closure, errors and db to pass first; until then it runs and reports. See tests/Lunette.Tests/Suite/AllLuaTests.cs.
+  # bleed). Blocking: all.lua is in tests/suite/required-files.txt, so a failure here fails the job and ci-gate.
+  # See tests/Lunette.Tests/Suite/AllLuaTests.cs.
   all-lua:
     needs: build
     runs-on: ubuntu-latest
@@ -237,7 +237,8 @@ jobs:
   # Later tickets add their jobs to `needs`; nightly and benchmark jobs never block.
   # Explicit waivers of spec items not in this workflow (lua-engine-build/36, from ticket 29):
   #   - LUA_SAFE_ACCESS scheduled variant (spec 17/18: whole suite on bounds-checked helpers): waived, the define and the
-  #     bounds-checked twins of the Unsafe helpers do not exist yet; add a nightly job when they land.
+  #     bounds-checked twins of the Unsafe helpers do not exist; documented no-op in nightly-variants.yml (which also holds
+  #     the arm64, preview-SDK, capacity-1 and constant-hash variants; scheduled only, never in ci-gate).
   #   - multi-name constant folding (several <const> names folded in one declaration): waived, a compiler optimisation
   #     with no CI gate of its own; behaviour is covered by tests/Lunette.Tests/ConstFoldingTests.cs.
   ci-gate:

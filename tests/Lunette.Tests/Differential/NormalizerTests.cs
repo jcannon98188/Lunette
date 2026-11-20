@@ -36,6 +36,24 @@ public class NormalizerTests
     }
 
     [Fact]
+    public void The_shell_name_in_child_shell_errors_is_unified()
+    {
+        // dash prints its argv[0]: "sh" when a C program runs `sh -c`, "/bin/sh" when .NET runs /bin/sh -c.
+        Assert.Equal(DiffNormalizer.Stderr("sh: 1: nope: not found\n"), DiffNormalizer.Stderr("/bin/sh: 1: nope: not found\n"));
+        Assert.NotEqual(DiffNormalizer.Stderr("sh: 1: nope: not found\n"), DiffNormalizer.Stderr("sh: 1: other: not found\n"));
+    }
+
+    [Fact]
+    public void Suite_chatter_hides_interpreter_paths_temp_names_and_gc_progress_dots()
+    {
+        Assert.Equal("progname: X\n(tmp: /tmp/lua_T)\n",
+            DiffNormalizer.SuiteChatter("progname: /root/lref/lua\n(tmp: /tmp/lua_nTBYVD)\n"));
+        Assert.Equal("\nOK\n", DiffNormalizer.SuiteChatter("...\nOK\n"));
+        Assert.Equal("a ... b", DiffNormalizer.SuiteChatter("a ... b"));
+        Assert.Equal("took N s", DiffNormalizer.SuiteChatter("took 0.25 s"));
+    }
+
+    [Fact]
     public void Masking_numbers_hides_timings_only()
     {
         Assert.Equal("took N s, N ok", DiffNormalizer.MaskNumbers("took 0.25 s, 7 ok"));

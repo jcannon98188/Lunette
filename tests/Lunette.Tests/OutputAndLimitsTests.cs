@@ -18,6 +18,25 @@ public class OutputAndLimitsTests
         Assert.Equal(expected, sink.ToArray());
     }
 
+    private sealed class FlushCountingStream : MemoryStream
+    {
+        public int Flushes;
+        public override void Flush() { Flushes++; base.Flush(); }
+    }
+
+    // lua.c's print ends with fflush(stdout): a piped reader (main.lua's Ctrl-C test reads "12" from a still-running script)
+    // must see each print line while the script is still running, even though a pipe is otherwise block-buffered.
+    [Fact]
+    public void Print_flushes_the_output_stream_after_each_line_but_io_write_does_not()
+    {
+        var sink = new FlushCountingStream();
+        var state = new LuaState { OutputStream = sink };
+        state.DoString("io.write('x')");
+        Assert.Equal(0, sink.Flushes);
+        state.DoString("print('a') print('b')");
+        Assert.Equal(2, sink.Flushes);
+    }
+
     [Fact]
     public void The_cli_round_trips_non_utf8_bytes_through_print_and_io_write()
     {

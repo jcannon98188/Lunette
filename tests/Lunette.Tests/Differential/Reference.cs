@@ -42,10 +42,12 @@ public static class Reference
     public static RunOutput RunEngine(string cwd, params string[] args)
     {
         string cli = System.IO.Path.Combine(AppContext.BaseDirectory, "Lunette.Cli.dll");
-        return Run("dotnet", [cli], cwd, args);
+        // Run under the dotnet host (so no apphost is needed to be runnable), but name the engine as its apphost: suite files
+        // that spawn "the interpreter" (files.lua, main.lua) read the name from argv[0], and "lunette" is not on PATH.
+        return Run("dotnet", [cli], cwd, args, new() { ["LUNETTE_PROGNAME"] = SuiteRunner.LauncherPath });
     }
 
-    private static RunOutput Run(string file, string[] prefix, string cwd, string[] args)
+    private static RunOutput Run(string file, string[] prefix, string cwd, string[] args, Dictionary<string, string>? env = null)
     {
         var psi = new ProcessStartInfo(file)
         {
@@ -56,6 +58,7 @@ public static class Reference
             StandardOutputEncoding = Encoding.Latin1,
             StandardErrorEncoding = Encoding.Latin1,
         };
+        if (env is not null) foreach (var (k, v) in env) psi.Environment[k] = v;
         foreach (string a in prefix) psi.ArgumentList.Add(a);
         foreach (string a in args) psi.ArgumentList.Add(a);
 

@@ -1,0 +1,93 @@
+name: nightly-variants
+
+# Scheduled variant runs of the whole test project, official suite included (ticket lua-engine-build/20). They run and
+# report; they are never a PR trigger and never part of `ci-gate`, so they cannot block a merge. Any failing variant opens
+# (or comments on) one tracking issue via the `report` job.
+#
+# Variants: linux arm64, preview .NET SDK, capacity-1 intern cache, constant string hash (ADR 0005).
+#
+# Explicit waiver: the LUA_SAFE_ACCESS safe-twin variant (whole suite on bounds-checked twins of the Unsafe helpers) is
+# a documented no-op. No `LUA_SAFE_ACCESS` define and no unsafe helpers exist in src/ (the engine is written against
+# checked accesses throughout), so there is nothing to switch. Add a `safe-access` job here if unsafe helpers are introduced.
+on:
+  schedule:
+    - cron: "43 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  arm64:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - run: dotnet test -c Release tests/Lunette.Tests
+
+  # Newest preview SDK instead of the pinned one: drop global.json so the pin does not apply.
+  preview-sdk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 11.0.x
+          dotnet-quality: preview
+      - run: rm global.json
+      - run: dotnet --info
+      - run: dotnet test -c Release tests/Lunette.Tests
+
+  capacity-1-cache:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      LUNETTE_INTERN_CAPACITY: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - run: dotnet test -c Release tests/Lunette.Tests
+
+  constant-hash:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      LUNETTE_CONSTANT_HASH: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - run: dotnet test -c Release tests/Lunette.Tests
+
+  # Always runs; opens or updates one tracking issue when any variant failed.
+  report:
+    if: always()
+    needs: [arm64, preview-sdk, capacity-1-cache, constant-hash]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      FAILED: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+    steps:
+      - name: Open or update tracking issue
+        if: env.FAILED == 'true'
+        run: |
+          title="Nightly variant run failing"
+          body="Run ${RUN_URL} had a failing variant (arm64, preview-sdk, capacity-1-cache or constant-hash). See the run summary."
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi
+      - name: Report status
+        run: echo "variants failed = ${FAILED}"
