@@ -49,6 +49,21 @@ internal static class BaseLib
             return [LuaValue.FromString(Meta.ToStringValue(st, args[0]))];
         });
         Add(state, "tonumber", ToNumber);
+        Add(state, "select", Select);
+    }
+
+    private static LuaValue[] Select(LuaState state, ReadOnlySpan<LuaValue> args)
+    {
+        if (args.Length > 0 && args[0].Ref is byte[] raw && new LuaString(raw).Length == 1 && new LuaString(raw)[0] == (byte)'#')
+            return [LuaValue.FromInteger(args.Length - 1)];
+        long n = Lib.LibArgs.CheckInteger("select", args, 0);
+        int count = args.Length - 1;
+        if (n < 0) n = count + n;
+        else if (n > count) n = count + 1;
+        else n--;
+        if (n < 0) throw ArgError(1, "select", "index out of range");
+        if (n < 0 || n >= count) return [];
+        return args[(int)(n + 1)..].ToArray();
     }
 
     private static void Add(LuaState state, string name, BuiltinBody body) =>

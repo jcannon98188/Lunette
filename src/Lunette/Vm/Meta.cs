@@ -118,6 +118,11 @@ internal static class Meta
     /// <summary>Binary arithmetic where an operand is not a number: try the metamethods, else raise the error.</summary>
     public static LuaValue Arith(LuaState state, TagMethod ev, LuaValue a, LuaValue b, Proto? p, int pc)
     {
+        // Manual 3.4.3: strings convert to numbers in arithmetic (PUC does this through string-metatable metamethods;
+        // observably the same unless the other operand has its own metamethod, which still wins below).
+        if (ev is >= TagMethod.Add and <= TagMethod.IDiv
+            && StringConv.TryToNumber(a, out LuaValue na) && StringConv.TryToNumber(b, out LuaValue nb))
+            return Vm.Arith.Binary(OpFor(ev), na, nb, p!, pc);
         LuaValue tm = GetTagMethod(state, a, ev);
         if (tm.IsNil) tm = GetTagMethod(state, b, ev);
         if (tm.IsNil)
@@ -129,6 +134,17 @@ internal static class Meta
         return Interpreter.Call1(state, tm, a, b, default, 2);
     }
 
+    private static OpCode OpFor(TagMethod ev) => ev switch
+    {
+        TagMethod.Add => OpCode.Add,
+        TagMethod.Sub => OpCode.Sub,
+        TagMethod.Mul => OpCode.Mul,
+        TagMethod.Mod => OpCode.Mod,
+        TagMethod.Pow => OpCode.Pow,
+        TagMethod.Div => OpCode.Div,
+        _ => OpCode.IDiv,
+    };
+
     private static string OperationName(TagMethod ev) =>
         ev is >= TagMethod.BAnd and <= TagMethod.Shr or TagMethod.BNot ? "bitwise operation" : "arithmetic";
 
@@ -136,6 +152,8 @@ internal static class Meta
 
     public static LuaValue Unary(LuaState state, TagMethod ev, LuaValue a, Proto? p, int pc)
     {
+        if (ev == TagMethod.Unm && StringConv.TryToNumber(a, out LuaValue n))
+            return Vm.Arith.Negate(n, p!, pc);
         LuaValue tm = GetTagMethod(state, a, ev);
         if (tm.IsNil) throw new LuaException($"{At(p, pc)}attempt to perform {OperationName(ev)} on a {a.TypeName} value{VarInfo.DescribeOperand(p, pc, true)}");
         return Interpreter.Call1(state, tm, a, a, default, 2);

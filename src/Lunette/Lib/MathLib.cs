@@ -5,8 +5,7 @@ namespace Lunette.Lib;
 /// <summary>
 /// The Lua <c>math</c> library, PUC 5.4 semantics. <see cref="Members"/> maps each field name to its value
 /// (functions as <see cref="BuiltinFunction"/>, plus <c>pi</c>, <c>huge</c>, <c>maxinteger</c>, <c>mininteger</c>);
-/// installing it as the global <c>math</c> table is the job of the table support.
-/// Not yet covered because Lua strings do not exist yet: <c>math.type</c> and string-to-number argument coercion.
+/// <see cref="Register"/> installs it as the global <c>math</c>.
 /// </summary>
 internal sealed class MathLib
 {
@@ -59,7 +58,7 @@ internal sealed class MathLib
 
     private static LuaValue Number(string fn, ReadOnlySpan<LuaValue> args, int index)
     {
-        if (index < args.Length && args[index].IsNumber) return args[index];
+        if (index < args.Length && StringConv.TryToNumber(args[index], out LuaValue n)) return n;
         throw ArgError(fn, index, $"number expected, got {(index < args.Length ? args[index].TypeName : "no value")}");
     }
 
@@ -136,7 +135,28 @@ internal sealed class MathLib
     private static LuaValue[] ToInteger(LuaState _, ReadOnlySpan<LuaValue> a)
     {
         if (a.Length == 0) throw ArgError("tointeger", 0, "value expected");
-        return One(LuaNumber.TryToInteger(a[0], out long n) ? LuaValue.FromInteger(n) : LuaValue.Nil);
+        return One(StringConv.TryToNumber(a[0], out LuaValue v) && LuaNumber.TryToInteger(v, out long n)
+            ? LuaValue.FromInteger(n) : LuaValue.Nil);
+    }
+
+    private static LuaValue[] MathType(LuaState state, ReadOnlySpan<LuaValue> a)
+    {
+        if (a.Length == 0) throw ArgError("type", 0, "value expected");
+        if (a[0].IsInteger) return One(LuaValue.FromString(state.Strings.FromUtf16("integer")));
+        if (a[0].IsFloat) return One(LuaValue.FromString(state.Strings.FromUtf16("float")));
+        return One(LuaValue.Nil);
+    }
+
+    /// <summary>Installs a fresh <c>math</c> table (with its own random state) as the global <c>math</c>.</summary>
+    public static void Register(LuaState state)
+    {
+        var lib = new MathLib();
+        var table = new LuaTable();
+        foreach (var (name, value) in lib.Members)
+            table.Set(LuaValue.FromString(state.Strings.FromUtf16(name)), value);
+        table.Set(LuaValue.FromString(state.Strings.FromUtf16("type")),
+            LuaValue.FromObject(new BuiltinFunction(MathType)));
+        state.Globals["math"] = LuaValue.FromTable(table);
     }
 
     private static LuaValue[] MinMax(string fn, ReadOnlySpan<LuaValue> a, bool max)

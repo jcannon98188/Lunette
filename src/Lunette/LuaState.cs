@@ -43,6 +43,7 @@ public sealed class LuaState
         BaseLib.Register(this);
         StringLib.Register(this);
         Utf8Lib.Register(this);
+        MathLib.Register(this);
         ErrorLib.Register(this);
     }
 
