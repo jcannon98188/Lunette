@@ -206,6 +206,8 @@ internal static class StringLib
                     continue;
                 }
                 int specStart = i;
+                // The reference checks that an argument exists before it parses the conversion.
+                if (++arg >= args.Length) throw ArgError("format", arg + 1, "no value");
                 int span = 0;
                 while (specStart + span < f.Length && f[specStart + span] is (byte)'-' or (byte)'+' or (byte)' ' or (byte)'#' or (byte)'.' or (>= (byte)'0' and <= (byte)'9')) span++;
                 if (span + 1 >= 22) throw LuaErrors.Error("invalid format string to 'format' (too long)");
@@ -257,7 +259,6 @@ internal static class StringLib
                 };
                 if (rules is { } rl && (badWidth || !ValidSpec(f.Slice(specStart, i - 1 - specStart), rl.flagSet, rl.allowPrec)))
                     throw InvalidSpecification(f, specStart, i);
-                if (++arg >= args.Length) throw ArgError("format", arg + 1, "no value");
                 switch (conv)
                 {
                     case 'c':

@@ -75,6 +75,13 @@ public sealed class LuaException : Exception
         return tostring.IsNil ? Message : Vm.Meta.ToStringValue(state, Value).ToString();
     }
 
+    /// <summary>Replaces the message text of a not-yet-located library error (keeps WantsPosition).</summary>
+    internal void Reword(string message)
+    {
+        _message = message;
+        Value = LuaValue.FromString(message);
+    }
+
     internal void Prefix(string where)
     {
         _message = where + " " + _message;

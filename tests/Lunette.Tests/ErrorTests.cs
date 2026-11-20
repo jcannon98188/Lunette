@@ -229,4 +229,13 @@ public class ErrorTests
         Assert.Equal("true\tfalse\t(load):1: z\n", Run("print(pcall(pcall, function() error('z') end))"));
         Assert.Equal("true\ttrue\t9\n", Run("print(pcall(pcall, function() return 9 end))"));
     }
+
+    [Fact]
+    public void A_library_function_called_by_pcall_reports_its_qualified_name() =>
+        Assert.Equal("false\tbad argument #2 to 'string.format' (number has no integer representation)\n", Run("print(pcall(string.format, '%d', 3.5))"));
+
+    [Fact]
+    public void Format_reports_a_missing_argument_before_a_bad_conversion() =>
+        Assert.Equal("false\tbad argument #2 to 'string.format' (no value)\nfalse\tbad argument #2 to 'string.format' (no value)\n",
+            Run("print(pcall(string.format, '%')) print(pcall(string.format, '%5%'))"));
 }

@@ -344,7 +344,7 @@ internal static class DebugLib
     }
 
     /// <summary>"print" or "string.rep" when <paramref name="fn"/> is a global or a library function (lauxlib pushglobalfuncname).</summary>
-    private static string? GlobalFuncName(LuaState state, LuaValue fn)
+    internal static string? GlobalFuncName(LuaState state, LuaValue fn)
     {
         LuaValue gkey = default;
         while (state.Globals.Next(gkey, out LuaValue gk, out LuaValue gv))

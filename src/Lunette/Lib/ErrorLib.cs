@@ -51,6 +51,25 @@ internal static class ErrorLib
         throw new LuaException(Interpreter.ErrorValue(state.Running, msg, 1, true));
     }
 
+    /// <summary>
+    /// A library function called straight from pcall has no call-site name, so luaL_argerror falls back to the qualified
+    /// global name: "bad argument #1 to 'string.rep'" rather than 'rep'.
+    /// </summary>
+    private static void QualifyArgError(LuaState state, LuaValue fn, LuaException ex)
+    {
+        const string Head = "bad argument #";
+        if (fn.Ref is not BuiltinFunction || !ex.WantsPosition || !ex.Value.IsString) return;
+        string m = ex.Message;
+        if (!m.StartsWith(Head, StringComparison.Ordinal)) return;
+        int q = m.IndexOf(" to '", StringComparison.Ordinal);
+        int end = q < 0 ? -1 : m.IndexOf('\'', q + 5);
+        if (end < 0) return;
+        string bare = m.Substring(q + 5, end - q - 5);
+        string? full = DebugLib.GlobalFuncName(state, fn);
+        if (full is null || full == bare || !full.EndsWith("." + bare, StringComparison.Ordinal)) return;
+        ex.Reword(m.Substring(0, q + 5) + full + m.Substring(end));
+    }
+
     private static LuaValue[] Protected(LuaState state, ReadOnlySpan<LuaValue> args, bool xpcall)
     {
         CheckProtectedArgs(xpcall, args);
@@ -69,7 +88,9 @@ internal static class ErrorLib
         }
         catch (Exception e) when (Interpreter.IsLuaError(e))
         {
-            LuaValue value = Interpreter.AsLuaException(e).Value;
+            LuaException ex = Interpreter.AsLuaException(e);
+            QualifyArgError(state, args[0], ex);
+            LuaValue value = ex.Value;
             if (xpcall) value = Interpreter.RunHandler(state, co, handler, value);
             co.Depth = depth;
             co.Close(level);
