@@ -2,7 +2,7 @@
 kind: ticket
 title: Full green and nightly variants
 status: open
-blocked_by: [11, 12, 13, 16, 17, 18, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]
+blocked_by: [11, 12, 13, 16, 17, 18, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34]
 tags: [ready-for-agent, enhancement]
 created: 2026-11-20
 updated: 2026-11-20
