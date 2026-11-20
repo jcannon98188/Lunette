@@ -8,7 +8,7 @@ Report-only. Nothing here fails a build or blocks `ci-gate`; performance is stee
   Needs `dotnet build -c Release src/Lunette.Cli` first, and `ci/build-reference.sh .reference` (Linux) for the PUC column.
 - `run-macro-linux.sh` (bash only, no node; for Linux/WSL): same comparison with the startup cost measured separately
   (`startup.lua` = `print(1)`) and subtracted from both engines; prints wall, net and net ratio.
-  `bench/run-macro-linux.sh [--runs N] [--only a,b] [--reference PATH] [--no-build] [--r2r] [--startup] [--engine-env "K=V"]`.
+  `bench/run-macro-linux.sh [--runs N] [--only a,b] [--reference PATH] [--no-build] [--r2r] [--aot] [--startup] [--engine-env "K=V"]`.
   Under WSL with the checkout on `/mnt/c`, set `BENCH_WORK=/root/lw` to build in a Linux copy instead of clobbering the Windows `obj/`.
   `--r2r` times a ReadyToRun publish; `--engine-env` sets runtime knobs for Lunette only (`DOTNET_TieredPGO=0`, note `DOTNET_*` values are hex).
 - `profile-probes.lua`: ns-per-construct probes (Move, arithmetic, table access, calls, string ops); run under both engines.
@@ -31,7 +31,9 @@ Report-only. Nothing here fails a build or blocks `ci-gate`; performance is stee
 ## Baseline (WSL Ubuntu, 16 CPUs, median of 5, net of startup; before the perf tickets 41-44)
 
 Startup (`print(1)`): Lunette about 90 ms (plain build) or 58 ms (ReadyToRun), PUC 5 ms. The CLI runtimeconfig sets
-`System.Runtime.TieredCompilation.CallCountingDelayMs=0` (measured win, see `PROFILE.md`).
+`System.Runtime.TieredCompilation.CallCountingDelayMs=0` (measured win, see `PROFILE.md`) and, since ticket 54,
+`System.GC.Concurrent=false` (gen0 p99 pause 4.2 -> 0.18 ms). Both now live in `src/Lunette.Cli/Lunette.Cli.csproj`. A Native AOT publish of the CLI
+starts in 4 ms with no warm-up (`run-macro-linux.sh --aot`); see `COVERAGE.md` "After ticket 54".
 
 | benchmark | PUC ms | Lunette ms | ratio (net) | | benchmark | PUC ms | Lunette ms | ratio (net) |
 |---|---:|---:|---:|---|---|---:|---:|---:|

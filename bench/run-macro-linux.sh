@@ -8,6 +8,7 @@
 #   --no-build        reuse an existing Release build instead of running `dotnet build -c Release src/Lunette.Cli`
 #   --startup         only print the startup baseline (bench/startup.lua = `print(1)`) for both engines
 #   --r2r             time a ReadyToRun publish of the CLI (startup ~30 ms lower, see bench/PROFILE.md) instead of the plain build
+#   --aot             time a Native AOT publish of the CLI (4 ms startup, no JIT warm-up; see bench/COVERAGE.md "After ticket 54"); needs clang
 #   --engine-env ".." extra environment for the Lunette process only, e.g. "DOTNET_TieredPGO=0" (runtime-config experiments)
 #
 # Environment: BENCH_WORK=<dir> builds in a copy of the repo there instead of in place. Use this under WSL when the checkout is on
@@ -15,7 +16,7 @@
 # Columns: wall = total process time; net = wall minus that engine's own startup baseline; ratio = Lunette net / PUC net.
 set -euo pipefail
 
-runs=3; only=""; ref=""; build=1; startup_only=0; engine_env=""; r2r=0
+runs=3; only=""; ref=""; build=1; startup_only=0; engine_env=""; r2r=0; aot=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --runs) runs="$2"; shift 2 ;;
@@ -24,6 +25,7 @@ while [ $# -gt 0 ]; do
     --no-build) build=0; shift ;;
     --startup) startup_only=1; shift ;;
     --r2r) r2r=1; shift ;;
+    --aot) aot=1; shift ;;
     --engine-env) engine_env="$2"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -58,13 +60,20 @@ if [ "$r2r" = 1 ]; then
   fi
   cli="$root/r2r-out/Lunette.Cli.dll"
 fi
+if [ "$aot" = 1 ]; then
+  if [ "$build" = 1 ] || [ ! -x "$root/aot-out/Lunette.Cli" ]; then
+    (cd "$root" && dotnet publish src/Lunette.Cli -c Release -o "$root/aot-out" --nologo -v q | tail -1)
+  fi
+  cli="$root/aot-out/Lunette.Cli"
+fi
 [ -f "$cli" ] || { echo "missing $cli (build first)" >&2; exit 1; }
 
 # time <cmd...>: wall milliseconds of one run, output discarded
 now_ms() { echo $(( $(date +%s%N) / 1000000 )); }
 run_ms() { local s e; s=$(now_ms); "$@" >/dev/null 2>&1 || { echo "FAIL: $*" >&2; }; e=$(now_ms); echo $(( e - s )); }
 median() { sort -n | awk '{a[NR]=$1} END {print a[int((NR+1)/2)]}'; }
-lunette() { if [ -n "$engine_env" ]; then env $engine_env dotnet "$cli" "$@"; else dotnet "$cli" "$@"; fi; }
+host=(dotnet); [ "$aot" = 1 ] && host=() # a native binary runs directly
+lunette() { if [ -n "$engine_env" ]; then env $engine_env "${host[@]}" "$cli" "$@"; else "${host[@]}" "$cli" "$@"; fi; }
 sample() { # sample <engine-fn> <script>
   local fn="$1" script="$2"
   "$fn" "$script" >/dev/null 2>&1 || true # warm-up
