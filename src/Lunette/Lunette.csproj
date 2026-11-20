@@ -7,6 +7,13 @@
     <!-- Enables the trim/AOT analyzers (IL2xxx/IL3xxx): no reflection or dynamic code in core. -->
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
+  <!-- LUA_SAFE_ACCESS (-p:LuaSafeAccess=true) swaps the whole Lunette.Unsafe family for its bounds-checked twin: exactly one of the two files compiles. -->
+  <ItemGroup Condition="'$(LuaSafeAccess)' == 'true'">
+    <Compile Remove="Unsafe\Regs.cs" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(LuaSafeAccess)' != 'true'">
+    <Compile Remove="Unsafe\RegsSafe.cs" />
+  </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Lunette.Tests" />
   </ItemGroup>

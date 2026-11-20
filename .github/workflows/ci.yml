@@ -236,9 +236,9 @@ jobs:
   # The single aggregate check required by branch protection (ADR/ticket 18).
   # Later tickets add their jobs to `needs`; nightly and benchmark jobs never block.
   # Explicit waivers of spec items not in this workflow (lua-engine-build/36, from ticket 29):
-  #   - LUA_SAFE_ACCESS scheduled variant (spec 17/18: whole suite on bounds-checked helpers): waived, the define and the
-  #     bounds-checked twins of the Unsafe helpers do not exist; documented no-op in nightly-variants.yml (which also holds
-  #     the arm64, preview-SDK, capacity-1 and constant-hash variants; scheduled only, never in ci-gate).
+  #   - LUA_SAFE_ACCESS scheduled variant (spec 17/18: whole suite on bounds-checked helpers): not a gate job, it is the
+  #     `safe-twin` job in nightly-variants.yml (which also holds the arm64, preview-SDK, capacity-1 and constant-hash
+  #     variants; scheduled only, never in ci-gate).
   #   - multi-name constant folding (several <const> names folded in one declaration): waived, a compiler optimisation
   #     with no CI gate of its own; behaviour is covered by tests/Lunette.Tests/ConstFoldingTests.cs.
   ci-gate:

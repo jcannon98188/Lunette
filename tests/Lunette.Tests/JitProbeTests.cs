@@ -13,6 +13,9 @@ namespace Lunette.Tests;
 /// contain calls to helpers meant to be inlined (the silent inlining cliff at 921 locals), beyond the recorded
 /// baseline in jit-budgets.json. Both need the plain JIT path (R2R and NativeAOT skip these thresholds).
 /// </summary>
+// Not part of the LUA_SAFE_ACCESS variant: the baselines in jit-budgets.json describe the unsafe helpers; the bounds-checked twin
+// legitimately leaves LuaValue.FromFloat / IsFalsy calls in the loop. (Budgets are default-build gates only.)
+#if !LUA_SAFE_ACCESS
 public class JitProbeTests
 {
     private sealed record ProbeRun(string Stdout, string DisasmFile);
@@ -130,3 +133,4 @@ public class JitProbeTests
         Assert.True(!stale.Any(), "lower inlineLeftovers in jit-budgets.json: " + string.Join("; ", stale));
     }
 }
+#endif

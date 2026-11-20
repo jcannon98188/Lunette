@@ -16,6 +16,8 @@ internal struct RawValue
 /// are always below the frame's <c>MaxStack</c>, which the call sequence has reserved, so the bounds check is dropped (and asserted in Debug).
 /// Numeric stores skip the GC write barrier when the destination already holds a value of the same number type: only the
 /// 8-byte payload changes and the type tag object stays the same.
+/// Why this is sound with respect to ADR 0001 and ADR 0006 is written up in RegsSafe.cs, which is the bounds-checked, always-barriered twin
+/// compiled instead of this file under LUA_SAFE_ACCESS. Every helper added here needs a twin there.
 /// </summary>
 internal static class Regs
 {
