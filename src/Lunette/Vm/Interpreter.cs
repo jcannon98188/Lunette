@@ -549,7 +549,7 @@ internal static partial class Interpreter
                     if (TMode.Traced) TraceBuiltin(state, co, tbf, Math.Max(top, fa + nargs + 1), true, fa + 1, nargs);
                     if (tbf.Kind != BuiltinKind.None)
                     {
-                        Special sp = CallSpecial(state, co, tbf.Kind, fa, nargs, -1, stop, proto, pc - 1);
+                        Special sp = tbf.Kind >= FastFirst ? (TMode.Traced ? Special.None : CallFast(state, co, tbf.Kind, fa, nargs, -1)) : CallSpecial(state, co, tbf.Kind, fa, nargs, -1, stop, proto, pc - 1);
                         if (sp == Special.NewFrame)
                         {
                             f = co.ResumeFrame!;
@@ -1181,12 +1181,14 @@ internal static partial class Interpreter
         {
             co.EnsureStack(ra + n, proto, pc - 1);
             r = co.Stack;
-            Array.Copy(r, f.VarargBase, r, ra, n);
+            if (n <= 4) for (int j = 0; j < n; j++) Regs.Copy(ref Regs.At(r, ra + j), in Regs.At(r, f.VarargBase + j)); // the varargs lie below the frame base: a forward copy cannot overlap
+            else Array.Copy(r, f.VarargBase, r, ra, n);
             return ra + n;
         }
         r = co.Stack;
         int c = Math.Min(n, wanted);
-        Array.Copy(r, f.VarargBase, r, ra, c);
+        if (c <= 4) for (int j = 0; j < c; j++) Regs.Copy(ref Regs.At(r, ra + j), in Regs.At(r, f.VarargBase + j));
+        else Array.Copy(r, f.VarargBase, r, ra, c);
         for (int j = c; j < wanted; j++) r[ra + j] = default;
         return top;
     }

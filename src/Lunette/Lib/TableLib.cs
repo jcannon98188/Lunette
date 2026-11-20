@@ -16,15 +16,15 @@ internal static class TableLib
         Add(t, "insert", Insert);
         Add(t, "remove", Remove);
         Add(t, "concat", Concat);
-        Add(t, "unpack", Unpack);
+        Add(t, "unpack", Unpack, BuiltinKind.TableUnpack);
         Add(t, "pack", Pack);
         Add(t, "move", Move);
         Add(t, "sort", Sort);
         state.SetGlobal("table", LuaValue.FromTable(t));
     }
 
-    private static void Add(LuaTable t, string name, BuiltinBody body) =>
-        t.Set(LuaValue.FromString(name), LuaValue.FromObject(new BuiltinFunction(body)));
+    private static void Add(LuaTable t, string name, BuiltinBody body, BuiltinKind kind = BuiltinKind.None) =>
+        t.Set(LuaValue.FromString(name), LuaValue.FromObject(new BuiltinFunction(body, kind)));
 
     private static LuaValue Geti(LuaState state, LuaValue t, long i) =>
         t.Ref is LuaTable { Metatable: null } tb ? tb.GetInt(i) : Meta.Index(state, t, LuaValue.FromInteger(i), null, 0);

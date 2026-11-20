@@ -47,6 +47,10 @@ internal enum BuiltinKind : byte
     Type,
     Select,
     SetMetatable,
+    TableUnpack,
+    Tonumber,
+    MathMax,
+    MathMin,
 }
 
 internal sealed class BuiltinFunction(BuiltinBody body, BuiltinKind kind = BuiltinKind.None) : LuaFunction

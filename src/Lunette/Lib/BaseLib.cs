@@ -50,7 +50,7 @@ internal static class BaseLib
             if (args.Length == 0) throw ArgError("tostring", 1, "value expected");
             return Rets.One(LuaValue.FromString(Meta.ToStringValue(st, args[0])));
         });
-        Add(state, "tonumber", ToNumber);
+        Add(state, "tonumber", ToNumber, BuiltinKind.Tonumber);
         Add(state, "select", Select, BuiltinKind.Select);
     }
 

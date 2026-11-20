@@ -85,6 +85,47 @@ internal static partial class Interpreter
                 state.Gc.OnSetMetatable(smt, smt.Metatable);
                 return DeliverOne(st, co, fa, wanted, a);
             }
+            case BuiltinKind.Tonumber:
+                if (nargs != 1) return Special.None;
+                return DeliverOne(st, co, fa, wanted, StringConv.TryToNumber(a, out LuaValue tn) ? tn : default);
+            case BuiltinKind.MathMax:
+            case BuiltinKind.MathMin:
+            {
+                if (nargs != 2 || !a.IsNumber || !st[fa + 2].IsNumber) return Special.None;
+                LuaValue b2 = st[fa + 2];
+                bool pickB = kind == BuiltinKind.MathMax ? Compare.NumberLessThan(a, b2) : Compare.NumberLessThan(b2, a);
+                return DeliverOne(st, co, fa, wanted, pickB ? b2 : a);
+            }
+            case BuiltinKind.TableUnpack:
+            {
+                // unpack(t [, i [, j]]) on a plain table with a short range: the elements go straight to the stack
+                if (a.Ref is not LuaTable { Metatable: null } ut || nargs > 3) return Special.None;
+                long lo = 1, hi;
+                if (nargs >= 2)
+                {
+                    if (!st[fa + 2].IsInteger) return Special.None;
+                    lo = st[fa + 2].AsInteger;
+                }
+                if (nargs == 3)
+                {
+                    if (!st[fa + 3].IsInteger) return Special.None;
+                    hi = st[fa + 3].AsInteger;
+                }
+                else hi = ut.Length();
+                int cnt = 0;
+                if (lo <= hi)
+                {
+                    ulong span = (ulong)hi - (ulong)lo;
+                    if (span >= 64) return Special.None;
+                    cnt = (int)span + 1;
+                }
+                if (wanted < 0 && fa + cnt >= st.Length) return Special.None;
+                int copy = wanted < 0 ? cnt : Math.Min(cnt, wanted);
+                for (int j = 0; j < copy; j++) st[fa + j] = ut.GetInt(lo + j);
+                if (wanted < 0) co.ResumeTop = fa + cnt;
+                else for (int j = copy; j < wanted; j++) st[fa + j] = default;
+                return Special.Done;
+            }
             default:
                 return Special.None;
         }

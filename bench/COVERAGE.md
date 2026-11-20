@@ -328,3 +328,36 @@ registration (no measurable startup share). Recommendation, not a code change: s
 
 Gaps: the max single pause with non-concurrent GC (76-93 ms) is the remaining GC outlier; the JIT-hosted first-chunk cost (the first chunk takes 14-24 ms: `RunLoop`'s FullOpts
 compile plus tier-0 of the helpers) has no lever that does not cost throughput; AOT is 20% slower than JIT on metamethod-heavy code (oop).
+
+## After ticket 55 (varargs/select, closure iterators, builtin per-call overhead)
+
+Method: WSL Ubuntu, interleaved base / new / PUC 5.4.9 runs, 9 rounds, medians of the per-section times the macro scripts print (ms; ratio = new / PUC). Probes are `bench` style loops (3M iterations, second pass
+of two, so JIT warm-up is excluded) with the loop cost included in every row. Run-to-run noise on this machine is about 5-10% per row, so only rows that moved in every round pair are claimed.
+
+Root cause found: `return select('#', ...)`, `return select(n, ...)` and any other builtin in tail position went through `CallSpecial` -> `CallBuiltin` (argument span, pooled result array), because the
+`TailCall` instruction never used the in-place `CallFast` protocol of ticket 47 that `Call` uses. That is the shape of every `count(...)`/`nth(...)` helper.
+
+Kept (each is a measured win):
+
+| change | before | after |
+|---|---:|---:|
+| `TailCall` of an in-place builtin uses `CallFast` (`select`, `type`, `math.*`, `string.byte`, ...) | varargs 1 (`select`) 245 ms, 2.78x | 204 ms, 2.7x; `return select('#', ...)` probe 287 -> 202 ms / 3M |
+| `table.unpack(t [, i [, j]])` in place (plain table, up to 64 values, written straight to the stack; metatables, bad arguments and huge ranges still take the builtin) | table-lib 7: 251 ms, 3.2x | 135 ms, 1.7x |
+| `tonumber(x)` in place (one argument; `StringConv.TryToNumber`, base form unchanged) | `tonumber('12345')` 168, int 105, `'0x1f'` 159 ms | 142, 80, 134 ms (1.9-2.1x PUC, was 1.9-2.4x) |
+| `math.max` / `math.min` with two numeric arguments in place | 115 ms | 103 ms |
+| `Vararg` instruction copies up to 4 values with scalar `Regs.Copy` instead of `Array.Copy` | varargs 4 (forwarding) 145 ms | 133 ms (2.8x -> 2.6x) |
+
+Net: varargs 1 2.78x -> 2.7x, varargs 4 2.8x -> 2.6x, varargs 5 2.3x -> 2.2x, table-lib 7 3.2x -> 1.7x; the other rows are unchanged within noise.
+
+Measured and reverted (no win, code removed):
+
+- **Fusing the Lua-closure iterator call into `TForMove`** (running the three Moves in place and entering the `Call` case directly, saving three dispatches): closure-built iterator 152 vs 167 ms (no gain, slightly worse),
+  so the cost of a closure iterator step is the call itself (frame push, upvalue get/set, `Return`), not instruction dispatch. The call path is the same one a plain fixed-arity call takes: an
+  empty 4-argument Lua call is ~42 ns vs 16 ns in PUC (2.7x), and a vararg callee adds only ~0-10 ns on top of that.
+- **A dedicated `PrecallVararg`** (inline stack check, scalar parameter copies, no `reuse` write-barrier when the closure repeats): forwarding 139.0 vs 139.7 ms, `select` 199 vs 213 ms; neutral.
+- Not attempted after probing: `string.sub/rep/char`, `table.insert/remove`, `tostring(int)` are already 1.1-1.6x PUC (tostring is 0.55x) and `tonumber('3.25')` is at parity, so the
+  "string.rep/sub/byte 2.5x" gap in the earlier survey was warm-up (first-section JIT), not per-call overhead; ticket 47's finding that in-place `string.sub` is neutral still holds.
+
+Gaps: closure-built iterator stays at 2.7-2.9x, `select` / forwarding / multiple returns at 2.2-2.7x. All of them are bounded by the general Lua call + return cost (2.7x on an empty call, as in `fib`),
+which is outside builtin/vararg handling; getting below 2.5x there needs work on `PushFrame`/`Return`/`newframe` reload, not on varargs. `tests/Lunette.Tests/Ticket55FastPathTests.cs` pins the new in-place paths
+against PUC-derived expectations. `gc.lua:473` (string-key weak table memory growth) fails in the differential chunk run on this machine for the base build as well; unrelated to this change.

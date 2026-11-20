@@ -42,8 +42,8 @@ internal sealed class MathLib
         Add("rad", static (_, a) => One(CheckNumber("rad", a, 0) * (Math.PI / 180.0)));
         Add("tointeger", ToInteger);
         Add("ult", static (_, a) => One(LuaValue.FromBoolean((ulong)CheckInteger("ult", a, 0) < (ulong)CheckInteger("ult", a, 1))));
-        Add("max", static (_, a) => MinMax("max", a, true));
-        Add("min", static (_, a) => MinMax("min", a, false));
+        Add("max", static (_, a) => MinMax("max", a, true), BuiltinKind.MathMax);
+        Add("min", static (_, a) => MinMax("min", a, false), BuiltinKind.MathMin);
         Add("random", (_, a) => Random(a));
         Add("randomseed", (_, a) => RandomSeed(a));
         if (hostSeed is var (h1, h2)) SetSeed(h1, h2);
