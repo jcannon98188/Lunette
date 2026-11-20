@@ -31,6 +31,7 @@ public readonly partial struct LuaValue
     public static LuaValue Nil => default;
     public static LuaValue FromInteger(long v) => new(IntegerTag, v);
     public static LuaValue FromFloat(double v) => new(FloatTag, BitConverter.DoubleToInt64Bits(v));
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static LuaValue FromBoolean(bool v) => new(v ? TrueTag : FalseTag, 0);
 
     public bool IsNil => Ref is null;

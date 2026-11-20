@@ -62,7 +62,7 @@ internal static partial class Interpreter
             if (viaPcall) return Special.None;
             throw new LuaException(co.IsMain ? "attempt to yield from outside a coroutine" : "attempt to yield across a C-call boundary");
         }
-        co.YieldValues = args.ToArray();
+        co.YieldValues = Rets.Of(args); // shared for up to three values; Resume hands it straight to its caller, who consumes it at once
         co.YieldFa = fa;
         co.YieldWanted = wanted;
         co.YieldPcall = viaPcall;
@@ -101,7 +101,7 @@ internal static partial class Interpreter
                 {
                     LuaValue[]? res = ((BuiltinFunction)co.Body.Ref!).Invoke(state, args);
                     co.Status = CoStatus.Dead;
-                    results = res ?? [];
+                    results = res is null ? [] : Rets.Own(res);
                     return true;
                 }
                 co.EnsureStack(args.Length + 2, null, 0);

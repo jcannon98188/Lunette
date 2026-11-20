@@ -16,9 +16,13 @@ const canary = path.join(root, 'src', 'Lunette', 'ZzAnalyzerCanary.cs');
 const source = `
 namespace Lunette;
 
-internal sealed class LuaString
+// Matched by simple name (LD003); nested so it does not clash with the real Lunette.LuaString.
+internal static class Canary
 {
-    internal byte[] Bytes = new byte[4];
+    internal sealed class LuaString
+    {
+        internal byte[] Bytes = new byte[4];
+    }
 }
 
 internal sealed class Box { }
@@ -28,7 +32,13 @@ internal static class HotCanary
 {
     public static object Alloc() => new Box();                                  // LD001
     public static void Throws() { throw new InvalidOperationException(); }      // LD002
-    public static byte Index(LuaString s) => s.Bytes[0];                        // LD003
+    public static byte Index(Canary.LuaString s) => s.Bytes[0];                        // LD003
+}
+
+internal static class LoopCanary
+{
+    [LuaInterpreterLoop]
+    public static void Loop() { try { } finally { } }                           // LD006
 }
 
 internal static class StringCanary
@@ -49,7 +59,7 @@ internal static class BannedCanary
 }
 `;
 
-const expected = ['LD001', 'LD002', 'LD003', 'LD004', 'LD005', 'RS0030'];
+const expected = ['LD001', 'LD002', 'LD003', 'LD004', 'LD005', 'LD006', 'RS0030'];
 
 let exitCode = 0;
 try {

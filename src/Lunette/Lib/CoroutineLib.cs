@@ -14,7 +14,7 @@ internal static class CoroutineLib
         Add(t, "status", Status);
         Add(t, "wrap", Wrap);
         Add(t, "isyieldable", IsYieldable);
-        Add(t, "running", static (st, _) => [LuaValue.FromObject(st.Running), LuaValue.FromBoolean(st.Running.IsMain)]);
+        Add(t, "running", static (st, _) => Rets.Two(LuaValue.FromObject(st.Running), LuaValue.FromBoolean(st.Running.IsMain)));
         Add(t, "close", Close);
         state.SetGlobal("coroutine", LuaValue.FromTable(t));
     }
@@ -50,6 +50,14 @@ internal static class CoroutineLib
     {
         Coroutine co = CheckCo(args, "resume");
         bool ok = Interpreter.Resume(state, co, args[1..], out LuaValue[] res);
+        if (res.Length <= 2)
+        {
+            LuaValue first = res.Length > 0 ? res[0] : default, second = res.Length > 1 ? res[1] : default;
+            int n = res.Length;
+            Rets.Release(res);
+            LuaValue okv = LuaValue.FromBoolean(ok);
+            return n == 0 ? Rets.One(okv) : n == 1 ? Rets.Two(okv, first) : Rets.Three(okv, first, second);
+        }
         var ret = new LuaValue[res.Length + 1];
         ret[0] = LuaValue.FromBoolean(ok);
         res.CopyTo(ret, 1);
@@ -75,7 +83,7 @@ internal static class CoroutineLib
     private static LuaValue[] IsYieldable(LuaState state, ReadOnlySpan<LuaValue> args)
     {
         Coroutine co = args.Length > 0 ? CheckCo(args, "isyieldable") : state.Running;
-        return [LuaValue.FromBoolean(!co.IsMain && co.Nny == 0)];
+        return Rets.One(LuaValue.FromBoolean(!co.IsMain && co.Nny == 0));
     }
 
     private static LuaValue[] Wrap(LuaState state, ReadOnlySpan<LuaValue> args)

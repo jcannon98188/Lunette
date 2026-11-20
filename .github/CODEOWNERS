@@ -1,0 +1,6 @@
+# Waiver manifests and the required-files ratchet must not ride in with a code change (spec ticket 18).
+# Enforced only with branch protection "Require review from Code Owners".
+/tests/differential/waivers.toml  @jasoncannon
+/tests/suite/waivers.toml         @jasoncannon
+/tests/suite/required-files.txt   @jasoncannon
+/.github/CODEOWNERS               @jasoncannon
