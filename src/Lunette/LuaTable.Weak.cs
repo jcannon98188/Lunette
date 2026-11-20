@@ -14,6 +14,9 @@ internal struct WeakSlot
     /// <summary>Weak key with a collectable value: the value lives only while the key does (ephemeron).</summary>
     public DependentHandle Ephemeron;
     public bool HasEphemeron;
+    /// <summary>Weak value with a long string key: the key's text lives only while the value does (primary = value, dependent = key).</summary>
+    public DependentHandle KeyHandle;
+    public bool HasKeyHandle;
 }
 
 /// <summary>The entries detached from one weak table; <see cref="Table"/> is weak so a dead table is not kept alive.</summary>
@@ -25,7 +28,10 @@ internal sealed class WeakDetach(WeakReference<LuaTable> table, WeakSlot[] slots
     public void DisposeHandles()
     {
         foreach (ref WeakSlot s in Slots.AsSpan())
+        {
             if (s.HasEphemeron) s.Ephemeron.Dispose();
+            if (s.HasKeyHandle) s.KeyHandle.Dispose();
+        }
     }
 }
 
@@ -37,7 +43,10 @@ internal sealed class WeakDetach(WeakReference<LuaTable> table, WeakSlot[] slots
 public sealed partial class LuaTable
 {
     /// <summary>Marks a key whose object was collected; the node keeps its place in the collision chain.</summary>
-    private static readonly LuaValue DeadKey = LuaValue.FromObject(new object());
+    /// <summary>Strings longer than this are Lua's "long strings" (LUAI_MAXSHORTLEN).</summary>
+    private const int LongStringLength = 40;
+
+    private static readonly LuaValue DeadKey =LuaValue.FromObject(new object());
 
     /// <summary>Weak-key / weak-value flags from this table's metatable <c>__mode</c> string.</summary>
     internal (bool Keys, bool Values) WeakMode()
@@ -70,7 +79,16 @@ public sealed partial class LuaTable
         for (int n = 0; n < _nodes.Length; n++)
         {
             ref Node nd = ref _nodes[n];
-            if (nd.Value.IsNil) continue;
+            if (nd.Value.IsNil)
+            {
+                // An erased entry keeps its key for 'next'; a long string key must not keep its text alive, so hold it weakly.
+                if (nd.Key.Ref is byte[] { Length: > LongStringLength } dead)
+                {
+                    slots.Add(new WeakSlot { Index = n, Key = new WeakReference(dead) });
+                    nd.Key = DeadKey;
+                }
+                continue;
+            }
             bool wk = weakKeys && nd.Key.IsCollectable;
             bool wv = weakValues && nd.Value.IsCollectable;
             if (!wk && !wv) continue;
@@ -99,6 +117,13 @@ public sealed partial class LuaTable
             else
             {
                 slot.Value = new WeakReference(nd.Value.Ref);
+                if (nd.Key.Ref is byte[] { Length: > LongStringLength } text)
+                {
+                    // A long string key lives only while its weak value does, so a dead entry frees its text in this collection.
+                    slot.KeyHandle = new DependentHandle(nd.Value.Ref, text);
+                    slot.HasKeyHandle = true;
+                    nd.Key = DeadKey;
+                }
                 nd.Value = default;
             }
             slots.Add(slot);
@@ -143,7 +168,11 @@ public sealed partial class LuaTable
             else
             {
                 object? value = s.Value!.Target;
-                if (value is not null) nd.Value = LuaValue.FromObject(value);
+                if (value is not null)
+                {
+                    nd.Value = LuaValue.FromObject(value);
+                    if (s.HasKeyHandle && s.KeyHandle.Dependent is { } text) nd.Key = LuaValue.FromObject(text);
+                }
             }
         }
     }

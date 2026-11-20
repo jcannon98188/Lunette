@@ -106,6 +106,9 @@ internal sealed class Coroutine
     /// <summary>A full collection requested by <c>collectgarbage</c>; the loop returned so <see cref="Interpreter"/> runs it, and where its result goes.</summary>
     public bool CollectPending;
     public int CollectFa, CollectNargs, CollectWanted;
+    /// <summary>What the pending cycle is: a full collection (-1), a <c>collectgarbage("step", n)</c> of n KB (0 or more), or an automatic one at a loop safepoint (-2, no result; <see cref="CollectTop"/> is the loop's top to resume with).</summary>
+    public long CollectStepKb = -1;
+    public int CollectTop;
     public LuaValue[] YieldValues = [];
     /// <summary>Where the results of the pending yield call go once resumed, how many are wanted, and whether a pcall status (true) leads them.</summary>
     public int YieldFa;

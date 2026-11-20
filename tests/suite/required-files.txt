@@ -27,3 +27,6 @@ files.lua
 main.lua
 calls.lua
 coroutine.lua
+gc.lua
+closure.lua
+gengc.lua

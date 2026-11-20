@@ -13,11 +13,6 @@
 # note = "..."
 
 [[waiver]]
-file   = "gengc.lua"
-reason = "gc-accounting"
-note   = "Generational-mode accounting (collectgarbage(\"generational\") young/old sizing) has no .NET GC equivalent; collectgarbage accepts the mode switch and reports the previous mode. Waived whole."
-
-[[waiver]]
 file     = "files.lua"
 reason   = "no-bytecode"
 line     = 553
@@ -146,3 +141,18 @@ line     = 999
 end_line = 1051
 anchor   = "without debug info"
 note     = "Lunette has no bytecode format: string.dump is unsupported, so loading and inspecting a dumped chunk cannot be tested."
+
+[[waiver]]
+file     = "closure.lua"
+reason   = "host-C-API"
+line     = 262
+anchor   = "string.gmatch"
+note     = "debug.upvalueid on a C function (the gmatch iterator): Lunette's built-ins are managed delegates with no upvalue slots to identify."
+
+[[waiver]]
+file     = "gc.lua"
+reason   = "gc-accounting"
+line     = 559
+end_line = 569
+anchor   = "do"
+note     = "Loops until gcinfo() doubles with the collector stopped; collectgarbage(\"count\") is the process-wide managed heap (GC.GetTotalMemory), which in the shared test host is too large for the loop to finish."

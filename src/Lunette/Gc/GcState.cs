@@ -74,7 +74,9 @@ internal sealed class GcState
 
     private void RegisterWeak(LuaTable t)
     {
-        _weakTables.Add(new WeakReference<LuaTable>(t));
+        // Long weak reference: a weak table reachable only through an object being finalized (its metatable's field, say)
+        // must still be restored, or its detached entries are lost and the table keeps dead-key placeholders.
+        _weakTables.Add(new WeakReference<LuaTable>(t, trackResurrection: true));
         if (_weakTables.Count > _weakTablesLimit)
         {
             Prune(_weakTables);
@@ -162,14 +164,36 @@ internal sealed class GcState
             for (int pass = 0; pass < 2; pass++)
             {
                 ClearDeadStack(full: true);
+                _state.Strings.Clear(); // before the collection, so the intern table does not keep a dead string alive through it
                 CollectWindow(GC.MaxGeneration, compacting: true);
-                _state.Strings.Clear();
                 if (Drain() == 0) break;
             }
             _allocatedAtLastCycle = GC.GetAllocatedBytesForCurrentThread();
             return true;
         }
         finally { _inCollector = false; }
+    }
+
+    /// <summary>The work, in KB of step size, that completes one cycle of <c>collectgarbage("step", n)</c>.</summary>
+    internal const long CycleWorkKb = 100;
+
+    private long _stepWork;
+
+    /// <summary>
+    /// <c>collectgarbage("step", n)</c>: <paramref name="kb"/> of zero completes a cycle at once; otherwise each call adds that
+    /// much work, so larger steps finish a cycle in fewer calls, and the call that reaches <see cref="CycleWorkKb"/> runs a
+    /// full collection. True when a cycle completed.
+    /// </summary>
+    internal bool StepBy(long kb)
+    {
+        if (kb > 0 && (_stepWork += kb) < CycleWorkKb)
+        {
+            Step();
+            return false;
+        }
+        _stepWork = 0;
+        FullCollect();
+        return true;
     }
 
     /// <summary>A cheap cycle: young generations only, then the finalizers. False when called from inside a finalizer.</summary>
@@ -224,10 +248,10 @@ internal sealed class GcState
     }
 
     /// <summary>Forgets stale references the running coroutine left above its live registers.</summary>
-    private void ClearDeadStack(bool full)
+    private void ClearDeadStack(bool full, int liveTop = -1)
     {
         var co = _state.Running;
-        int from = Math.Min(co.CallTop, co.Stack.Length);
+        int from = Math.Min(liveTop >= 0 ? liveTop : co.CallTop, co.Stack.Length);
         int count = co.Stack.Length - from;
         if (!full) count = Math.Min(count, 1024);
         if (count > 0) Array.Clear(co.Stack, from, count);
@@ -235,26 +259,26 @@ internal sealed class GcState
 
     /// <summary>
     /// Called by the interpreter every <see cref="SafepointInterval"/> loop back-edges: drains finalizers the .NET GC
-    /// has queued, and starts a full cycle when weak tables exist and enough has been allocated since the last one.
+    /// has queued. Returns true when a full cycle is due (weak tables exist and enough has been allocated since the last one):
+    /// the loop then returns so the cycle runs outside it, where its frame holds no stale references. <paramref name="liveTop"/>
+    /// is the first stack slot above the running frame's named locals; everything above it is a dead temporary.
     /// </summary>
-    internal void Safepoint()
+    internal bool Safepoint(int liveTop)
     {
         _state.GcTick = SafepointInterval;
-        if (!Running || _inCollector || _closed) return;
-        ClearDeadStack(full: false);
+        if (!Running || _inCollector || _closed) return false;
+        ClearDeadStack(full: false, liveTop);
         if (_weakTables.Count > 0)
         {
             long allocated = GC.GetAllocatedBytesForCurrentThread();
             if (allocated - _allocatedAtLastCycle > Math.Max(MinCycleBytes, GC.GetTotalMemory(false) * Pause / 100))
-            {
-                FullCollect();
-                return;
-            }
+                return true;
         }
-        if (!HasPending) return;
+        if (!HasPending) return false;
         _inCollector = true;
         try { Drain(); }
         finally { _inCollector = false; }
+        return false;
     }
 
     // ---- close ----

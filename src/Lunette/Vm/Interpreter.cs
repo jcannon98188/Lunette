@@ -426,7 +426,14 @@ internal static partial class Interpreter
                         if (--state.GcTick < 0)
                         {
                             f.Pc = pc;
-                            state.Gc.Safepoint();
+                            int live = bs + proto.LiveRegisters(i.Ax);
+                            if (state.Gc.Safepoint(live))
+                            {
+                                // A cycle is due: leave the loop (resuming at the jump target) so it runs where no dispatch temporary is live.
+                                f.Pc = i.Ax;
+                                RequestAutoCollect(co, live, top);
+                                return top;
+                            }
                             r = co.Stack;
                         }
                     }

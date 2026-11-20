@@ -30,8 +30,7 @@ internal static class GcLib
             case "count":
                 return Rets.One(LuaValue.FromFloat(GC.GetTotalMemory(false) / 1024.0));
             case "step":
-                gc.Step();
-                return Rets.One(LuaValue.FromBoolean(true));
+                return Rets.One(LuaValue.FromBoolean(gc.StepBy(LibArgs.OptInteger("collectgarbage", args, 1, 0))));
             case "isrunning":
                 return Rets.One(LuaValue.FromBoolean(gc.Running));
             case "incremental":

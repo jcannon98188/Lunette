@@ -2,7 +2,15 @@ using Xunit;
 
 namespace Lunette.Tests;
 
+/// <summary>Collection for tests that read the process-wide heap size (<c>collectgarbage("count")</c>): they run alone, since another test's allocation would move the figure.</summary>
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class ProcessMemoryCollection
+{
+    public const string Name = "Process memory";
+}
+
 /// <summary>Seams: Lua-level collectgarbage, setmetatable with __mode / __gc, and LuaState.Dispose (ticket 12).</summary>
+[Collection(ProcessMemoryCollection.Name)]
 public class GcTests
 {
     private static string Run(string source) => ControlFlowTests.Run(source);
@@ -281,6 +289,84 @@ public class GcTests
         state.DoString("""Keep = setmetatable({}, {__gc = function() error("x") end})""");
         state.Dispose();
     }
+
+    // ---- ticket 33: automatic collection, steps, weak-table corner cases ----
+
+    [Fact]
+    public void Allocation_alone_eventually_clears_a_weak_entry_the_loop_condition_reads() =>
+        // closure.lua's idiom: nothing but allocation and a read of the weak entry each iteration.
+        Assert.Equal("nil\n", Run("""
+            local A = 0
+            local x = {[1] = {}}
+            setmetatable(x, {__mode = 'kv'})
+            while x[1] do
+              local a = A..A..A..A
+              A = A + 1
+            end
+            print(x[1])
+            """));
+
+    [Fact]
+    public void Larger_steps_complete_a_cycle_in_fewer_calls_and_a_huge_step_in_one() =>
+        Assert.Equal("true\ttrue\ttrue\n", Run("""
+            local function dosteps(siz)
+              collectgarbage()
+              local i = 0
+              repeat i = i + 1 until collectgarbage("step", siz)
+              return i
+            end
+            print(dosteps(10) < dosteps(2), dosteps(20000) == 1, collectgarbage("step", 20000))
+            """));
+
+    [Fact]
+    public void Step_with_a_non_integer_size_is_an_argument_error() =>
+        Assert.Contains("number has no integer representation",
+            Assert.Throws<LuaException>(() => Run("collectgarbage('step', 1.5)")).Message);
+
+    [Fact]
+    public void Weak_table_reachable_only_through_a_finalized_object_is_restored_before_the_finalizer_runs() =>
+        Assert.Equal("nil\t10\n", Run("""
+            local u = setmetatable({}, {__gc = true})
+            local m = getmetatable(u)
+            m.x = {[{0}] = 1; [0] = {1}}
+            setmetatable(m.x, {__mode = "kv"})
+            local seen
+            m.__gc = function (o) seen = next(getmetatable(o).x); m = 10 end
+            u, m = nil
+            collectgarbage()
+            print(seen, m)
+            """));
+
+    [Fact]
+    public void Dead_weak_entry_frees_its_long_string_key_but_a_live_entry_keeps_it()
+    {
+        Assert.Equal("true\ttrue\ttrue\n", Run("""
+            collectgarbage(); collectgarbage()
+            local m = collectgarbage("count")
+            local a = setmetatable({}, {__mode = "kv"})
+            local live = {}
+            a[string.rep("a", 2^21)] = live      -- value alive: the key survives
+            a[string.rep("b", 2^21)] = {}        -- value dead: the entry and its 2 MB key go
+            collectgarbage()
+            local k, v = next(a)
+            print(#k == 2^21 and v == live, next(a, k) == nil, collectgarbage("count") < m + 2^11 + 512)
+            """));
+    }
+
+    [Fact]
+    public void Erased_long_string_key_is_freed_by_a_collection_yet_next_still_works_for_a_held_key() =>
+        Assert.Equal("true\ttrue\n", Run("""
+            collectgarbage(); collectgarbage()
+            local m = collectgarbage("count")
+            local a = setmetatable({}, {__mode = "kv"})
+            a[string.rep("a", 2^21)] = 25
+            local k = next(a)
+            a[k] = nil
+            collectgarbage()
+            print(next(a, k) == nil, collectgarbage("count") > m + 2^11 - 512)   -- k is still held, so its text stays
+            k = nil
+            collectgarbage()
+            """));
 
     [Fact]
     public void Gc_with_a_non_function_field_is_ignored() =>

@@ -4,6 +4,7 @@ using Xunit.Abstractions;
 namespace Lunette.Tests.Suite;
 
 /// <summary>One test per official suite file. Files outside required-files may fail (reported); required ones may not.</summary>
+[Collection(ProcessMemoryCollection.Name)]
 public class SuiteTests(ITestOutputHelper log)
 {
     public static IEnumerable<object[]> Files() =>
