@@ -76,6 +76,7 @@ A pure-managed C# (.NET 11) Lua 5.4 engine and minimal CLI, built to the lua-eng
 - [Perf: table.insert/remove/move bulk copies and more in-place library forms](tickets/60-perf-table-insert-remove-move-bulk-copies-and-more-in-place.md): Bulk table-lib copies, more in-place builtins
 - [Perf: allocation-free lexer tokens (name table, lazy token text)](tickets/57-perf-allocation-free-lexer-tokens-name-table-lazy-token-text.md): Allocation-free lexer; load 1.5x faster
 - [Perf: RunLoop register diet and handler style pass (core audit 2+3)](tickets/62-perf-runloop-register-diet-and-handler-style-pass-core-audit.md): RunLoop register diet; up to 22% faster
+- [Perf: table fast paths (ulong index, inline GetTable int path, first string probe) (core audit 4)](tickets/63-perf-table-fast-paths-ulong-index-inline-gettable-int-path-f.md): Measured neutral after 61/62; not merged
 
 ## Not yet specified
 
