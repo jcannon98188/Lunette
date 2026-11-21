@@ -18,14 +18,19 @@ internal sealed class LuaFile
 
     private readonly Stream _stream;
     private readonly bool _append;
-    private readonly byte[] _read = new byte[DefaultBufferSize];
+    private byte[]? _read; // allocated on the first read: write-only files and stdout/stderr never pay for it
     private int _readPos, _readLen;
+    // True for the default state of a host-backed standard output (stdout over LuaState.OutputStream/Output): writes go straight to the host
+    // stream without flushing it, so a redirected stdout is block-buffered by the host (C stdio's choice) and a terminal, whose stream is
+    // unbuffered, still sees every write. An explicit setvbuf, io.flush, close and exit flush it; print keeps its own fflush.
+    private bool _hostBuffered;
     private byte[]? _write;
     private int _writeLen;
     private int _bufferSize = DefaultBufferSize;
 
-    public LuaFile(Stream stream, bool append = false, bool standard = false, IPlatformProcess? process = null)
+    public LuaFile(Stream stream, bool append = false, bool standard = false, IPlatformProcess? process = null, bool hostBuffered = false)
     {
+        _hostBuffered = hostBuffered;
         _stream = stream;
         _append = append;
         IsStandard = standard;
@@ -46,6 +51,7 @@ internal sealed class LuaFile
     public void SetBuffering(BufferMode mode, int size)
     {
         Flush();
+        _hostBuffered = false; // an explicit setvbuf takes over: "no" flushes per write, "line"/"full" use our own buffer
         Mode = mode;
         _bufferSize = size > 0 ? size : DefaultBufferSize;
         if (_write is not null && _write.Length < _bufferSize) _write = null;
@@ -57,17 +63,17 @@ internal sealed class LuaFile
         {
             int n = _writeLen;
             _writeLen = 0;
-            WriteThrough(_write.AsSpan(0, n));
+            WriteThrough(_write.AsSpan(0, n), flushHost: true);
         }
         else if (_stream.CanWrite) _stream.Flush();
     }
 
-    private void WriteThrough(ReadOnlySpan<byte> data)
+    private void WriteThrough(ReadOnlySpan<byte> data, bool flushHost = false)
     {
         if (!_stream.CanWrite) throw new ErrnoException(Errno.EBADF);
         if (_append && _stream.CanSeek) _stream.Seek(0, SeekOrigin.End);
         _stream.Write(data);
-        _stream.Flush();
+        if (flushHost || !_hostBuffered) _stream.Flush();
     }
 
     public void Write(ReadOnlySpan<byte> data)
@@ -85,7 +91,7 @@ internal sealed class LuaFile
             Flush();
             if (data.Length >= _write.Length)
             {
-                WriteThrough(data);
+                WriteThrough(data, flushHost: true);
                 return;
             }
         }
@@ -110,14 +116,15 @@ internal sealed class LuaFile
         if (!_stream.CanRead) throw new ErrnoException(Errno.EBADF);
         if (_writeLen > 0) Flush();
         _readPos = 0;
-        _readLen = _stream.Read(_read, 0, _read.Length);
+        byte[] buf = _read ??= new byte[DefaultBufferSize];
+        _readLen = _stream.Read(buf, 0, buf.Length);
         return _readLen > 0;
     }
 
     /// <summary>The next byte without consuming it, or -1 at end of file.</summary>
-    public int Peek() => Fill() ? _read[_readPos] : -1;
+    public int Peek() => Fill() ? _read![_readPos] : -1;
 
-    private int Next() => Fill() ? _read[_readPos++] : -1;
+    private int Next() => Fill() ? _read![_readPos++] : -1;
 
     public bool AtEof() => !Fill();
 
@@ -127,7 +134,7 @@ internal sealed class LuaFile
         bool any = false;
         while (Fill())
         {
-            ReadOnlySpan<byte> avail = _read.AsSpan(_readPos, _readLen - _readPos);
+            ReadOnlySpan<byte> avail = _read!.AsSpan(_readPos, _readLen - _readPos);
             int nl = avail.IndexOf((byte)'\n');
             any = true;
             if (nl < 0)
@@ -147,7 +154,7 @@ internal sealed class LuaFile
     {
         while (Fill())
         {
-            buffer.Append(_read.AsSpan(_readPos, _readLen - _readPos));
+            buffer.Append(_read!.AsSpan(_readPos, _readLen - _readPos));
             _readPos = _readLen;
         }
     }
@@ -159,7 +166,7 @@ internal sealed class LuaFile
         while (left > 0 && Fill())
         {
             int take = (int)Math.Min(left, _readLen - _readPos);
-            buffer.Append(_read.AsSpan(_readPos, take));
+            buffer.Append(_read!.AsSpan(_readPos, take));
             _readPos += take;
             left -= take;
         }

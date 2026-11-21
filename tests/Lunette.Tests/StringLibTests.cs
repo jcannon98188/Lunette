@@ -192,6 +192,20 @@ public class StringLibTests
     }
 
     [Fact]
+    public void Intern_cache_starts_small_and_grows_on_demand_up_to_its_capacity()
+    {
+        var cache = new StringCache();
+        int start = cache.Capacity;
+        Assert.True(start <= 256, $"starts with {start} slots");
+        var first = new List<LuaString>();
+        for (int i = 0; i < 200; i++) first.Add(cache.Intern(System.Text.Encoding.ASCII.GetBytes("key" + i)));
+        for (int i = 0; i < 20_000; i++) cache.Intern(System.Text.Encoding.ASCII.GetBytes("grow" + i));
+        Assert.Equal(StringCache.DefaultCapacity, cache.Capacity);
+        for (int i = 0; i < 200; i++) Assert.True(first[i] == cache.Intern(System.Text.Encoding.ASCII.GetBytes("key" + i)));
+        Assert.Equal(1, new StringCache(1).Capacity);
+    }
+
+    [Fact]
     public void Long_strings_are_not_interned_but_compare_by_content()
     {
         var cache = new StringCache();
