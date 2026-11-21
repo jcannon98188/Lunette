@@ -25,6 +25,16 @@ public class LuaValueTests
     }
 #endif
 
+    /// <summary>The type tags are string literals so the runtime allocates them on the frozen heap, which lets the JIT treat them as
+    /// constants and skip the write barrier on a tag store. Correctness never depends on it; this notices a runtime that un-freezes them.</summary>
+    [Fact]
+    public void Type_tags_are_frozen_objects()
+    {
+        if (!System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeSupported) return; // Native AOT: GetGeneration is not meaningful
+        foreach (object tag in new[] { LuaValue.IntegerTag, LuaValue.FloatTag, LuaValue.TrueTag, LuaValue.FalseTag })
+            Assert.Equal(int.MaxValue, GC.GetGeneration(tag));
+    }
+
     [Fact]
     public void Default_value_is_nil() =>
         Assert.True(default(LuaValue).IsNil);

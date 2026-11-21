@@ -16,8 +16,11 @@ namespace Lunette.Unsafe;
 //    barriered store, which is observably identical.
 //  * ADR 0006: weak entries are weakened only inside a collection window, which runs on the Lua thread at a safepoint, never
 //    concurrently with the dispatch loop. A skipped barrier therefore cannot hide a young-object reference from a
-//    concurrent or background mark: number tags are old, permanently reachable statics, and a payload-only write creates no
-//    reference. Stale-slot clearing at a collection operates on the same arrays and sees the same values either way.
+//    concurrent or background mark: the scalar tags are string literals on the frozen heap (never collected, never moved, not
+//    in any generation), so storing one creates no reference the collector must learn about, and a payload write creates none either.
+//    Store and Copy write a tag constant only when the source tag is one of the four scalar tags; every other reference goes through a
+//    normal barriered reference store. If a runtime ever stopped freezing the literals the JIT would simply emit the barrier again.
+//    Stale-slot clearing at a collection operates on the same arrays and sees the same values either way.
 //  * Register indexes come from the compiler and are below the frame's MaxStack, which the call sequence reserved; the
 //    unsafe At drops the bounds check on that basis. The twin keeps the check, so a violation of that invariant surfaces
 //    as an IndexOutOfRangeException under the variant instead of memory corruption.
@@ -41,4 +44,7 @@ internal static class Regs
 
     /// <summary>Copies <paramref name="src"/> into <paramref name="dst"/>.</summary>
     public static void Copy(ref LuaValue dst, in LuaValue src) => dst = src;
+
+    /// <summary>Stores into a heap slot (table slot, upvalue).</summary>
+    public static void Store(ref LuaValue dst, in LuaValue src) => dst = src;
 }

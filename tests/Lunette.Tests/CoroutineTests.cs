@@ -77,6 +77,19 @@ public class CoroutineTests
             print(pcall(bad))
             """));
 
+    /// <summary>PUC auxwrap prepends the caller's position to a string error only (not to numbers, booleans or tables); a C caller adds nothing.</summary>
+    [Fact]
+    public void Wrap_adds_the_callers_position_to_string_errors_only() =>
+        Assert.Equal("true\tfalse\tfalse\n42\nfalse\ttrue\n", Run("""
+            local f = coroutine.wrap(function() error("boom", 0) end)
+            local _, e = pcall(function() f() end)
+            print(e:find("^.-:%d+: boom$") ~= nil, e == "boom", select(2, pcall(coroutine.wrap(function() error("boom", 0) end))) ~= "boom")
+            local g = coroutine.wrap(function() error(42) end)
+            print(select(2, pcall(function() g() end)))
+            local n = coroutine.wrap(function() error(true) end)
+            print(pcall(function() n() end))
+            """));
+
     [Fact]
     public void Wrap_works_as_a_generic_for_iterator() =>
         Assert.Equal("1\n2\n3\n", Run("""

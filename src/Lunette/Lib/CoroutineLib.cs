@@ -97,7 +97,7 @@ internal static class CoroutineLib
             if (co.Status == CoStatus.Dead && Interpreter.CloseThread(st, co) is LuaValue closeErr) res = [closeErr];
             var ex = new LuaException(res[0]);
             // Like auxwrap: a string error gets the position of the caller of the wrapper.
-            if (res[0].Ref is string) ex.WantsPosition = true;
+            if (res[0].Ref is byte[]) ex.WantsPosition = true;
             throw ex;
         }) { Collectable = true })];
     }

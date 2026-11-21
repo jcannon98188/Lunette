@@ -299,6 +299,116 @@ public class GcTests
         Assert.Equal("userdata gc\n", output.ToString());
     }
 
+    [Theory]
+    [InlineData(100_000)]
+    [InlineData(200_000)]
+    public void Dispose_with_many_live_finalizers_runs_all_in_reverse_order_in_linear_time(int count)
+    {
+        // Ticket 58: Close used List.Contains per registered mark, so 1e5 live __gc objects took 15 s and 2e5 85 s (PUC: tens of ms).
+        var output = new StringWriter { NewLine = "\n" };
+        var state = new LuaState { Output = output };
+        state.DoString($$"""
+            local ran, last, ordered = 0, math.huge, true
+            local mt = {__gc = function(o)
+                ran = ran + 1
+                if o.id >= last then ordered = false end
+                last = o.id
+                if o.id == 1 then print(ran, ordered) end
+            end}
+            Keep = {}
+            for i = 1, {{count}} do Keep[i] = setmetatable({id = i}, mt) end
+            """);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        state.Dispose();
+        sw.Stop();
+        Assert.Equal($"{count}\ttrue\n", output.ToString());
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(8), $"Dispose took {sw.Elapsed}");
+    }
+
+    // ---- ticket 58: weak entries ride GCHandles that are freed with the window ----
+
+    [Fact]
+    public void Weak_window_handles_are_all_freed_after_each_collection_and_on_Dispose()
+    {
+        long before = WeakDetach.LiveHandles;
+        var state = new LuaState { Output = new StringWriter() };
+        state.DoString("""
+            Wv = setmetatable({}, {__mode = "v"})
+            Wk = setmetatable({}, {__mode = "k"})   -- ephemeron entries (collectable value)
+            Wkv = setmetatable({}, {__mode = "kv"})
+            Wvs = setmetatable({}, {__mode = "v"})  -- long string keys beside weak values
+            Keep = {}
+            for i = 1, 2000 do
+                local o = {}
+                if i % 2 == 0 then Keep[#Keep + 1] = o end
+                Wv[i] = o; Wk[o] = {}; Wkv[o] = {}; Wvs[string.rep("k", 60) .. i] = o
+            end
+            Wk[{}] = 1
+            for i = 1, 3 do collectgarbage() end
+            """);
+        Assert.Equal(before, WeakDetach.LiveHandles);
+        state.DoString("""
+            local n = 0
+            for _ in pairs(Wv) do n = n + 1 end
+            assert(n == 1000, n)
+            n = 0
+            for _ in pairs(Wk) do n = n + 1 end
+            assert(n == 1000, n)
+            n = 0
+            for _ in pairs(Wvs) do n = n + 1 end
+            assert(n == 1000, n)
+            """);
+        state.Dispose();
+        Assert.Equal(before, WeakDetach.LiveHandles);
+    }
+
+    [Fact]
+    public void Weak_window_handles_are_freed_when_a_finalizer_errors_during_the_window()
+    {
+        long before = WeakDetach.LiveHandles;
+        var state = new LuaState { Output = new StringWriter() };
+        state.DoString("""
+            Wv = setmetatable({}, {__mode = "v"})
+            for i = 1, 100 do Wv[i] = setmetatable({}, {__gc = function() error("x") end}) end
+            collectgarbage()
+            Keep = {}
+            for i = 1, 100 do Keep[i] = {}; Wv[i] = Keep[i] end
+            collectgarbage()
+            """);
+        Assert.Equal(before, WeakDetach.LiveHandles);
+        state.Dispose();
+    }
+
+    [Fact]
+    public void Large_weak_tables_keep_exactly_the_referenced_entries_in_every_mode()
+    {
+        Assert.Equal("50000\t50000\t50000\t50000\t0\n", Run("""
+            local wv = setmetatable({}, {__mode = "v"})
+            local wk = setmetatable({}, {__mode = "k"})
+            local wkv = setmetatable({}, {__mode = "kv"})
+            local eph = setmetatable({}, {__mode = "k"})
+            local keep = {}
+            local function fill()
+                for i = 1, 100000 do
+                    local o = {}
+                    if i % 2 == 0 then keep[#keep + 1] = o end
+                    wv[i] = o; wk[o] = i; wkv[o] = o; eph[o] = {o}   -- the ephemeron value refers to its own key: still collectable
+                end
+            end
+            fill()
+            collectgarbage(); collectgarbage()
+            local function count(t) local n = 0 for _ in pairs(t) do n = n + 1 end return n end
+            local sum = 0
+            for k, v in pairs(wk) do assert(rawequal(k, k) and v % 2 == 0); sum = sum + 1 end
+            local ephAlive = 0
+            for k, v in pairs(eph) do assert(v[1] == k); ephAlive = ephAlive + 1 end
+            local wvAlive, wkvAlive = count(wv), count(wkv)
+            keep = nil
+            collectgarbage(); collectgarbage()
+            print(wvAlive, sum, wkvAlive, ephAlive, count(wk))
+            """));
+    }
+
     [Fact]
     public void Dispose_swallows_finalizer_errors()
     {

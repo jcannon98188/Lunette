@@ -304,8 +304,14 @@ internal static partial class Interpreter
                     break;
                 }
                 case OpCode.SetUpval:
-                    cl.Upvals[i.B].Set(r[bs + i.A]);
+                {
+                    UpVal uv = cl.Upvals[i.B];
+                    Coroutine? owner = uv.Owner;
+                    // Source-typed store: scalars write a constant tag with no barrier and the destination is never read
+                    if (owner is null) Regs.Store(ref uv.Value, in Regs.At(r, bs + i.A));
+                    else Regs.Store(ref owner.Stack[uv.Index], in Regs.At(r, bs + i.A));
                     break;
+                }
                 case OpCode.Add:
                 case OpCode.AddK:
                     if (ArithFast<AddOp>(ref Regs.At(r, bs + i.A), ref Regs.At(r, bs + i.B), ref (i.Op == OpCode.AddK ? ref Regs.At(k, i.C) : ref Regs.At(r, bs + i.C)))) break;
