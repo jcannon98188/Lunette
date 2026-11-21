@@ -75,7 +75,7 @@ internal sealed class IoLib
         _state.RegisterMetatable<LuaFile>(_meta);
 
         LuaUserdata stdin = _state.CreateUserdata(new LuaFile(_platform.OpenStandardInput(), standard: true));
-        LuaUserdata stdout = _state.CreateUserdata(new LuaFile(new TextWriterStream(_state), standard: true));
+        LuaUserdata stdout = _state.CreateUserdata(new LuaFile(new TextWriterStream(_state), standard: true, hostBuffered: true));
         LuaUserdata stderr = _state.CreateUserdata(new LuaFile(_platform.OpenStandardError(), standard: true));
         _input = stdin;
         _output = stdout;
