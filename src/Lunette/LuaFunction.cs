@@ -51,6 +51,13 @@ internal enum BuiltinKind : byte
     Tonumber,
     MathMax,
     MathMin,
+    MathType,
+    MathToInteger,
+    MathFmod,
+    StringChar,
+    Utf8Codepoint,
+    Utf8Len,
+    MathRandom,
 }
 
 internal sealed class BuiltinFunction(BuiltinBody body, BuiltinKind kind = BuiltinKind.None) : LuaFunction

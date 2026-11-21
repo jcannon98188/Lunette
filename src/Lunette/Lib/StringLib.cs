@@ -21,7 +21,7 @@ internal static class StringLib
         Add("rep", Rep);
         Add("reverse", Reverse);
         Add("byte", Byte, BuiltinKind.StringByte);
-        Add("char", Char);
+        Add("char", Char, BuiltinKind.StringChar);
         Add("format", Format);
         Add("find", static (st, a) => FindAux(st, a, find: true));
         Add("match", static (st, a) => FindAux(st, a, find: false));

@@ -23,6 +23,8 @@ internal struct Token
     public long Int;
     public double Float;
     public int Line;
+    /// <summary>Source range of a string or number token; <see cref="Text"/> stays empty for those and is sliced on demand by <see cref="Lexer.TextOf"/>.</summary>
+    public int Start, End;
 }
 
 internal sealed class Lexer(byte[] bytes, string chunkName, StringCache cache)
@@ -48,6 +50,96 @@ internal sealed class Lexer(byte[] bytes, string chunkName, StringCache cache)
 
     private int _tokStart;
 
+    // Per-compilation name table: source bytes -> canonical text, interned LuaString and keyword kind, so a repeated name costs one hash and no allocation.
+    // Starts empty and small so tiny chunks (load("return 1 + 2")) pay nothing for it.
+    private struct NameEntry { public uint Hash; public int Next; public string Text; public LuaString Str; public Tok Kind; }
+    private NameEntry[] _names = [];
+    private int[] _nameBuckets = [];
+    private int _nameCount;
+    private static readonly string[] OneChar = BuildOneChar();
+    private static string[] BuildOneChar() { var a = new string[128]; for (int i = 0; i < 128; i++) a[i] = ((char)i).ToString(); return a; }
+
+    private static readonly NameEntry[] Keywords = BuildKeywords(out KeywordBuckets);
+    private static readonly int[] KeywordBuckets;
+
+    private static NameEntry[] BuildKeywords(out int[] buckets)
+    {
+        (string, Tok)[] kw =
+        [
+            ("local", Tok.Local), ("nil", Tok.Nil), ("true", Tok.True), ("false", Tok.False),
+            ("if", Tok.If), ("then", Tok.Then), ("else", Tok.Else), ("elseif", Tok.Elseif), ("end", Tok.End),
+            ("while", Tok.While), ("do", Tok.Do), ("repeat", Tok.Repeat), ("until", Tok.Until), ("for", Tok.For),
+            ("function", Tok.Function), ("return", Tok.Return), ("break", Tok.Break), ("goto", Tok.Goto),
+            ("in", Tok.In), ("and", Tok.And), ("or", Tok.Or), ("not", Tok.Not),
+        ];
+        var entries = new NameEntry[kw.Length];
+        buckets = new int[64];
+        for (int i = 0; i < kw.Length; i++)
+        {
+            uint h = 2166136261;
+            foreach (char c in kw[i].Item1) h = (h ^ c) * 16777619;
+            int b = (int)(h & 63);
+            entries[i] = new NameEntry { Hash = h, Text = kw[i].Item1, Kind = kw[i].Item2, Next = buckets[b] };
+            buckets[b] = i + 1;
+        }
+        return entries;
+    }
+
+    private static bool IsText(ReadOnlySpan<byte> span, string text)
+    {
+        for (int i = 0; i < span.Length; i++) if (span[i] != text[i]) return false;
+        return true;
+    }
+
+    /// <summary>The raw source text of a token for error messages: names and symbols carry theirs, strings and numbers are sliced on demand.</summary>
+    public string TextOf(in Token t) => t.Text.Length > 0 || t.End <= t.Start ? t.Text : src.Slice(t.Start, t.End);
+
+    private ref NameEntry LookupName(int start, int len)
+    {
+        ReadOnlySpan<byte> span = bytes.AsSpan(start, len);
+        uint h = 2166136261;
+        for (int i = 0; i < span.Length; i++) h = (h ^ span[i]) * 16777619;
+        // Keywords are shared by every compilation and never touch the per-compilation table.
+        if (len <= 8)
+        {
+            for (int e = KeywordBuckets[(int)(h & 63)]; e != 0; e = Keywords[e - 1].Next)
+            {
+                ref NameEntry ke = ref Keywords[e - 1];
+                if (ke.Hash == h && ke.Text.Length == len && IsText(span, ke.Text)) return ref ke;
+            }
+        }
+        if (_nameCount > 0)
+        {
+            for (int e = _nameBuckets[(int)(h & (uint)(_nameBuckets.Length - 1))]; e != 0; e = _names[e - 1].Next)
+            {
+                ref NameEntry ne = ref _names[e - 1];
+                if (ne.Hash == h && ne.Str.Bytes.SequenceEqual(span)) return ref ne;
+            }
+        }
+        if (_nameCount == _names.Length)
+        {
+            int cap = _names.Length == 0 ? 8 : _names.Length * 2;
+            Array.Resize(ref _names, cap);
+            _nameBuckets = new int[cap * 2];
+            for (int i = 0; i < _nameCount; i++)
+            {
+                int nb = (int)(_names[i].Hash & (uint)(_nameBuckets.Length - 1));
+                _names[i].Next = _nameBuckets[nb];
+                _nameBuckets[nb] = i + 1;
+            }
+        }
+        string text = src.Slice(start, start + len);
+        ref NameEntry made = ref _names[_nameCount++];
+        made.Hash = h;
+        made.Text = text;
+        made.Str = cache.Intern(span);
+        made.Kind = Tok.Name;
+        int b = (int)(h & (uint)(_nameBuckets.Length - 1));
+        made.Next = _nameBuckets[b];
+        _nameBuckets[b] = _nameCount;
+        return ref made;
+    }
+
     public string ChunkName { get; } = chunkName;
 
     public LuaException Error(string msg, int line) => new($"{DisplayName(ChunkName)}:{line}: {msg}");
@@ -65,17 +157,10 @@ internal sealed class Lexer(byte[] bytes, string chunkName, StringCache cache)
         {
             int s = _pos;
             while (_pos < src.Length && (char.IsAsciiLetterOrDigit(src[_pos]) || src[_pos] == '_')) _pos++;
-            t.Text = src.Slice(s, _pos);
-            t.Str = cache.FromUtf16(t.Text);
-            t.Kind = t.Text switch
-            {
-                "local" => Tok.Local, "nil" => Tok.Nil, "true" => Tok.True, "false" => Tok.False,
-                "if" => Tok.If, "then" => Tok.Then, "else" => Tok.Else, "elseif" => Tok.Elseif, "end" => Tok.End,
-                "while" => Tok.While, "do" => Tok.Do, "repeat" => Tok.Repeat, "until" => Tok.Until, "for" => Tok.For,
-                "function" => Tok.Function, "return" => Tok.Return, "break" => Tok.Break, "goto" => Tok.Goto,
-                "in" => Tok.In, "and" => Tok.And, "or" => Tok.Or, "not" => Tok.Not,
-                _ => Tok.Name,
-            };
+            ref NameEntry ne = ref LookupName(s, _pos - s);
+            t.Text = ne.Text;
+            t.Str = ne.Str;
+            t.Kind = ne.Kind;
             return t;
         }
         if (char.IsAsciiDigit(c) || (c == '.' && _pos + 1 < src.Length && char.IsAsciiDigit(src[_pos + 1])))
@@ -135,7 +220,7 @@ internal sealed class Lexer(byte[] bytes, string chunkName, StringCache cache)
             case ';': t.Kind = Tok.Semi; break;
             default: throw Error($"unexpected symbol near '{(c is >= ' ' and <= '~' ? c.ToString() : "<\\" + (int)c + ">")}'", _line);
         }
-        t.Text = c.ToString();
+        t.Text = c < 128 ? OneChar[c] : c.ToString();
         return t;
     }
 
@@ -188,7 +273,7 @@ internal sealed class Lexer(byte[] bytes, string chunkName, StringCache cache)
         }
         if (isComment) return t;
         t.Kind = Tok.String;
-        t.Text = src.Slice(_tokStart, _pos); // error messages quote the raw token text
+        t.Start = _tokStart; t.End = _pos; // error messages quote the raw token text (sliced on demand)
         t.Str = InternBuffer();
         return t;
     }
@@ -201,7 +286,7 @@ internal sealed class Lexer(byte[] bytes, string chunkName, StringCache cache)
         return HexValue(src[_pos++]);
     }
 
-    private readonly Dictionary<string, LuaString> _longStrings = new();
+    private Dictionary<string, LuaString>? _longStrings;
 
     /// <summary>Interns the scanned string; long strings are shared within one compilation, like PUC's scanner table.</summary>
     private LuaString InternBuffer()
@@ -211,6 +296,7 @@ internal sealed class Lexer(byte[] bytes, string chunkName, StringCache cache)
         var chars = new char[_bufLen];
         for (int i = 0; i < chars.Length; i++) chars[i] = (char)_buf[i];
         string key = new(chars);
+        _longStrings ??= new();
         if (_longStrings.TryGetValue(key, out LuaString found)) return found;
         LuaString made = LuaString.Create(span);
         _longStrings[key] = made;
@@ -323,7 +409,7 @@ internal sealed class Lexer(byte[] bytes, string chunkName, StringCache cache)
             }
         }
         t.Kind = Tok.String;
-        t.Text = src.Slice(_tokStart, _pos);
+        t.Start = _tokStart; t.End = _pos;
         t.Str = InternBuffer();
         return t;
     }
@@ -343,9 +429,11 @@ internal sealed class Lexer(byte[] bytes, string chunkName, StringCache cache)
             else if (char.IsAsciiHexDigit(c) || c == '.' || char.IsAsciiLetter(c) || c == '_') _pos++;
             else break;
         }
-        string text = src.Slice(s, _pos);
-        t.Text = text;
-        if (!LuaNumber.TryParse(text, out LuaValue v)) throw Error("malformed number near '" + text + "'", _line);
+        t.Start = s; t.End = _pos;
+        int nlen = _pos - s;
+        Span<char> text = nlen <= 64 ? stackalloc char[nlen] : new char[nlen];
+        for (int k = 0; k < nlen; k++) text[k] = src[s + k];
+        if (!LuaNumber.TryParse(text, out LuaValue v)) throw Error("malformed number near '" + src.Slice(s, _pos) + "'", _line);
         if (v.IsInteger) { t.Kind = Tok.Integer; t.Int = v.AsInteger; }
         else { t.Kind = Tok.Float; t.Float = v.AsFloat; }
         return t;

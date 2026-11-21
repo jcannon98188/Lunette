@@ -62,6 +62,53 @@ internal static class TableLib
         throw LibArgs.TypeError(fn, args, i, "table");
     }
 
+    /// <summary>
+    /// The element-wise loop <c>dst[t+i] = src[f+i]</c> for i = 0..n-1 (ascending, or descending when <paramref name="backward"/>) over two tables
+    /// without metatables, with runs whose source and destination keys are all array slots moved by one memmove. Each run is exactly what the
+    /// element-wise loop would do (array stores only, in an order <see cref="Span{T}.CopyTo"/> reproduces for the overlaps the callers allow), and
+    /// everything else (hash keys, growth past the array part, which may rehash) is still done one element at a time, so the resulting layout,
+    /// borders (<see cref="LuaTable.ArraySpan"/> keeps the length hint identical) and traversal order are those of the plain loop.
+    /// </summary>
+    private static void CopyPlain(LuaTable src, long f, LuaTable dst, long t, long n, bool backward)
+    {
+        if (!backward)
+        {
+            long i = 0;
+            while (i < n)
+            {
+                int run = (int)Math.Min(Math.Min(src.ArrayRunFrom(f + i), dst.ArrayRunFrom(t + i)), n - i);
+                if (run > 0)
+                {
+                    src.ArraySpan(f + i, run).CopyTo(dst.ArraySpan(t + i, run));
+                    i += run;
+                }
+                else
+                {
+                    dst.SetInt(t + i, src.GetInt(f + i));
+                    i++;
+                }
+            }
+        }
+        else
+        {
+            long i = n - 1;
+            while (i >= 0)
+            {
+                int run = (int)Math.Min(Math.Min(src.ArrayRunTo(f + i), dst.ArrayRunTo(t + i)), i + 1);
+                if (run > 0)
+                {
+                    src.ArraySpan(f + i - run + 1, run).CopyTo(dst.ArraySpan(t + i - run + 1, run));
+                    i -= run;
+                }
+                else
+                {
+                    dst.SetInt(t + i, src.GetInt(f + i));
+                    i--;
+                }
+            }
+        }
+    }
+
     private static LuaValue[]? Insert(LuaState state, ReadOnlySpan<LuaValue> args)
     {
         LuaValue t = CheckTab(state, args, 0, "insert", CanRead | CanWrite | CanLen);
@@ -75,7 +122,8 @@ internal static class TableLib
             case 3:
                 pos = CheckInteger("insert", args, 1);
                 if ((ulong)pos - 1UL >= (ulong)e) throw LibArgs.ArgError("insert", 2, "position out of bounds");
-                for (long i = e; i > pos; i--) Seti(state, t, i, Geti(state, t, i - 1));
+                if (t.Ref is LuaTable { Metatable: null } plain) CopyPlain(plain, pos, plain, pos + 1, e - pos, true);
+                else for (long i = e; i > pos; i--) Seti(state, t, i, Geti(state, t, i - 1));
                 break;
             default:
                 throw LuaErrors.Error("wrong number of arguments to 'insert'");
@@ -92,7 +140,12 @@ internal static class TableLib
         if (pos != size && (ulong)pos - 1UL > (ulong)size)
             throw LibArgs.ArgError("remove", 2, "position out of bounds");
         LuaValue removed = Geti(state, t, pos);
-        for (; pos < size; pos++) Seti(state, t, pos, Geti(state, t, pos + 1));
+        if (pos < size && t.Ref is LuaTable { Metatable: null } plain)
+        {
+            CopyPlain(plain, pos + 1, plain, pos, size - pos, false);
+            pos = size;
+        }
+        else for (; pos < size; pos++) Seti(state, t, pos, Geti(state, t, pos + 1));
         Seti(state, t, pos, default);
         return Rets.One(removed);
     }
@@ -155,7 +208,9 @@ internal static class TableLib
             if (!(f > 0 || e < long.MaxValue + f)) throw LibArgs.ArgError("move", 3, "too many elements to move");
             long n = e - f + 1;
             if (t > long.MaxValue - n + 1) throw LibArgs.ArgError("move", 4, "destination wrap around");
-            if (t > e || t <= f || (tt != 0 && !Meta.Equal(state, a1, a2)))
+            bool forward = t > e || t <= f || (tt != 0 && !Meta.Equal(state, a1, a2));
+            if (a1.Ref is LuaTable { Metatable: null } src && a2.Ref is LuaTable { Metatable: null } dst) CopyPlain(src, f, dst, t, n, !forward);
+            else if (forward)
                 for (long i = 0; i < n; i++) Seti(state, a2, t + i, Geti(state, a1, f + i));
             else
                 for (long i = n - 1; i >= 0; i--) Seti(state, a2, t + i, Geti(state, a1, f + i));

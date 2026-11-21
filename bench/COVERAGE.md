@@ -410,3 +410,44 @@ WSL2, .NET 11, PUC 5.4.9; wall time of 1e6 `io.write("line ", i, "\n")` calls (3
 - `StateBenchmarks` (`CreateRunDispose`): 80.7 us / 106 KB -> 39.9 us / 56 KB per state; `CreateFillDispose` 183.7 us / 320 KB -> 151.0 us / 294 KB.
 - Tests: `tests/Lunette.Tests/StdoutBufferingTests.cs` (flush counts, setvbuf modes, io.flush, Dispose, return values/errors, failing stream, TextWriter output, CLI exit paths), and the growth test in `StringLibTests.cs`.
 - Known, unrelated: `gc.lua:473` fails in the differential chunk run for the base build too (verified on the pre-change WSL build), and `big.lua` exceeds the 3 min suite timeout on this shared machine for the base build as well (212 s before, not completed in 240 s after under load; compile-time territory of ticket 56).
+## Ticket 60 (bulk table.insert/remove/move, more in-place library calls)
+
+Method: WSL Ubuntu, `bench/lib-probes/ticket60.lua` (best of 3 in-process repetitions per row, JIT warm-up excluded), interleaved PUC / base / new, 7 rounds (9 for `string.byte`), medians in ms. Macro set: 5 interleaved rounds of every `bench/macro` script, wall ms (11 and 15 rounds for the three rows that looked 3-6% slower once; they are noise).
+
+Part 1, `table.insert(t, pos, v)`, `table.remove(t, pos)`, `table.move` on tables without metatables: runs whose source and destination keys are all array slots are moved with one `Span.CopyTo` (`TableLib.CopyPlain`); keys outside the array part (hash keys, the growth step past the end, which may rehash) are still copied one element at a time, so the array/hash layout is exactly what the element-wise loop produces. Tables with a metatable take the old loop (every access honours `__index`/`__newindex`/`__len`).
+
+Border invariant (proved in the comment on `LuaTable.ArraySpan`): `_limit` is only a hint with `0 <= _limit <= _arr.Length`; `Length()` and `ArrayIndex` are correct for every such value, and touching key `k` through `ArrayIndex` leaves `_limit = max(_limit, k)`. `ArraySpan` applies the same `max(_limit, last key)` once, so `#t` after a bulk copy is the value the element-wise loop would have produced (not `_limit = _arr.Length` as in the audit prototype, which could change `#t` of tables with holes). `tests/differential/corpus/table-bulk-fuzz.lua` (600 random tables with holes and hash parts, also run at 60000 rounds) checks library result against an element-wise twin and prints a checksum equal to PUC's.
+
+| row | PUC | base | new | new / base |
+|---|---:|---:|---:|---:|
+| `table.insert(t, 1, v)` x 2e4 | 1383 | 1655 | 91 | 0.06 |
+| `table.insert(t, #t // 2 + 1, v)` x 2e4 | 716 | 793 | 40 | 0.05 |
+| `table.remove(t, 1)` x 2e4 | 1419 | 1541 | 78 | 0.05 |
+| `table.move(t, 1, 999, 2)` + back, 1e3 elements x 2e3 | 26 | 20 | 1.6 | 0.08 |
+| queue of 100: `insert(q, i); remove(q, 1)` x 3e5 | 227 | 202 | 35 | 0.17 |
+| `table.move` of 1e6 into `{}` | 30 | 58 | 48 | 0.83 (growth is still per-element rehash, as PUC) |
+| pop `remove(t)` / append `insert(t, v)` x 1e6 | 73 / 41 | 108 / 64 | 103 / 64 | unchanged |
+
+`table-lib.lua` whole script 1219 -> 932 ms wall (0.77).
+
+Part 2, in-place (`CallFast`) forms, measured one by one:
+
+| row | PUC | base | new | new / base | verdict |
+|---|---:|---:|---:|---:|---|
+| `math.type` | 63 | 243 | 79 | 0.32 | kept (3.9x -> 1.25x PUC) |
+| `math.tointeger` | 73 | 150 | 139 | 0.92 (0.82 in an earlier run) | kept |
+| `math.fmod` int / float | 86 / 92 | 161 / 245 | 139 / 175 | 0.86 / 0.72 | kept |
+| `math.random()` / `(n)` / `(m,n)` | 61 / 94 / 107 | 150 / 176 / 193 | 110 / 146 / 153 | 0.73 / 0.83 / 0.79 | kept (the generator is reached through `LuaState.MathRandomSource`; arguments are validated before drawing so the fallback draws exactly once) |
+| `utf8.codepoint(s, i)` | 116 | 257 | 129 | 0.50 | kept (2.2x -> 1.1x PUC) |
+| `utf8.len(s)` | 203 | 237 | 204 | 0.86 | kept |
+| `string.byte(s, 1, 4)` / `(s, -1)` | 131 / 98 | 256 / 184 | 175 / 117 | 0.68 / 0.63 | kept (the single in-range position keeps its own first branch: without it `byte(s, 5)` was 16-30% slower) |
+| `string.char(72)` / 5 args | 98 / 182 | 176 / 243 | 160 / 223 | 0.91 / 0.92 | kept (small, consistent in both runs) |
+| `utf8.offset`, `utf8.codes` loop, `utf8.char` | | | | 1.0 | not done: no measured lever (`utf8.codes` would need a fused iterator like `ipairs`; left at 2.5x) |
+
+Fidelity fix found on the way: `math.fmod('7', '3')` returned integer 1; PUC (`lua_isinteger` on the raw arguments) returns float 1.0, so strings take the float path now (`MathGlobalTests` expectation corrected; the new in-place form only takes real numbers).
+
+Macro set (wall, base -> new, 5 rounds): every script within +-3% (binary-trees 0.99, closures 1.00, coroutines 1.03/0.95, fannkuch 1.00, fib 1.02, gc-latency 0.97, k-nucleotide 0.99, mandelbrot 1.02, n-body 1.01, nsieve 1.00, oop 0.99, pcall-error 1.06 then 1.01 with 15 rounds, spectral-norm 0.95, string-build 1.06 then 1.00 with 11 rounds, string-heavy 0.98, varargs 0.98, warmup 1.00); table-lib 0.77.
+
+Tests: `tests/differential/corpus/table-bulk-moves.lua`, `table-bulk-fuzz.lua`, `library-fastpaths.lua`, `library-fastpaths-utf8-random.lua` (outputs identical to PUC 5.4.9), `Ticket60BulkCopyTests.cs`. `gc.lua:473` (differential chunk run) fails on the base build as well. `big.lua` / `all.lua` exceed the harness' 3 minute limit on this loaded machine for the base build too (235 s for base, 191 s for new when run alone).
+
+Gaps: `math.random` stays 1.4-1.8x PUC, `utf8.offset` 2.2x and the `utf8.codes` loop 2.5x, `math.tointeger` 1.9x, `string.char` 1.2-1.6x (all bounded by the call protocol and, for `string.char`, interning the result).

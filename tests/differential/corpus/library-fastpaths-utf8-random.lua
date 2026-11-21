@@ -1,0 +1,35 @@
+-- utf8.codepoint/utf8.len and math.random through the in-place call path (ticket 60): argument shapes, errors, lax input, fixed-seed streams.
+local u = "h\xC3\xA4llo \xE2\x82\xACuro \xF0\x9F\x98\x80!"
+print(utf8.codepoint(u), utf8.codepoint(u, 2), utf8.codepoint(u, -1), utf8.codepoint(u, 8), utf8.codepoint(u, 13))
+print(select("#", utf8.codepoint(u, 5, 4)), utf8.codepoint(u, 1, 3))
+print(pcall(utf8.codepoint, u, 3))
+print(pcall(utf8.codepoint, u, 0))
+print(pcall(utf8.codepoint, u, #u + 1))
+print(pcall(utf8.codepoint, "\xFF"))
+print(pcall(utf8.codepoint, "\xED\xA0\x80"))
+print(utf8.codepoint("\xED\xA0\x80", 1, 1, true))
+print(pcall(utf8.codepoint, u, 1.5))
+print(pcall(utf8.codepoint))
+print(utf8.len(u), utf8.len(""), utf8.len("abc"), utf8.len("a\xFFb"), utf8.len("\xC3"), utf8.len(u, 3), utf8.len(u, 1, -1))
+print(utf8.len("\xED\xA0\x80"), utf8.len("\xED\xA0\x80", 1, -1, true))
+print(pcall(utf8.len))
+local x, y, z = utf8.codepoint(u, 2), utf8.len(u)
+print(x, y, z)
+-- math.random: same stream as the reference for a fixed seed, and every argument shape
+math.randomseed(42)
+print(math.random(), math.random(10), math.random(5, 9), math.random(0) ~= nil, math.random(1), math.random(-3, -3))
+print(pcall(math.random, 0, -1))
+print(pcall(math.random, 2, 1))
+print(pcall(math.random, 1, 2, 3))
+print(pcall(math.random, 1.5))
+print(pcall(math.random, "3"))
+math.randomseed(7)
+local acc = 0
+for i = 1, 200 do acc = acc + math.random(100) + math.random(-5, 5) + math.floor(math.random() * 10) end
+print(acc, math.random(math.mininteger, math.maxinteger) ~= nil)
+math.randomseed(7)
+print(select("#", math.random()), select("#", math.random(3)))
+math.randomseed(7)
+local first = { math.random(1000), math.random(1000) }
+math.randomseed(7)
+print(first[1] == math.random(1000), first[2] == math.random(1000))
