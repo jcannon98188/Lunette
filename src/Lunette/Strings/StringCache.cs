@@ -17,9 +17,13 @@ internal sealed class StringCache
     public const int DefaultCapacity = 4096;
     private const int Ways = 4;
 
-    private readonly LuaString[] _slots;
+    /// <summary>A fresh state starts with this many sets (256 slots, 2 KB) and doubles on demand up to the configured capacity.</summary>
+    private const int InitialSets = 64;
+
+    private LuaString[] _slots;
     private readonly int _ways;
-    private readonly int _setMask;
+    private readonly int _maxSets;
+    private int _setMask;
     private uint _victim;
 
     public StringCache(int capacity = DefaultCapacity)
@@ -28,10 +32,13 @@ internal sealed class StringCache
         _ways = Math.Min(Ways, capacity);
         int sets = 1;
         while (sets * 2 * _ways <= capacity) sets *= 2;
-        _setMask = sets - 1;
-        _slots = new LuaString[sets * _ways];
+        _maxSets = sets;
+        int initial = Math.Min(sets, InitialSets);
+        _setMask = initial - 1;
+        _slots = new LuaString[initial * _ways];
     }
 
+    /// <summary>The slots currently allocated (grows towards the configured capacity).</summary>
     public int Capacity => _slots.Length;
 
     /// <summary>Forgets every cached string; safe because interning is not an invariant.</summary>
@@ -47,7 +54,7 @@ internal sealed class StringCache
         int set = (hash & _setMask) * _ways;
         if (Find(set, hash, data, out LuaString found)) return found;
         LuaString created = LuaString.CreateHashed(data, hash);
-        Insert(set, created);
+        Insert(hash, created);
         return created;
     }
 
@@ -58,7 +65,7 @@ internal sealed class StringCache
         int hash = s.Hash;
         int set = (hash & _setMask) * _ways;
         if (Find(set, hash, s.Bytes, out LuaString found)) return found;
-        Insert(set, s);
+        Insert(hash, s);
         return s;
     }
 
@@ -80,5 +87,48 @@ internal sealed class StringCache
         return false;
     }
 
-    private void Insert(int set, LuaString s) => _slots[set + (int)(_victim++ % (uint)_ways)] = s;
+    private void Insert(int hash, LuaString s)
+    {
+        while (true)
+        {
+            int set = (hash & _setMask) * _ways;
+            for (int w = 0; w < _ways; w++)
+            {
+                if (_slots[set + w].IsDefault)
+                {
+                    _slots[set + w] = s;
+                    return;
+                }
+            }
+            if (_setMask + 1 >= _maxSets)
+            {
+                _slots[set + (int)(_victim++ % (uint)_ways)] = s;
+                return;
+            }
+            Grow(); // a full set while the table is below its capacity: double it instead of evicting
+        }
+    }
+
+    private void Grow()
+    {
+        LuaString[] old = _slots;
+        int newMask = (_setMask + 1) * 2 - 1;
+        var next = new LuaString[(newMask + 1) * _ways];
+        for (int i = 0; i < old.Length; i++)
+        {
+            LuaString s = old[i];
+            if (s.IsDefault) continue;
+            int set = (s.CachedHash & newMask) * _ways;
+            for (int w = 0; w < _ways; w++)
+            {
+                if (next[set + w].IsDefault)
+                {
+                    next[set + w] = s;
+                    break;
+                }
+            }
+        }
+        _slots = next;
+        _setMask = newMask;
+    }
 }

@@ -385,3 +385,18 @@ Metering: the compiler now calls `LuaState.CompileTick` every 256 tokens of a `l
 through the existing `Poll` when the slice runs out). A sandboxed script that `load`s a huge string now hits `LuaAbortException` (instruction budget) or an "interrupted" error from `load`
 instead of pinning the thread; the per-token cost is one increment and mask. The host-side `LuaState.Load`/`DoString` are not metered (no run in progress). A legitimate large load now spends budget
 (about 1 unit per 16 tokens).
+## Ticket 59 (io.write flush per argument, lazy LuaFile buffers, growable StringCache)
+
+WSL2, .NET 11, PUC 5.4.9; wall time of 1e6 `io.write("line ", i, "\n")` calls (3 runs, process start included, ~60 ms) to a redirected stdout. Output is byte-identical (md5) to PUC and to the old build.
+
+| sink | before | after | PUC |
+|---|---:|---:|---:|
+| file | 1738-2367 ms | 284-376 ms | 129-184 ms |
+| pipe | 2867-3157 ms | 291-319 ms (one 1392 ms outlier under load) | 160-226 ms |
+| `print` x 1e6 (file / pipe) | 800 / 1087-1364 | 787-876 / 1222-1376 | 686-733 / 1132-1278 |
+
+- Standard output (`io.stdout` over `LuaState.OutputStream` / `Output`) is now "host-buffered" by default: `LuaFile.WriteThrough` no longer flushes the host stream per write, so a redirected CLI stdout (a 16 KB `BufferedStream`) is block-buffered and a terminal (raw stream) still sees every write. An explicit `setvbuf` clears that state (`"no"` flushes per write, `"line"`/`"full"` use the file's own buffer), `io.flush`/`file:flush`, close, `__gc`/state `Dispose`, `os.exit` and error exit flush as before, and `print` keeps its fflush. Embedders: `Output`/`OutputStream` are no longer flushed after each `io.write`; hand in an unbuffered writer/stream (or call `io.flush`) if bytes must appear immediately. Documented on both properties.
+- `LuaFile` read buffers (8 KB) are allocated on the first read; `StringCache` starts at 64 sets x 4 ways (256 slots) and doubles when a set is full, up to the configured capacity (`LUNETTE_INTERN_CAPACITY=1` still means one slot).
+- `StateBenchmarks` (`CreateRunDispose`): 80.7 us / 106 KB -> 39.9 us / 56 KB per state; `CreateFillDispose` 183.7 us / 320 KB -> 151.0 us / 294 KB.
+- Tests: `tests/Lunette.Tests/StdoutBufferingTests.cs` (flush counts, setvbuf modes, io.flush, Dispose, return values/errors, failing stream, TextWriter output, CLI exit paths), and the growth test in `StringLibTests.cs`.
+- Known, unrelated: `gc.lua:473` fails in the differential chunk run for the base build too (verified on the pre-change WSL build), and `big.lua` exceeds the 3 min suite timeout on this shared machine for the base build as well (212 s before, not completed in 240 s after under load; compile-time territory of ticket 56).
