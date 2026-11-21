@@ -208,26 +208,25 @@ internal static partial class Interpreter
     private static int RunLoop<TMode>(LuaState state, Coroutine co, Frame f, int stop, int top)
         where TMode : struct, ILoopMode
     {
-        LuaClosure cl;
-        Proto proto;
         Instruction[] code;
         LuaValue[] k;
-        LuaValue[] r;
-        int bs, pc;
+        int pc;
+        ref LuaValue rb = ref Regs.At(co.Stack, 0);
 
     newframe:
-        cl = f.Closure;
-        proto = cl.Proto;
-        code = proto.Code;
-        k = proto.Constants;
-        r = co.Stack;
-        bs = f.Base;
-        pc = f.Pc;
-        co.CallTop = bs + proto.MaxStack;
+        {
+            Proto np = f.Closure.Proto;
+            code = np.Code;
+            k = np.Constants;
+            int nb = f.Base;
+            rb = ref Regs.At(co.Stack, nb);
+            pc = f.Pc;
+            co.CallTop = nb + np.MaxStack;
+        }
         if (TMode.Traced)
         {
             TraceEnter(state, co, f, pc, top);
-            r = co.Stack;
+            rb = ref Regs.At(co.Stack, f.Base);
         }
 
         while (true)
@@ -235,18 +234,18 @@ internal static partial class Interpreter
             if (TMode.Traced)
             {
                 TraceInstruction(state, co, f, pc, top);
-                r = co.Stack;
+                rb = ref Regs.At(co.Stack, f.Base);
             }
             Instruction i = code[pc++];
             switch (i.Op)
             {
                 case OpCode.TForMove:
-                    if (!TMode.Traced && Regs.At(r, bs + i.B).Ref is BuiltinFunction { Kind: BuiltinKind.Next or BuiltinKind.IpairsAux } ib && TForFused(co, ib.Kind, bs + i.B, code[pc + 2].C - 1))
+                    if (!TMode.Traced && Regs.Reg(co, f, ref rb, i.B).Ref is BuiltinFunction { Kind: BuiltinKind.Next or BuiltinKind.IpairsAux } ib && TForFused(co, ib.Kind, f.Base + i.B, code[pc + 2].C - 1))
                     {
                         // Fused step: the Move, Move, Call and TForLoop that follow were run in place; code[pc + 4] is the loop's back Jmp, pc + 5 the Close
-                        if (!Regs.At(r, bs + i.A).IsNil)
+                        if (!Regs.Reg(co, f, ref rb, i.A).IsNil)
                         {
-                            Regs.Copy(ref Regs.At(r, bs + i.B + 2), in Regs.At(r, bs + i.A));
+                            Regs.Copy(ref Regs.Reg(co, f, ref rb, i.B + 2), in Regs.Reg(co, f, ref rb, i.A));
                             i = code[pc + 4];
                             pc += 5;
                             goto case OpCode.Jmp;
@@ -256,29 +255,29 @@ internal static partial class Interpreter
                     }
                     goto case OpCode.Move;
                 case OpCode.Move:
-                    Regs.Copy(ref Regs.At(r, bs + i.A), in Regs.At(r, bs + i.B));
+                    Regs.Copy(ref Regs.Reg(co, f, ref rb, i.A), in Regs.Reg(co, f, ref rb, i.B));
                     break;
                 case OpCode.LoadK:
-                    Regs.Copy(ref Regs.At(r, bs + i.A), in Regs.At(k, i.Bx));
+                    Regs.Copy(ref Regs.Reg(co, f, ref rb, i.A), in Regs.At(k, i.Bx));
                     break;
                 case OpCode.LoadKX:
-                    r[bs + i.A] = k[code[pc++].Ax];
+                    Regs.Reg(co, f, ref rb, i.A) = k[code[pc++].Ax];
                     break;
                 case OpCode.LoadNil:
-                    for (int j = 0; j <= i.B; j++) r[bs + i.A + j] = default;
+                    for (int j = 0; j <= i.B; j++) Regs.Reg(co, f, ref rb, i.A + j) = default;
                     break;
                 case OpCode.LoadBool:
-                    r[bs + i.A] = LuaValue.FromBoolean(i.B != 0);
+                    Regs.Reg(co, f, ref rb, i.A) = LuaValue.FromBoolean(i.B != 0);
                     break;
                 case OpCode.GetGlobal:
                 {
-                    UpVal uv = cl.Upvals[i.B];
+                    UpVal uv = f.Closure.Upvals[i.B];
                     if ((uv.Owner is null ? uv.Value.Ref : uv.Owner.Stack[uv.Index].Ref) is LuaTable t)
                     {
                         ref readonly LuaValue v = ref t.GetStrRef((byte[])Regs.At(k, i.C).Ref!);
                         if (!v.IsNil || t.NoIndex)
                         {
-                            Regs.Copy(ref Regs.At(r, bs + i.A), in v);
+                            Regs.Copy(ref Regs.Reg(co, f, ref rb, i.A), in v);
                             break;
                         }
                     }
@@ -286,47 +285,47 @@ internal static partial class Interpreter
                 }
                 case OpCode.SetGlobal:
                 {
-                    UpVal uv = cl.Upvals[i.B];
+                    UpVal uv = f.Closure.Upvals[i.B];
                     if ((uv.Owner is null ? uv.Value.Ref : uv.Owner.Stack[uv.Index].Ref) is LuaTable t && t.NoNewIndex)
                     {
-                        t.SetStr((byte[])Regs.At(k, i.C).Ref!, in Regs.At(r, bs + i.A));
+                        t.SetStr((byte[])Regs.At(k, i.C).Ref!, in Regs.Reg(co, f, ref rb, i.A));
                         break;
                     }
                     goto otherslow;
                 }
                 case OpCode.GetUpval:
                 {
-                    UpVal uv = cl.Upvals[i.B];
+                    UpVal uv = f.Closure.Upvals[i.B];
                     Coroutine? owner = uv.Owner;
                     // Open upvalue: read the owner's stack slot in place; the copy skips the write barrier when the register holds the same tag object
-                    if (owner is null) Regs.Copy(ref Regs.At(r, bs + i.A), in uv.Value);
-                    else Regs.Copy(ref Regs.At(r, bs + i.A), in owner.Stack[uv.Index]);
+                    if (owner is null) Regs.Copy(ref Regs.Reg(co, f, ref rb, i.A), in uv.Value);
+                    else Regs.Copy(ref Regs.Reg(co, f, ref rb, i.A), in owner.Stack[uv.Index]);
                     break;
                 }
                 case OpCode.SetUpval:
                 {
-                    UpVal uv = cl.Upvals[i.B];
+                    UpVal uv = f.Closure.Upvals[i.B];
                     Coroutine? owner = uv.Owner;
                     // Source-typed store: scalars write a constant tag with no barrier and the destination is never read
-                    if (owner is null) Regs.Store(ref uv.Value, in Regs.At(r, bs + i.A));
-                    else Regs.Store(ref owner.Stack[uv.Index], in Regs.At(r, bs + i.A));
+                    if (owner is null) Regs.Store(ref uv.Value, in Regs.Reg(co, f, ref rb, i.A));
+                    else Regs.Store(ref owner.Stack[uv.Index], in Regs.Reg(co, f, ref rb, i.A));
                     break;
                 }
                 case OpCode.Add:
                 case OpCode.AddK:
-                    if (ArithFast<AddOp>(ref Regs.At(r, bs + i.A), ref Regs.At(r, bs + i.B), ref (i.Op == OpCode.AddK ? ref Regs.At(k, i.C) : ref Regs.At(r, bs + i.C)))) break;
+                    if (ArithFast<AddOp>(ref Regs.Reg(co, f, ref rb, i.A), ref Regs.Reg(co, f, ref rb, i.B), ref (i.Op == OpCode.AddK ? ref Regs.At(k, i.C) : ref Regs.Reg(co, f, ref rb, i.C)))) break;
                     goto arithslow;
                 case OpCode.Sub:
                 case OpCode.SubK:
-                    if (ArithFast<SubOp>(ref Regs.At(r, bs + i.A), ref Regs.At(r, bs + i.B), ref (i.Op == OpCode.SubK ? ref Regs.At(k, i.C) : ref Regs.At(r, bs + i.C)))) break;
+                    if (ArithFast<SubOp>(ref Regs.Reg(co, f, ref rb, i.A), ref Regs.Reg(co, f, ref rb, i.B), ref (i.Op == OpCode.SubK ? ref Regs.At(k, i.C) : ref Regs.Reg(co, f, ref rb, i.C)))) break;
                     goto arithslow;
                 case OpCode.Mul:
                 case OpCode.MulK:
-                    if (ArithFast<MulOp>(ref Regs.At(r, bs + i.A), ref Regs.At(r, bs + i.B), ref (i.Op == OpCode.MulK ? ref Regs.At(k, i.C) : ref Regs.At(r, bs + i.C)))) break;
+                    if (ArithFast<MulOp>(ref Regs.Reg(co, f, ref rb, i.A), ref Regs.Reg(co, f, ref rb, i.B), ref (i.Op == OpCode.MulK ? ref Regs.At(k, i.C) : ref Regs.Reg(co, f, ref rb, i.C)))) break;
                     goto arithslow;
                 case OpCode.Div:
                 case OpCode.DivK:
-                    if (ArithFast<DivOp>(ref Regs.At(r, bs + i.A), ref Regs.At(r, bs + i.B), ref (i.Op == OpCode.DivK ? ref Regs.At(k, i.C) : ref Regs.At(r, bs + i.C)))) break;
+                    if (ArithFast<DivOp>(ref Regs.Reg(co, f, ref rb, i.A), ref Regs.Reg(co, f, ref rb, i.B), ref (i.Op == OpCode.DivK ? ref Regs.At(k, i.C) : ref Regs.Reg(co, f, ref rb, i.C)))) break;
                     goto arithslow;
                 case OpCode.IDiv:
                 case OpCode.Mod:
@@ -342,9 +341,9 @@ internal static partial class Interpreter
                 case OpCode.Shr:
                     goto arithslow;
                 case OpCode.Unm:
-                    if (Regs.At(r, bs + i.B).IsNumber)
+                    if (Regs.Reg(co, f, ref rb, i.B).IsInteger || Regs.Reg(co, f, ref rb, i.B).IsFloat)
                     {
-                        r[bs + i.A] = Arith.Negate(r[bs + i.B], proto, pc - 1);
+                        Regs.Reg(co, f, ref rb, i.A) = Arith.Negate(Regs.Reg(co, f, ref rb, i.B), f.Closure.Proto, pc - 1);
                         break;
                     }
                     goto otherslow;
@@ -355,10 +354,10 @@ internal static partial class Interpreter
                 case OpCode.Self:
                     goto otherslow;
                 case OpCode.Not:
-                    r[bs + i.A] = LuaValue.FromBoolean(r[bs + i.B].IsFalsy);
+                    Regs.Reg(co, f, ref rb, i.A) = LuaValue.FromBoolean(Regs.IsFalsy(ref Regs.Reg(co, f, ref rb, i.B)));
                     break;
                 case OpCode.Test:
-                    if (!Regs.IsFalsy(ref Regs.At(r, bs + i.A)) != (i.C != 0)) pc++;
+                    if (!Regs.IsFalsy(ref Regs.Reg(co, f, ref rb, i.A)) != (i.C != 0)) pc++;
                     else
                     {
                         i = code[pc++]; // the Jmp that follows runs now, without another dispatch
@@ -371,8 +370,8 @@ internal static partial class Interpreter
                 {
                     // R[B] < R[C], R[B] < K[C], or K[C] < R[B]
                     OpCode op = i.Op;
-                    ref LuaValue x = ref Regs.At(r, bs + i.B);
-                    ref LuaValue y = ref (op == OpCode.JLt ? ref Regs.At(r, bs + i.C) : ref Regs.At(k, i.C));
+                    ref LuaValue x = ref Regs.Reg(co, f, ref rb, i.B);
+                    ref LuaValue y = ref (op == OpCode.JLt ? ref Regs.Reg(co, f, ref rb, i.C) : ref Regs.At(k, i.C));
                     ref LuaValue lhs = ref (op == OpCode.JGtK ? ref y : ref x);
                     ref LuaValue rhs = ref (op == OpCode.JGtK ? ref x : ref y);
                     bool res;
@@ -392,8 +391,8 @@ internal static partial class Interpreter
                 case OpCode.JGeK:
                 {
                     OpCode op = i.Op;
-                    ref LuaValue x = ref Regs.At(r, bs + i.B);
-                    ref LuaValue y = ref (op == OpCode.JLe ? ref Regs.At(r, bs + i.C) : ref Regs.At(k, i.C));
+                    ref LuaValue x = ref Regs.Reg(co, f, ref rb, i.B);
+                    ref LuaValue y = ref (op == OpCode.JLe ? ref Regs.Reg(co, f, ref rb, i.C) : ref Regs.At(k, i.C));
                     ref LuaValue lhs = ref (op == OpCode.JGeK ? ref y : ref x);
                     ref LuaValue rhs = ref (op == OpCode.JGeK ? ref x : ref y);
                     bool res;
@@ -411,8 +410,8 @@ internal static partial class Interpreter
                 case OpCode.JEq:
                 case OpCode.JEqK:
                 {
-                    ref LuaValue lhs = ref Regs.At(r, bs + i.B);
-                    ref LuaValue rhs = ref (i.Op == OpCode.JEq ? ref Regs.At(r, bs + i.C) : ref Regs.At(k, i.C));
+                    ref LuaValue lhs = ref Regs.Reg(co, f, ref rb, i.B);
+                    ref LuaValue rhs = ref (i.Op == OpCode.JEq ? ref Regs.Reg(co, f, ref rb, i.C) : ref Regs.At(k, i.C));
                     bool res;
                     if (lhs.IsInteger && rhs.IsInteger) res = lhs.AsInteger == rhs.AsInteger;
                     else if (lhs.IsFloat && rhs.IsFloat) res = lhs.AsFloat == rhs.AsFloat;
@@ -438,7 +437,7 @@ internal static partial class Interpreter
                         if (--state.GcTick < 0)
                         {
                             f.Pc = pc;
-                            int live = bs + proto.LiveRegisters(i.Ax);
+                            int live = f.Base + f.Closure.Proto.LiveRegisters(i.Ax);
                             if (state.Gc.Safepoint(live))
                             {
                                 // A cycle is due: leave the loop (resuming at the jump target) so it runs where no dispatch temporary is live.
@@ -446,42 +445,42 @@ internal static partial class Interpreter
                                 RequestAutoCollect(co, live, top);
                                 return top;
                             }
-                            r = co.Stack;
+                            rb = ref Regs.At(co.Stack, f.Base);
                         }
                     }
                     pc = i.Ax;
                     break;
                 case OpCode.Call:
                 {
-                    int fa = bs + i.A;
+                    int fa = f.Base + i.A;
                     int nargs = i.B != 0 ? i.B - 1 : top - fa - 1;
                     int wanted = i.C - 1;
                     f.Pc = pc;
-                    object? fn = Regs.At(r, fa).Ref;
+                    object? fn = Regs.At(co.Stack, fa).Ref;
                     if (fn is not (LuaClosure or BuiltinFunction))
                     {
-                        nargs = ResolveCallable(co, fa, nargs, proto, pc - 1, true);
+                        nargs = ResolveCallable(co, fa, nargs, f.Closure.Proto, pc - 1, true);
                         if (nargs < 0)
                         {
                             f = RaiseDeferred(state, co, stop);
                             top = co.ResumeTop;
                             goto newframe;
                         }
-                        r = co.Stack;
-                        fn = Regs.At(r, fa).Ref;
+                        rb = ref Regs.At(co.Stack, f.Base);
+                        fn = Regs.At(co.Stack, fa).Ref;
                     }
                     if (fn is LuaClosure callee)
                     {
                         if (co.Depth >= state.DepthLimit) throw LuaErrors.Error("stack overflow");
                         if (--state.Ticks <= 0) state.Poll();
-                        f = PrecallLua(co, callee, fa, nargs, wanted, proto, pc - 1);
+                        f = PrecallLua(co, callee, fa, nargs, wanted, f.Closure.Proto, pc - 1);
                         goto newframe;
                     }
                     var bf = (BuiltinFunction)fn!; // ResolveCallable guarantees a closure or a builtin
                     if (TMode.Traced) TraceBuiltin(state, co, bf, Math.Max(top, fa + nargs + 1), true, fa + 1, nargs);
                     if (bf.Kind != BuiltinKind.None)
                     {
-                        Special sp = bf.Kind >= FastFirst ? (TMode.Traced ? Special.None : CallFast(state, co, bf.Kind, fa, nargs, wanted)) : CallSpecial(state, co, bf.Kind, fa, nargs, wanted, stop, proto, pc - 1);
+                        Special sp = bf.Kind >= FastFirst ? (TMode.Traced ? Special.None : CallFast(state, co, bf.Kind, fa, nargs, wanted)) : CallSpecial(state, co, bf.Kind, fa, nargs, wanted, stop, f.Closure.Proto, pc - 1);
                         if (sp == Special.NewFrame)
                         {
                             f = co.ResumeFrame!;
@@ -498,24 +497,24 @@ internal static partial class Interpreter
                         }
                         if (sp == Special.Done)
                         {
-                            r = co.Stack;
+                            rb = ref Regs.At(co.Stack, f.Base);
                             if (wanted < 0) top = co.ResumeTop;
                             if (TMode.Traced) TraceBuiltin(state, co, bf, top, false, fa, wanted < 0 ? top - fa : wanted);
-                            r = co.Stack;
+                            rb = ref Regs.At(co.Stack, f.Base);
                             break;
                         }
                     }
                     // A traced call keeps every result so the return hook can see them (debug.getinfo "r"); they are trimmed afterwards.
-                    int end = CallBuiltin(state, co, bf, fa, nargs, TMode.Traced ? -1 : wanted, proto, pc - 1);
-                    r = co.Stack;
+                    int end = CallBuiltin(state, co, bf, fa, nargs, TMode.Traced ? -1 : wanted, f.Closure.Proto, pc - 1);
+                    rb = ref Regs.At(co.Stack, f.Base);
                     if (wanted < 0) top = end;
                     if (TMode.Traced)
                     {
                         TraceBuiltin(state, co, bf, Math.Max(top, end), false, fa, end - fa);
-                        r = co.Stack;
+                        rb = ref Regs.At(co.Stack, f.Base);
                         if (wanted >= 0)
                         {
-                            for (int j = end - fa; j < wanted; j++) r[fa + j] = default;
+                            for (int j = end - fa; j < wanted; j++) co.Stack[fa + j] = default;
                         }
                     }
                     else if (co.Traced)
@@ -530,32 +529,32 @@ internal static partial class Interpreter
                 }
                 case OpCode.TailCall:
                 {
-                    int fa = bs + i.A;
+                    int fa = f.Base + i.A;
                     int nargs = i.B != 0 ? i.B - 1 : top - fa - 1;
-                    if (r[fa].Ref is not (LuaClosure or BuiltinFunction))
+                    if (co.Stack[fa].Ref is not (LuaClosure or BuiltinFunction))
                     {
-                        nargs = ResolveCallable(co, fa, nargs, proto, pc - 1);
-                        r = co.Stack;
+                        nargs = ResolveCallable(co, fa, nargs, f.Closure.Proto, pc - 1);
+                        rb = ref Regs.At(co.Stack, f.Base);
                     }
-                    if (r[fa].Ref is LuaClosure callee)
+                    if (co.Stack[fa].Ref is LuaClosure callee)
                     {
                         f.Pc = pc;
                         if (--state.Ticks <= 0) state.Poll();
-                        if (co.OpenTop >= bs) co.Close(bs);
+                        if (co.OpenTop >= f.Base) co.Close(f.Base);
                         int tdst = f.FuncIdx;
-                        if (nargs <= 3) for (int j = 0; j <= nargs; j++) Regs.Copy(ref Regs.At(r, tdst + j), in Regs.At(r, fa + j)); // tdst < fa: forward copy is safe
-                        else Array.Copy(r, fa, r, tdst, nargs + 1);
-                        f = Precall(co, callee, f.FuncIdx, nargs, f.Wanted, f, proto, pc - 1);
+                        if (nargs <= 3) for (int j = 0; j <= nargs; j++) Regs.Copy(ref Regs.At(co.Stack, tdst + j), in Regs.At(co.Stack, fa + j)); // tdst < fa: forward copy is safe
+                        else Array.Copy(co.Stack, fa, co.Stack, tdst, nargs + 1);
+                        f = Precall(co, callee, f.FuncIdx, nargs, f.Wanted, f, f.Closure.Proto, pc - 1);
                         f.IsTail = true;
                         goto newframe;
                     }
                     // Builtins cannot be tail-called in place: run it and let the Return that follows pass on its results.
                     f.Pc = pc;
-                    var tbf = (BuiltinFunction)r[fa].Ref!;
+                    var tbf = (BuiltinFunction)co.Stack[fa].Ref!;
                     if (TMode.Traced) TraceBuiltin(state, co, tbf, Math.Max(top, fa + nargs + 1), true, fa + 1, nargs);
                     if (tbf.Kind != BuiltinKind.None)
                     {
-                        Special sp = tbf.Kind >= FastFirst ? (TMode.Traced ? Special.None : CallFast(state, co, tbf.Kind, fa, nargs, -1)) : CallSpecial(state, co, tbf.Kind, fa, nargs, -1, stop, proto, pc - 1);
+                        Special sp = tbf.Kind >= FastFirst ? (TMode.Traced ? Special.None : CallFast(state, co, tbf.Kind, fa, nargs, -1)) : CallSpecial(state, co, tbf.Kind, fa, nargs, -1, stop, f.Closure.Proto, pc - 1);
                         if (sp == Special.NewFrame)
                         {
                             f = co.ResumeFrame!;
@@ -570,27 +569,27 @@ internal static partial class Interpreter
                         }
                         if (sp == Special.Done)
                         {
-                            r = co.Stack;
+                            rb = ref Regs.At(co.Stack, f.Base);
                             top = co.ResumeTop;
                             break;
                         }
                     }
-                    top = CallBuiltin(state, co, fa, nargs, -1, proto, pc - 1);
+                    top = CallBuiltin(state, co, fa, nargs, -1, f.Closure.Proto, pc - 1);
                     if (TMode.Traced) TraceBuiltin(state, co, tbf, top, false, fa, top - fa);
-                    r = co.Stack;
+                    rb = ref Regs.At(co.Stack, f.Base);
                     break;
                 }
                 case OpCode.Return:
                 {
-                    int ra = bs + i.A;
+                    int ra = f.Base + i.A;
                     int n = i.B != 0 ? i.B - 1 : top - ra;
-                    if (co.OpenTop >= bs) co.Close(bs);
-                    if (co.Tbc.Count > 0 && co.Tbc[^1] >= bs)
+                    if (co.OpenTop >= f.Base) co.Close(f.Base);
+                    if (co.Tbc.Count > 0 && co.Tbc[^1] >= f.Base)
                     {
                         // Each __close handler runs as a Frame so it can yield; this instruction runs again when it returns.
                         f.Pc = pc;
-                        Frame? hf = StartClose(state, co, f, bs, Math.Max(bs + proto.MaxStack, ra + n), top);
-                        r = co.Stack;
+                        Frame? hf = StartClose(state, co, f, f.Base, Math.Max(f.Base + f.Closure.Proto.MaxStack, ra + n), top);
+                        rb = ref Regs.At(co.Stack, f.Base);
                         if (hf is not null)
                         {
                             f = hf;
@@ -600,7 +599,7 @@ internal static partial class Interpreter
                     if (TMode.Traced)
                     {
                         TraceReturn(state, co, f, pc, Math.Max(top, ra + n), i.A + 1, n);
-                        r = co.Stack;
+                        rb = ref Regs.At(co.Stack, f.Base);
                     }
                     if (f.Cont != Continuation.None)
                     {
@@ -608,23 +607,23 @@ internal static partial class Interpreter
                         if (cont == Continuation.Value)
                         {
                             // An __index/arithmetic metamethod returning: store its first result and go back to the instruction's Frame.
-                            if (n > 0) Regs.Copy(ref Regs.At(r, f.ContDest), in Regs.At(r, ra));
-                            else Regs.At(r, f.ContDest) = default;
+                            if (n > 0) Regs.Copy(ref Regs.At(co.Stack, f.ContDest), in Regs.At(co.Stack, ra));
+                            else Regs.At(co.Stack, f.ContDest) = default;
                             f = co.Frames[--co.Depth - 1]!;
                             goto newframe;
                         }
                         if (cont == Continuation.Cond)
                         {
                             // An __eq/__lt/__le metamethod returning to a fused compare-and-jump: the Jmp that follows runs when the truthiness matches.
-                            bool truth = n > 0 && !Regs.IsFalsy(ref Regs.At(r, ra));
+                            bool truth = n > 0 && !Regs.IsFalsy(ref Regs.At(co.Stack, ra));
                             bool want = f.ContDest != 0;
                             f = co.Frames[--co.Depth - 1]!;
                             if (truth != want) f.Pc++;
                             goto newframe;
                         }
                         int expect = f.ContDest;
-                        LuaValue mres = n > 0 ? r[ra] : default;
-                        FinishMeta(f, mres, r);
+                        LuaValue mres = n > 0 ? co.Stack[ra] : default;
+                        FinishMeta(f, mres, co.Stack);
                         f = ResumeAfterMeta(state, co, cont, ref top);
                         if (cont == Continuation.Cond && Truthy(mres) != (expect != 0)) f.Pc++; // the compare's Jmp is not taken
                         goto newframe;
@@ -635,55 +634,52 @@ internal static partial class Interpreter
                     {
                         // A protected call's results are (true, ...) at its own base; wanted counts the status too.
                         dst = f.PcallBase;
-                        r[dst++] = LuaValue.FromBoolean(true);
+                        co.Stack[dst++] = LuaValue.FromBoolean(true);
                         if (wanted > 0) wanted--;
                     }
                     if (wanted < 0)
                     {
-                        if (n <= 3) for (int j = 0; j < n; j++) Regs.Copy(ref Regs.At(r, dst + j), in Regs.At(r, ra + j));
-                        else Array.Copy(r, ra, r, dst, n);
+                        if (n <= 3) for (int j = 0; j < n; j++) Regs.Copy(ref Regs.At(co.Stack, dst + j), in Regs.At(co.Stack, ra + j));
+                        else Array.Copy(co.Stack, ra, co.Stack, dst, n);
                         top = dst + n;
                     }
                     else if (wanted == 1)
                     {
                         // The common case: one result, a scalar copy instead of Array.Copy (dst < ra, so no overlap hazard)
-                        if (n > 0) Regs.Copy(ref Regs.At(r, dst), in Regs.At(r, ra));
-                        else Regs.At(r, dst) = default;
+                        if (n > 0) Regs.Copy(ref Regs.At(co.Stack, dst), in Regs.At(co.Stack, ra));
+                        else Regs.At(co.Stack, dst) = default;
                     }
                     else
                     {
                         int c = Math.Min(n, wanted);
-                        if (c <= 3) for (int j = 0; j < c; j++) Regs.Copy(ref Regs.At(r, dst + j), in Regs.At(r, ra + j));
-                        else Array.Copy(r, ra, r, dst, c);
-                        for (int j = c; j < wanted; j++) r[dst + j] = default;
+                        if (c <= 3) for (int j = 0; j < c; j++) Regs.Copy(ref Regs.At(co.Stack, dst + j), in Regs.At(co.Stack, ra + j));
+                        else Array.Copy(co.Stack, ra, co.Stack, dst, c);
+                        for (int j = c; j < wanted; j++) co.Stack[dst + j] = default;
                     }
                     if (--co.Depth == stop) return top;
                     f = co.Frames[co.Depth - 1]!;
                     goto newframe;
                 }
                 case OpCode.ForPrep:
-                    if (ForPrep(r, bs + i.A, proto, pc - 1)) pc++;
+                    if (ForPrep(co.Stack, f.Base + i.A, f.Closure.Proto, pc - 1)) pc++;
                     break;
                 case OpCode.ForLoop:
                 {
-                    int ra = bs + i.A;
-                    ref LuaValue idx = ref Regs.At(r, ra);
-                    ref LuaValue cnt = ref Regs.At(r, ra + 1);
-                    ref LuaValue stp = ref Regs.At(r, ra + 2);
-                    if (stp.IsInteger)
+                    int fra = i.A;
+                    if (Regs.Reg(co, f, ref rb, fra + 2).IsInteger)
                     {
-                        ulong count = (ulong)cnt.AsInteger;
+                        long count = Regs.Reg(co, f, ref rb, fra + 1).AsInteger;
                         if (count == 0)
                         {
                             pc++;
                             break;
                         }
-                        long next = unchecked(idx.AsInteger + stp.AsInteger);
-                        Regs.SetBits(ref cnt, (long)(count - 1)); // the hidden loop state always holds integers here
-                        Regs.SetBits(ref idx, next);
-                        Regs.SetInteger(ref Regs.At(r, ra + 3), next);
+                        long next = unchecked(Regs.Reg(co, f, ref rb, fra).AsInteger + Regs.Reg(co, f, ref rb, fra + 2).AsInteger);
+                        Regs.SetBits(ref Regs.Reg(co, f, ref rb, fra + 1), count - 1); // the hidden loop state always holds integers here
+                        Regs.SetBits(ref Regs.Reg(co, f, ref rb, fra), next);
+                        Regs.SetInteger(ref Regs.Reg(co, f, ref rb, fra + 3), next);
                     }
-                    else if (!ForLoopFloat(r, ra))
+                    else if (!ForLoopFloat(co.Stack, f.Base + fra))
                     {
                         pc++;
                         break;
@@ -692,29 +688,29 @@ internal static partial class Interpreter
                     goto case OpCode.Jmp;
                 }
                 case OpCode.Closure:
-                    NewClosure(co, cl, proto.Protos[i.Bx], bs, i.A);
+                    NewClosure(co, f.Closure, f.Closure.Proto.Protos[i.Bx], f.Base, i.A);
                     break;
                 case OpCode.Close:
                 case OpCode.Tbc:
                     goto otherslow;
                 case OpCode.Vararg:
-                    top = VarargOp(co, f, i, bs, pc, proto, top);
-                    r = co.Stack;
+                    top = VarargOp(co, f, i, f.Base, pc, f.Closure.Proto, top);
+                    rb = ref Regs.At(co.Stack, f.Base);
                     break;
                 case OpCode.NewTable:
                 {
                     int arraySize = code[pc++].Ax;
-                    r[bs + i.A] = LuaValue.FromTable(new LuaTable(arraySize, i.B));
+                    Regs.Reg(co, f, ref rb, i.A) = LuaValue.FromTable(new LuaTable(arraySize, i.B));
                     break;
                 }
                 case OpCode.GetTable:
                 {
-                    if (Regs.At(r, bs + i.B).Ref is LuaTable t)
+                    if (Regs.Reg(co, f, ref rb, i.B).Ref is LuaTable t)
                     {
-                        ref readonly LuaValue v = ref t.GetRef(in Regs.At(r, bs + i.C));
+                        ref readonly LuaValue v = ref t.GetRef(in Regs.Reg(co, f, ref rb, i.C));
                         if (!v.IsNil || t.NoIndex)
                         {
-                            Regs.Copy(ref Regs.At(r, bs + i.A), in v);
+                            Regs.Copy(ref Regs.Reg(co, f, ref rb, i.A), in v);
                             break;
                         }
                     }
@@ -722,12 +718,12 @@ internal static partial class Interpreter
                 }
                 case OpCode.GetField:
                 {
-                    if (Regs.At(r, bs + i.B).Ref is LuaTable t)
+                    if (Regs.Reg(co, f, ref rb, i.B).Ref is LuaTable t)
                     {
                         ref readonly LuaValue v = ref t.GetStrRef((byte[])Regs.At(k, i.C).Ref!);
                         if (!v.IsNil || t.NoIndex)
                         {
-                            Regs.Copy(ref Regs.At(r, bs + i.A), in v);
+                            Regs.Copy(ref Regs.Reg(co, f, ref rb, i.A), in v);
                             break;
                         }
                     }
@@ -735,17 +731,17 @@ internal static partial class Interpreter
                 }
                 case OpCode.SetTable:
                 {
-                    if (Regs.At(r, bs + i.A).Ref is LuaTable t && t.NoNewIndex)
+                    if (Regs.Reg(co, f, ref rb, i.A).Ref is LuaTable t && t.NoNewIndex)
                     {
-                        ref LuaValue key = ref Regs.At(r, bs + i.B);
+                        ref LuaValue key = ref Regs.Reg(co, f, ref rb, i.B);
                         if (ReferenceEquals(key.Ref, LuaValue.IntegerTag))
                         {
-                            t.SetInt(key.Bits, in Regs.At(r, bs + i.C));
+                            t.SetInt(key.Bits, in Regs.Reg(co, f, ref rb, i.C));
                             break;
                         }
                         if (key.Ref is byte[] s)
                         {
-                            t.SetStr(s, in Regs.At(r, bs + i.C));
+                            t.SetStr(s, in Regs.Reg(co, f, ref rb, i.C));
                             break;
                         }
                     }
@@ -753,9 +749,9 @@ internal static partial class Interpreter
                 }
                 case OpCode.SetField:
                 {
-                    if (Regs.At(r, bs + i.A).Ref is LuaTable t && t.NoNewIndex)
+                    if (Regs.Reg(co, f, ref rb, i.A).Ref is LuaTable t && t.NoNewIndex)
                     {
-                        t.SetStr((byte[])Regs.At(k, i.B).Ref!, in Regs.At(r, bs + i.C));
+                        t.SetStr((byte[])Regs.At(k, i.B).Ref!, in Regs.Reg(co, f, ref rb, i.C));
                         break;
                     }
                     goto setslow;
@@ -763,54 +759,54 @@ internal static partial class Interpreter
                 case OpCode.SetList:
                 {
                     int offset = code[pc++].Ax;
-                    int ra = bs + i.A;
+                    int ra = f.Base + i.A;
                     int n = i.B != 0 ? i.B : top - ra - 1;
-                    ((LuaTable)r[ra].Ref!).SetRange(offset, r, ra + 1, n);
+                    ((LuaTable)co.Stack[ra].Ref!).SetRange(offset, co.Stack, ra + 1, n);
                     break;
                 }
                 case OpCode.SelfK:
                 {
-                    ref LuaValue obj = ref Regs.At(r, bs + i.B);
+                    ref LuaValue obj = ref Regs.Reg(co, f, ref rb, i.B);
                     byte[] key = (byte[])Regs.At(k, i.C).Ref!;
                     ref readonly LuaValue v = ref s_nilValue;
                     if (obj.Ref is LuaTable t) v = ref t.GetStrRef(key);
                     else if (obj.Ref is byte[]) v = ref StringMethod(state, key);
                     if (!v.IsNil)
                     {
-                        Regs.Copy(ref Regs.At(r, bs + i.A + 1), in obj);
-                        Regs.Copy(ref Regs.At(r, bs + i.A), in v);
+                        Regs.Copy(ref Regs.Reg(co, f, ref rb, i.A + 1), in obj);
+                        Regs.Copy(ref Regs.Reg(co, f, ref rb, i.A), in v);
                         break;
                     }
                     goto indexslow;
                 }
                 case OpCode.Len:
-                    if (Regs.At(r, bs + i.B).Ref is LuaTable lt && lt.Metatable is null)
+                    if (Regs.Reg(co, f, ref rb, i.B).Ref is LuaTable lt && lt.Metatable is null)
                     {
-                        r[bs + i.A] = LuaValue.FromInteger(lt.Length());
+                        Regs.Reg(co, f, ref rb, i.A) = LuaValue.FromInteger(lt.Length());
                         break;
                     }
                     goto otherslow;
                 case OpCode.Concat:
                 {
-                    Frame? nf = ConcatOp(state, co, f, i, bs, pc, proto);
+                    Frame? nf = ConcatOp(state, co, f, i, f.Base, pc, f.Closure.Proto);
                     if (nf is not null)
                     {
                         f = nf;
                         goto newframe;
                     }
-                    r = co.Stack;
+                    rb = ref Regs.At(co.Stack, f.Base);
                     break;
                 }
                 case OpCode.TForLoop:
-                    if (!r[bs + i.A + 4].IsNil) r[bs + i.A + 2] = r[bs + i.A + 4];
+                    if (!Regs.Reg(co, f, ref rb, i.A + 4).IsNil) Regs.Reg(co, f, ref rb, i.A + 2) = Regs.Reg(co, f, ref rb, i.A + 4);
                     else pc++;
                     break;
                 default:
                     throw new InvalidOperationException($"bad opcode {i.Op}");
                 arithslow:
                 {
-                    if (Arith.TryNumeric(i.Op, ref Regs.At(r, bs + i.A), in Regs.At(r, bs + i.B), in (i.Op >= OpCode.AddK && i.Op <= OpCode.PowK ? ref Regs.At(k, i.C) : ref Regs.At(r, bs + i.C)))) break;
-                    Frame? nf = ArithSlow(state, co, f, i, bs, pc, proto, k, stop);
+                    if (Arith.TryNumeric(i.Op, ref Regs.Reg(co, f, ref rb, i.A), in Regs.Reg(co, f, ref rb, i.B), in (i.Op >= OpCode.AddK && i.Op <= OpCode.PowK ? ref Regs.At(k, i.C) : ref Regs.Reg(co, f, ref rb, i.C)))) break;
+                    Frame? nf = ArithSlow(state, co, f, i, f.Base, pc, f.Closure.Proto, k, stop);
                     if (nf is not null)
                     {
                         f = nf;
@@ -821,12 +817,12 @@ internal static partial class Interpreter
                         }
                         goto newframe;
                     }
-                    r = co.Stack;
+                    rb = ref Regs.At(co.Stack, f.Base);
                     break;
                 }
                 indexslow:
                 {
-                    Frame? nf = IndexSlow(state, co, f, i, bs, pc, proto, k, stop);
+                    Frame? nf = IndexSlow(state, co, f, i, f.Base, pc, f.Closure.Proto, k, stop);
                     if (nf is not null)
                     {
                         f = nf;
@@ -837,12 +833,12 @@ internal static partial class Interpreter
                         }
                         goto newframe;
                     }
-                    r = co.Stack;
+                    rb = ref Regs.At(co.Stack, f.Base);
                     break;
                 }
                 setslow:
                 {
-                    Frame? nf = SetSlow(state, co, f, i, bs, pc, proto, k, stop);
+                    Frame? nf = SetSlow(state, co, f, i, f.Base, pc, f.Closure.Proto, k, stop);
                     if (nf is not null)
                     {
                         f = nf;
@@ -853,29 +849,29 @@ internal static partial class Interpreter
                         }
                         goto newframe;
                     }
-                    r = co.Stack;
+                    rb = ref Regs.At(co.Stack, f.Base);
                     break;
                 }
                 otherslow:
                 {
-                    Frame? nf = OtherSlow(state, co, f, i, bs, pc, proto, k, top);
+                    Frame? nf = OtherSlow(state, co, f, i, f.Base, pc, f.Closure.Proto, k, top);
                     if (nf is not null)
                     {
                         f = nf;
                         goto newframe;
                     }
-                    r = co.Stack;
+                    rb = ref Regs.At(co.Stack, f.Base);
                     break;
                 }
                 condslow:
                 {
-                    Frame? nf = CondSlow(state, co, f, i, bs, pc, proto, k, out bool take);
+                    Frame? nf = CondSlow(state, co, f, i, f.Base, pc, f.Closure.Proto, k, out bool take);
                     if (nf is not null)
                     {
                         f = nf;
                         goto newframe;
                     }
-                    r = co.Stack;
+                    rb = ref Regs.At(co.Stack, f.Base);
                     if (take)
                     {
                         i = code[pc++];

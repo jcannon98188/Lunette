@@ -29,6 +29,18 @@ internal static class Regs
         return ref System.Runtime.CompilerServices.Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(a), (nint)i);
     }
 
+    /// <summary>
+    /// Register <paramref name="n"/> of frame <paramref name="f"/>, given <paramref name="rb"/>, the dispatch loop's reference to the frame's
+    /// first register (<c>co.Stack[f.Base]</c>). The unsafe version ignores <paramref name="co"/> and <paramref name="f"/> (they exist so the
+    /// safe twin can bounds-check against the real stack); <paramref name="rb"/> must be refreshed after anything that can reallocate the stack.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static ref LuaValue Reg(Vm.Coroutine co, Vm.Frame f, ref LuaValue rb, int n)
+    {
+        Debug.Assert((uint)(f.Base + n) < (uint)co.Stack.Length && System.Runtime.CompilerServices.Unsafe.AreSame(ref rb, ref co.Stack[f.Base]));
+        return ref System.Runtime.CompilerServices.Unsafe.Add(ref rb, (nint)n);
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static ref RawValue Raw(ref LuaValue v) => ref System.Runtime.CompilerServices.Unsafe.As<LuaValue, RawValue>(ref v);
 

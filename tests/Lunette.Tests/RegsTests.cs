@@ -67,7 +67,28 @@ public class RegsTests
         for (int i = 0; i < r.Length; i++) Assert.Equal(expected[i], Regs.IsFalsy(ref Regs.At(r, i)));
     }
 
+    [Fact]
+    public void Reg_addresses_the_frame_register_through_the_base_reference()
+    {
+        var co = new Lunette.Vm.Coroutine { Stack = new LuaValue[8] };
+        var f = new Lunette.Vm.Frame { Base = 3 };
+        ref LuaValue rb = ref Regs.At(co.Stack, f.Base);
+        Regs.SetInteger(ref Regs.Reg(co, f, ref rb, 2), 41);
+        Assert.True(co.Stack[5].IsInteger);
+        Assert.Equal(41, co.Stack[5].Bits);
+        Assert.True(co.Stack[3].IsNil);
+        Assert.Equal(41, Regs.Reg(co, f, ref rb, 2).Bits);
+    }
+
 #if LUA_SAFE_ACCESS
+    [Fact]
+    public void Safe_twin_Reg_checks_bounds()
+    {
+        var co = new Lunette.Vm.Coroutine { Stack = new LuaValue[4] };
+        var f = new Lunette.Vm.Frame { Base = 2 };
+        Assert.Throws<IndexOutOfRangeException>(() => Regs.Reg(co, f, ref Regs.At(co.Stack, 2), 2));
+    }
+
     [Fact]
     public void Safe_twin_checks_bounds()
     {

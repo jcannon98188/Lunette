@@ -29,6 +29,9 @@ internal static class Regs
     /// <summary>A reference to element <paramref name="i"/> of <paramref name="a"/> (bounds-checked).</summary>
     public static ref LuaValue At(LuaValue[] a, int i) => ref a[i];
 
+    /// <summary>Register <paramref name="n"/> of frame <paramref name="f"/> (bounds-checked; ignores the base reference the unsafe version uses).</summary>
+    public static ref LuaValue Reg(Vm.Coroutine co, Vm.Frame f, ref LuaValue rb, int n) => ref co.Stack[f.Base + n];
+
     /// <summary>True for nil and false (see <see cref="LuaValue.IsFalsy"/>).</summary>
     public static bool IsFalsy(ref LuaValue v) => v.IsFalsy;
 
