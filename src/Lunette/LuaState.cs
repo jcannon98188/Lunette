@@ -160,7 +160,7 @@ public sealed partial class LuaState : IDisposable
 
     /// <summary>Compiles a text chunk and returns it as a function value with the given environment.</summary>
     internal LuaClosure Load(byte[] source, string chunkName, LuaValue env) =>
-        NewMainClosure(LuaCompiler.Compile(source, chunkName, Strings), env);
+        NewMainClosure(LuaCompiler.Compile(source, chunkName, Strings, this), env);
 
     private readonly Dictionary<BuiltinFunction, LuaClosure> _trampolines = new();
 
