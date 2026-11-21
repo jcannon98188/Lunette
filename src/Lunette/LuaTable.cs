@@ -298,7 +298,7 @@ public sealed partial class LuaTable
         ulong idx = (ulong)k - 1;
         if (idx < (ulong)_limit && idx < (ulong)a.Length)
         {
-            a[idx] = value;
+            Lunette.Unsafe.Regs.Store(ref a[idx], in value);
             return;
         }
         SetIntSlow(k, in value);
@@ -320,7 +320,7 @@ public sealed partial class LuaTable
     {
         Flags = 0;
         int n = FindNodeStr(key);
-        if (n >= 0) { _nodes[n].Value = value; return; }
+        if (n >= 0) { Lunette.Unsafe.Regs.Store(ref _nodes[n].Value, in value); return; }
         NewKey(LuaValue.FromObject(key), value);
     }
 

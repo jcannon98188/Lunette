@@ -9,15 +9,13 @@ namespace Lunette;
 /// </summary>
 public readonly partial struct LuaValue
 {
-    private sealed class Tag(string name)
-    {
-        public override string ToString() => name;
-    }
-
-    internal static readonly object IntegerTag = new Tag("integer");
-    internal static readonly object FloatTag = new Tag("float");
-    private static readonly object TrueTag = new Tag("true");
-    internal static readonly object FalseTag = new Tag("false");
+    // The type tags are string literals on purpose: the runtime allocates literals on the frozen (non-GC) heap, so the JIT treats them as
+    // constants and emits no write barrier for a tag store (a custom class instance is not frozen). Lua strings are byte[], so no Lua value
+    // ever carries a System.String in Ref and the tags cannot be mistaken for one. Correctness never depends on the tags being frozen.
+    internal static readonly object IntegerTag = "integer";
+    internal static readonly object FloatTag = "float";
+    internal static readonly object TrueTag = "true";
+    internal static readonly object FalseTag = "false";
 
     internal readonly object? Ref;
     internal readonly long Bits;
