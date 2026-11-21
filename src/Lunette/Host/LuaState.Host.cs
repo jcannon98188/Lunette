@@ -131,6 +131,16 @@ public sealed partial class LuaState
     }
 
     /// <summary>
+    /// Called by the compiler every 256 tokens of a <c>load</c>: charges 16 ticks (one per 16 tokens) so a long compile counts against the
+    /// instruction budget and reaches the memory and interrupt checks in <see cref="Poll"/> instead of pinning the thread unmetered.
+    /// </summary>
+    internal void CompileTick()
+    {
+        Ticks -= 16;
+        if (Ticks <= 0) Poll();
+    }
+
+    /// <summary>
     /// Pre-check for a library function about to allocate <paramref name="bytes"/> in one go: aborts with
     /// <see cref="LuaAbortKind.MemoryLimit"/> if that would pass the memory cap, before anything is allocated.
     /// </summary>

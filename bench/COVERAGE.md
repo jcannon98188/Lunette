@@ -371,3 +371,42 @@ against PUC-derived expectations. `gc.lua:473` (string-key weak table memory gro
   `collectgarbage()`: 95-104 ms -> 88-95 ms per collect (PUC 19 ms); the 30-43% of the prototype did not reproduce on this workload, the gain is mostly fewer finalizable objects.
 - gc-latency (5 runs, median): p99 0.31 -> 0.26, p99.9 1.37 -> 1.14, max 82.9 -> 85.3 ms; macro set within noise.
 - Baseline before the change: `GcTests` 33/33 and `gc.lua` green on the unmodified tree.
+
+## Ticket 56 (load() compile was quadratic in constants and names)
+
+`LuaCompiler.NumberConst`/`StringConst`/`ConstOperand`/`AddName` scanned `FuncState.Consts`/`Names` linearly, so a chunk with N distinct constants cost O(N^2).
+Now each `FuncState` builds a hash index (`Dictionary<LuaValue,int>` for constants, `Dictionary<string,int>` for names) lazily, the first time a lookup finds more than 32 entries;
+smaller functions keep the linear scan and allocate nothing extra (an eager index made `load("return 1 + 2")` about 3x slower in the audit). The constant comparer is `SameConst`
+(strings by content, everything else by tag and bits, so 1, 1.0, 0.0, -0.0 stay distinct) and hashes string bytes directly, never `LuaString.Hash`, so `LUNETTE_CONSTANT_HASH=1` stays a hash lookup.
+The first index of a constant still wins (string literals are appended without dedupe, as before); `CompilerConstantIndexTests` pins a SHA-256 of the constants, names and code of a corpus taken
+before the change, so the output is identical, including chunks past 256 and 65536 constants.
+
+`p2l.lua` (`bench/lib-probes/`, `lua p2l.lua load <rows>`), WSL, best of 3-5 in-process, ms (PUC / before / after):
+
+| probe | PUC | before | after |
+|---|---:|---:|---:|
+| data table chunk, 6000 rows (0.56 MB) | 10.6 | 1131 | 15.1 |
+| data table chunk, 60000 rows (5.8 MB) | 164 | about 80000 (audit; 144 s on Windows in the new test) | 285 |
+| 3 MB chunk of 8000 functions | 88 to 128 | 676 | 151 |
+| `load("return 1 + 2")` x 20000 | 17 to 28 | 19 to 26 | 16 to 26 (noise) |
+| small function x 5000 | 17 to 27 | 16 to 37 | 16 to 42 (noise) |
+
+Metering: the compiler now calls `LuaState.CompileTick` every 256 tokens of a `load` (charges 16 ticks, so one instruction unit per 16 tokens, and polls the budget, memory cap and interrupt flag
+through the existing `Poll` when the slice runs out). A sandboxed script that `load`s a huge string now hits `LuaAbortException` (instruction budget) or an "interrupted" error from `load`
+instead of pinning the thread; the per-token cost is one increment and mask. The host-side `LuaState.Load`/`DoString` are not metered (no run in progress). A legitimate large load now spends budget
+(about 1 unit per 16 tokens).
+## Ticket 59 (io.write flush per argument, lazy LuaFile buffers, growable StringCache)
+
+WSL2, .NET 11, PUC 5.4.9; wall time of 1e6 `io.write("line ", i, "\n")` calls (3 runs, process start included, ~60 ms) to a redirected stdout. Output is byte-identical (md5) to PUC and to the old build.
+
+| sink | before | after | PUC |
+|---|---:|---:|---:|
+| file | 1738-2367 ms | 284-376 ms | 129-184 ms |
+| pipe | 2867-3157 ms | 291-319 ms (one 1392 ms outlier under load) | 160-226 ms |
+| `print` x 1e6 (file / pipe) | 800 / 1087-1364 | 787-876 / 1222-1376 | 686-733 / 1132-1278 |
+
+- Standard output (`io.stdout` over `LuaState.OutputStream` / `Output`) is now "host-buffered" by default: `LuaFile.WriteThrough` no longer flushes the host stream per write, so a redirected CLI stdout (a 16 KB `BufferedStream`) is block-buffered and a terminal (raw stream) still sees every write. An explicit `setvbuf` clears that state (`"no"` flushes per write, `"line"`/`"full"` use the file's own buffer), `io.flush`/`file:flush`, close, `__gc`/state `Dispose`, `os.exit` and error exit flush as before, and `print` keeps its fflush. Embedders: `Output`/`OutputStream` are no longer flushed after each `io.write`; hand in an unbuffered writer/stream (or call `io.flush`) if bytes must appear immediately. Documented on both properties.
+- `LuaFile` read buffers (8 KB) are allocated on the first read; `StringCache` starts at 64 sets x 4 ways (256 slots) and doubles when a set is full, up to the configured capacity (`LUNETTE_INTERN_CAPACITY=1` still means one slot).
+- `StateBenchmarks` (`CreateRunDispose`): 80.7 us / 106 KB -> 39.9 us / 56 KB per state; `CreateFillDispose` 183.7 us / 320 KB -> 151.0 us / 294 KB.
+- Tests: `tests/Lunette.Tests/StdoutBufferingTests.cs` (flush counts, setvbuf modes, io.flush, Dispose, return values/errors, failing stream, TextWriter output, CLI exit paths), and the growth test in `StringLibTests.cs`.
+- Known, unrelated: `gc.lua:473` fails in the differential chunk run for the base build too (verified on the pre-change WSL build), and `big.lua` exceeds the 3 min suite timeout on this shared machine for the base build as well (212 s before, not completed in 240 s after under load; compile-time territory of ticket 56).

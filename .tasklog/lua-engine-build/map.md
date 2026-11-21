@@ -69,6 +69,8 @@ A pure-managed C# (.NET 11) Lua 5.4 engine and minimal CLI, built to the lua-eng
 - [Perf: warm-up and GC pause tail (first-chunk JIT cost, gen0 p99)](tickets/54-perf-warm-up-and-gc-pause-tail-first-chunk-jit-cost-gen0-p99.md): Non-concurrent GC for CLI, AOT recommendation (de7fc97)
 - [Perf: metamethod function calls (__index chains, __newindex, __call) 3-5.7x PUC](tickets/52-perf-metamethod-function-calls-index-chains-newindex-call-3.md): Metamethod call fast paths (7fda119)
 - [Perf: varargs/select, closure iterators and builtin per-call overhead (unpack, tonumber, string.rep/sub/byte)](tickets/55-perf-varargs-select-closure-iterators-and-builtin-per-call-o.md): Vararg and builtin fast paths (915d09a)
+- [Perf: io.write flushes per argument; lazy LuaFile buffers and growable StringCache](tickets/59-perf-io-write-flushes-per-argument-lazy-luafile-buffers-and.md): io.write flush removed, lazy buffers; 6x faster writes
+- [Perf: load() compile is quadratic in constants (lazy hash index for constants and names)](tickets/56-perf-load-compile-is-quadratic-in-constants-lazy-hash-index.md): load() quadratic constant lookup fixed; compile metered
 
 ## Not yet specified
 

@@ -160,7 +160,7 @@ public sealed partial class LuaState : IDisposable
 
     /// <summary>Compiles a text chunk and returns it as a function value with the given environment.</summary>
     internal LuaClosure Load(byte[] source, string chunkName, LuaValue env) =>
-        NewMainClosure(LuaCompiler.Compile(source, chunkName, Strings), env);
+        NewMainClosure(LuaCompiler.Compile(source, chunkName, Strings, this), env);
 
     private readonly Dictionary<BuiltinFunction, LuaClosure> _trampolines = new();
 
@@ -203,10 +203,10 @@ public sealed partial class LuaState : IDisposable
         }
     }
 
-    /// <summary>Text sink for <c>print</c> and <c>io.stdout</c>. Lua strings are bytes, so bytes that are not valid UTF-8 become U+FFFD here; set <see cref="OutputStream"/> to keep them.</summary>
+    /// <summary>Text sink for <c>print</c> and <c>io.stdout</c>. Lua strings are bytes, so bytes that are not valid UTF-8 become U+FFFD here; set <see cref="OutputStream"/> to keep them. <c>io.write</c> and <c>io.stdout:write</c> do not flush this writer per call (like C stdio on a redirected stdout): they are flushed by <c>io.flush</c>, <c>setvbuf</c>, <c>io.stdout:close</c>, <see cref="Dispose"/> and the host; <c>print</c> on the <see cref="OutputStream"/> path flushes after each line. A host that needs bytes immediately should hand in an unbuffered writer or stream.</summary>
     public TextWriter Output { get; set; } = Console.Out;
 
-    /// <summary>When set, <c>print</c> and <c>io.stdout</c> write their bytes here verbatim (no decoding) and <see cref="Output"/> is not used.</summary>
+    /// <summary>When set, <c>print</c> and <c>io.stdout</c> write their bytes here verbatim (no decoding) and <see cref="Output"/> is not used. The stream is flushed after each <c>print</c> and by <c>io.flush</c>/<c>setvbuf</c>/close/<see cref="Dispose"/>, but not after each <c>io.write</c>; the command-line driver passes a buffered stream when stdout is redirected and the raw stream on a terminal.</summary>
     public Stream? OutputStream { get; set; }
 
     /// <summary>Compiles and runs a chunk of Lua source (encoded as UTF-8).</summary>
