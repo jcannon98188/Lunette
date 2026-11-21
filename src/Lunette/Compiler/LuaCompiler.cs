@@ -63,6 +63,29 @@ internal sealed class LuaCompiler
         public List<int> Lines { get; } = new();
         public List<LuaValue> Consts { get; } = new();
         public List<string> Names { get; } = new();
+
+        /// <summary>Above this many entries a function's constants and names are looked up through a hash index instead of a linear scan (ticket 56).</summary>
+        public const int IndexThreshold = 32;
+
+        /// <summary>First index of each distinct constant (<see cref="ConstComparer"/>); built lazily past <see cref="IndexThreshold"/> and then kept in step with <see cref="Consts"/>.</summary>
+        public Dictionary<LuaValue, int>? ConstIndex;
+        public Dictionary<string, int>? NameIndex;
+
+        public Dictionary<LuaValue, int> EnsureConstIndex()
+        {
+            if (ConstIndex is { } d) return d;
+            d = new Dictionary<LuaValue, int>(Consts.Count * 2, ConstComparer.Instance);
+            for (int i = 0; i < Consts.Count; i++) d.TryAdd(Consts[i], i);
+            return ConstIndex = d;
+        }
+
+        public Dictionary<string, int> EnsureNameIndex()
+        {
+            if (NameIndex is { } d) return d;
+            d = new Dictionary<string, int>(Names.Count * 2, StringComparer.Ordinal);
+            for (int i = 0; i < Names.Count; i++) d.TryAdd(Names[i], i);
+            return NameIndex = d;
+        }
         public List<LocalVar> Locals { get; } = new();
         /// <summary>Every local ever declared, for debug info (variable names in error messages).</summary>
         public List<LocalVar> AllLocals { get; } = new();
@@ -119,9 +142,10 @@ internal sealed class LuaCompiler
     public static Proto Compile(string source, string chunkName, StringCache? cache = null) =>
         Compile(LuaString.FromUtf16(source).Bytes.ToArray(), chunkName, cache);
 
-    public static Proto Compile(byte[] source, string chunkName, StringCache? cache = null)
+    public static Proto Compile(byte[] source, string chunkName, StringCache? cache = null, LuaState? meter = null)
     {
         var c = new LuaCompiler(source, chunkName, cache ?? new StringCache());
+        c._meter = meter;
         c._fs.IsVararg = true;
         c._fs.OnLimit = (fs, what, limit) => throw c.LimitError(fs, what, limit);
         c._fs.Upvals.Add(("_ENV", new UpvalDesc(true, 0)));
@@ -172,8 +196,13 @@ internal sealed class LuaCompiler
 
     private int _lastLine = 1;
 
+    /// <summary>The state whose instruction budget, memory cap and interrupt flag a long compile is charged to (null: not metered).</summary>
+    private LuaState? _meter;
+    private int _tokens;
+
     private void Advance()
     {
+        if ((++_tokens & 255) == 0) _meter?.CompileTick();
         _lastLine = _tok.Line;
         if (_hasAhead) { _tok = _ahead; _hasAhead = false; }
         else _tok = _lex.Next();
@@ -264,23 +293,54 @@ internal sealed class LuaCompiler
     private static bool SameConst(LuaValue a, LuaValue b) =>
         (ReferenceEquals(a.Ref, b.Ref) && a.Bits == b.Bits) || (a.Ref is byte[] && b.Ref is byte[] && LuaValue.RawEquals(a, b));
 
+    /// <summary>
+    /// <see cref="SameConst"/> as a comparer: strings by content, everything else by tag identity and bits (so 1, 1.0, 0.0 and -0.0 stay
+    /// distinct and a NaN equals the same NaN). Strings are hashed over their bytes, never through <see cref="LuaString.Hash"/>, so the
+    /// LUNETTE_CONSTANT_HASH=1 variant (every cached hash equal) cannot turn the index into a list.
+    /// </summary>
+    private sealed class ConstComparer : IEqualityComparer<LuaValue>
+    {
+        public static readonly ConstComparer Instance = new();
+
+        public bool Equals(LuaValue a, LuaValue b) => SameConst(a, b);
+
+        public int GetHashCode(LuaValue v)
+        {
+            if (v.Ref is byte[] s)
+            {
+                var h = new HashCode();
+                h.AddBytes(new LuaString(s).Bytes);
+                return h.ToHashCode();
+            }
+            return HashCode.Combine(v.Ref is null ? 0 : System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(v.Ref), v.Bits);
+        }
+    }
+
+    /// <summary>Index of the first constant equal to <paramref name="v"/> (<see cref="SameConst"/>), or -1: a scan for small functions, the hash index past <see cref="FuncState.IndexThreshold"/>.</summary>
+    private int FindConst(LuaValue v)
+    {
+        var fs = _fs;
+        var consts = fs.Consts;
+        if (consts.Count > FuncState.IndexThreshold)
+            return fs.EnsureConstIndex().TryGetValue(v, out int found) ? found : -1;
+        for (int i = 0; i < consts.Count; i++)
+            if (SameConst(consts[i], v)) return i;
+        return -1;
+    }
+
     /// <summary>Index of <paramref name="v"/> in the first 256 constants (the ones a K operand reaches), adding it when there is room; -1 when there is none.</summary>
     private int ConstOperand(LuaValue v)
     {
-        var consts = _fs.Consts;
-        int n = Math.Min(consts.Count, 256);
-        for (int i = 0; i < n; i++)
-            if (SameConst(consts[i], v)) return i;
-        return consts.Count < 256 ? AddConst(v) : -1;
+        int i = FindConst(v);
+        if (i >= 0) return i < 256 ? i : -1; // first match past 256: no earlier one exists, and the table is full
+        return _fs.Consts.Count < 256 ? AddConst(v) : -1;
     }
 
     /// <summary>A number constant's index, reusing an equal one (same type and bits), for the 16-bit LoadK operand.</summary>
     private int NumberConst(LuaValue v)
     {
-        var consts = _fs.Consts;
-        for (int i = 0; i < consts.Count; i++)
-            if (SameConst(consts[i], v)) return i;
-        return AddConst(v);
+        int i = FindConst(v);
+        return i >= 0 ? i : AddConst(v);
     }
 
     /// <summary>
@@ -354,7 +414,9 @@ internal sealed class LuaCompiler
     private int AddConst(LuaValue v)
     {
         _fs.Consts.Add(v);
-        return _fs.Consts.Count - 1;
+        int idx = _fs.Consts.Count - 1;
+        _fs.ConstIndex?.TryAdd(v, idx); // string literals are appended without dedupe: the first index stays the one found
+        return idx;
     }
 
     /// <summary>Loads a constant into a register: LoadK reaches 65536 constants, LoadKX (with an Extra word) any number.</summary>
@@ -371,10 +433,19 @@ internal sealed class LuaCompiler
 
     private int AddName(string n)
     {
-        int i = _fs.Names.IndexOf(n);
+        var names = _fs.Names;
+        if (names.Count > FuncState.IndexThreshold)
+        {
+            var index = _fs.EnsureNameIndex();
+            if (index.TryGetValue(n, out int found)) return found;
+            names.Add(n);
+            index.Add(n, names.Count - 1);
+            return names.Count - 1;
+        }
+        int i = names.IndexOf(n);
         if (i >= 0) return i;
-        _fs.Names.Add(n);
-        return _fs.Names.Count - 1;
+        names.Add(n);
+        return names.Count - 1;
     }
 
     // ---- variable resolution ----
@@ -438,9 +509,8 @@ internal sealed class LuaCompiler
     private int StringConst(string name)
     {
         LuaValue v = NameConst(name);
-        for (int i = 0; i < _fs.Consts.Count; i++)
-            if (LuaValue.RawEquals(_fs.Consts[i], v)) return i;
-        return AddConst(v);
+        int i = FindConst(v);
+        return i >= 0 ? i : AddConst(v);
     }
 
     /// <summary>A global name is a field of the <c>_ENV</c> variable in scope (a local or an upvalue).</summary>

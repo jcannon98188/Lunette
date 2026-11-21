@@ -247,9 +247,15 @@ internal sealed class GcState
     private void CollectWindow(int generation, bool compacting)
     {
         List<WeakDetach>? detached = Weaken();
-        GC.Collect(generation, GCCollectionMode.Forced, blocking: true, compacting);
-        GC.WaitForPendingFinalizers();
-        if (detached is not null) Restore(detached);
+        try
+        {
+            GC.Collect(generation, GCCollectionMode.Forced, blocking: true, compacting);
+            GC.WaitForPendingFinalizers();
+        }
+        finally
+        {
+            if (detached is not null) Restore(detached); // also frees every handle, even when the collection threw
+        }
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -274,8 +280,8 @@ internal sealed class GcState
     {
         foreach (WeakDetach d in detached)
         {
-            if (d.Table.TryGetTarget(out LuaTable? t)) t.RestoreWeak(d);
-            d.DisposeHandles();
+            try { if (d.Table.TryGetTarget(out LuaTable? t)) t.RestoreWeak(d); }
+            finally { d.DisposeHandles(); }
         }
     }
 
@@ -334,10 +340,11 @@ internal sealed class GcState
         try
         {
             var batch = new List<FinalizerMark>();
-            while (_pending.TryDequeue(out FinalizerMark? p)) batch.Add(p);
+            var seen = new HashSet<FinalizerMark>(ReferenceEqualityComparer.Instance);
+            while (_pending.TryDequeue(out FinalizerMark? p)) { batch.Add(p); seen.Add(p); }
             Volatile.Write(ref _pendingCount, 0);
             foreach (WeakReference<FinalizerMark> w in _registry)
-                if (w.TryGetTarget(out FinalizerMark? m) && !m.Done && !batch.Contains(m)) batch.Add(m);
+                if (w.TryGetTarget(out FinalizerMark? m) && !m.Done && seen.Add(m)) batch.Add(m);
             try { RunFinalizers(batch); }
             catch (Exception) { /* errors while closing are swallowed */ }
         }
