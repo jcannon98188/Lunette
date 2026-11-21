@@ -75,6 +75,7 @@ A pure-managed C# (.NET 11) Lua 5.4 engine and minimal CLI, built to the lua-eng
 - [Perf: frozen type tags and barrier-free scalar stores (core audit 1)](tickets/61-perf-frozen-type-tags-and-barrier-free-scalar-stores-core-au.md): Frozen tags + barrier-free stores; wrap error bug fixed
 - [Perf: table.insert/remove/move bulk copies and more in-place library forms](tickets/60-perf-table-insert-remove-move-bulk-copies-and-more-in-place.md): Bulk table-lib copies, more in-place builtins
 - [Perf: allocation-free lexer tokens (name table, lazy token text)](tickets/57-perf-allocation-free-lexer-tokens-name-table-lazy-token-text.md): Allocation-free lexer; load 1.5x faster
+- [Perf: RunLoop register diet and handler style pass (core audit 2+3)](tickets/62-perf-runloop-register-diet-and-handler-style-pass-core-audit.md): RunLoop register diet; up to 22% faster
 
 ## Not yet specified
 
