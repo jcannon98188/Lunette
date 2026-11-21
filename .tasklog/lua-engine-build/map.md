@@ -71,6 +71,7 @@ A pure-managed C# (.NET 11) Lua 5.4 engine and minimal CLI, built to the lua-eng
 - [Perf: varargs/select, closure iterators and builtin per-call overhead (unpack, tonumber, string.rep/sub/byte)](tickets/55-perf-varargs-select-closure-iterators-and-builtin-per-call-o.md): Vararg and builtin fast paths (915d09a)
 - [Perf: io.write flushes per argument; lazy LuaFile buffers and growable StringCache](tickets/59-perf-io-write-flushes-per-argument-lazy-luafile-buffers-and.md): io.write flush removed, lazy buffers; 6x faster writes
 - [Perf: load() compile is quadratic in constants (lazy hash index for constants and names)](tickets/56-perf-load-compile-is-quadratic-in-constants-lazy-hash-index.md): load() quadratic constant lookup fixed; compile metered
+- [Perf: GC bookkeeping scaling (GcState.Close quadratic, weak entries via GCHandle)](tickets/58-perf-gc-bookkeeping-scaling-gcstate-close-quadratic-weak-ent.md): Quadratic Close fixed; GCHandle weak entries
 
 ## Not yet specified
 
