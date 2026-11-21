@@ -226,7 +226,7 @@ internal sealed class LuaCompiler
         if (++_level > MaxLevels) throw LimitError(_fs, "C levels", MaxLevels);
     }
 
-    private LuaException Err(string msg) => _lex.Error(_tok.Kind == Tok.Eof ? $"{msg} near <eof>" : $"{msg} near '{_tok.Text}'", _tok.Line);
+    private LuaException Err(string msg) => _lex.Error(_tok.Kind == Tok.Eof ? $"{msg} near <eof>" : $"{msg} near '{_lex.TextOf(_tok)}'", _tok.Line);
 
     private void Expect(Tok kind, string what)
     {
