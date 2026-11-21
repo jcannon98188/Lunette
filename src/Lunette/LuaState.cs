@@ -98,6 +98,19 @@ public sealed partial class LuaState : IDisposable
         return names[ix];
     }
 
+    /// <summary>The state's <c>math</c> library instance (it owns the random generator), for the in-place <c>math.random</c>.</summary>
+    internal Lib.MathLib? MathRandomSource;
+
+    private LuaValue _mathTypeInteger, _mathTypeFloat;
+
+    /// <summary>The string <c>math.type</c> returns for an integer or a float, interned once per state (the in-place <c>math.type</c> path).</summary>
+    internal LuaValue MathTypeValue(bool integer)
+    {
+        ref LuaValue slot = ref (integer ? ref _mathTypeInteger : ref _mathTypeFloat);
+        if (slot.IsNil) slot = LuaValue.FromString(Strings.FromUtf16(integer ? "integer" : "float"));
+        return slot;
+    }
+
     /// <summary>Whether construction registers the global <paramref name="name"/>: always for a full state, only when allowlisted for a sandboxed one.</summary>
     internal bool Wants(string name) => _construction is null || _construction.IsAllowed(name);
 

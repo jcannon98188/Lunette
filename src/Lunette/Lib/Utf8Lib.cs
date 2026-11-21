@@ -12,12 +12,12 @@ internal static class Utf8Lib
     {
         if (!state.Wants("utf8")) return;
         var lib = new LuaTable();
-        void Add(string name, BuiltinBody body) =>
-            lib.Set(LuaValue.FromString(state.Strings.FromUtf16(name)), LuaValue.FromObject(new BuiltinFunction(body)));
+        void Add(string name, BuiltinBody body, BuiltinKind kind = BuiltinKind.None) =>
+            lib.Set(LuaValue.FromString(state.Strings.FromUtf16(name)), LuaValue.FromObject(new BuiltinFunction(body, kind)));
 
         Add("char", Char);
-        Add("codepoint", CodePoint);
-        Add("len", Len);
+        Add("codepoint", CodePoint, BuiltinKind.Utf8Codepoint);
+        Add("len", Len, BuiltinKind.Utf8Len);
         Add("offset", Offset);
         var strictIter = new BuiltinFunction((st, a) => IterAux(st, a, strict: true));
         var laxIter = new BuiltinFunction((st, a) => IterAux(st, a, strict: false));
@@ -40,7 +40,7 @@ internal static class Utf8Lib
     private static long PosRelat(long pos, long len) => pos >= 0 ? pos : -pos > len ? 0 : len + pos + 1;
 
     /// <summary>Decodes one sequence at <paramref name="at"/>; returns the index after it, or -1 if invalid.</summary>
-    private static int Decode(ReadOnlySpan<byte> s, int at, out uint val, bool strict)
+    internal static int Decode(ReadOnlySpan<byte> s, int at, out uint val, bool strict)
     {
         ReadOnlySpan<uint> limits = [~0u, 0x80, 0x800, 0x10000u, 0x200000u, 0x4000000u];
         uint c = s[at];

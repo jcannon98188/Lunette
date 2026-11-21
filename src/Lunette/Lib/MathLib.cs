@@ -27,7 +27,7 @@ internal sealed class MathLib
         Add("abs", Abs, BuiltinKind.MathAbs);
         Add("ceil", static (_, a) => Round("ceil", a, Math.Ceiling));
         Add("floor", static (_, a) => Round("floor", a, Math.Floor), BuiltinKind.MathFloor);
-        Add("fmod", Fmod);
+        Add("fmod", Fmod, BuiltinKind.MathFmod);
         Add("modf", Modf);
         Add("sqrt", static (_, a) => One(Math.Sqrt(CheckNumber("sqrt", a, 0))), BuiltinKind.MathSqrt);
         Add("exp", static (_, a) => One(Math.Exp(CheckNumber("exp", a, 0))));
@@ -40,11 +40,11 @@ internal sealed class MathLib
         Add("log", Log);
         Add("deg", static (_, a) => One(CheckNumber("deg", a, 0) * (180.0 / Math.PI)));
         Add("rad", static (_, a) => One(CheckNumber("rad", a, 0) * (Math.PI / 180.0)));
-        Add("tointeger", ToInteger);
+        Add("tointeger", ToInteger, BuiltinKind.MathToInteger);
         Add("ult", static (_, a) => One(LuaValue.FromBoolean((ulong)CheckInteger("ult", a, 0) < (ulong)CheckInteger("ult", a, 1))));
         Add("max", static (_, a) => MinMax("max", a, true), BuiltinKind.MathMax);
         Add("min", static (_, a) => MinMax("min", a, false), BuiltinKind.MathMin);
-        Add("random", (_, a) => Random(a));
+        Add("random", (_, a) => Random(a), BuiltinKind.MathRandom);
         Add("randomseed", (_, a) => RandomSeed(a));
         if (hostSeed is var (h1, h2)) SetSeed(h1, h2);
         else SetSeed((ulong)DateTime.UtcNow.Ticks, (ulong)Environment.TickCount64);
@@ -81,7 +81,7 @@ internal sealed class MathLib
     private static LuaValue[] Fmod(LuaState _, ReadOnlySpan<LuaValue> a)
     {
         LuaValue x = CheckNumberValue("fmod", a, 0), y = CheckNumberValue("fmod", a, 1);
-        if (x.IsInteger && y.IsInteger)
+        if (a[0].IsInteger && a[1].IsInteger) // numeric strings take the float path, as in lua_isinteger
         {
             long d = y.AsInteger;
             if ((ulong)d + 1UL <= 1UL)
@@ -134,11 +134,12 @@ internal sealed class MathLib
     {
         if (!state.Wants("math")) return;
         var lib = new MathLib(hostSeed);
+        state.MathRandomSource = lib;
         var table = new LuaTable();
         foreach (var (name, value) in lib.Members)
             table.Set(LuaValue.FromString(state.Strings.FromUtf16(name)), value);
         table.Set(LuaValue.FromString(state.Strings.FromUtf16("type")),
-            LuaValue.FromObject(new BuiltinFunction(MathType)));
+            LuaValue.FromObject(new BuiltinFunction(MathType, BuiltinKind.MathType)));
         state.SetGlobal("math", LuaValue.FromTable(table));
     }
 
@@ -192,6 +193,42 @@ internal sealed class MathLib
         lim |= lim >> 32;
         while ((ran &= lim) > n) ran = NextRand();
         return ran;
+    }
+
+    /// <summary>
+    /// <c>math.random</c> for the in-place call path: 0 arguments, or integer bounds forming a non-empty interval. Returns false having drawn nothing
+    /// (so the ordinary body, which reports the error, draws exactly once) for any other shape.
+    /// </summary>
+    internal bool TryRandomInPlace(int nargs, in LuaValue a0, in LuaValue a1, out LuaValue result)
+    {
+        long low, up;
+        switch (nargs)
+        {
+            case 0:
+                result = LuaValue.FromFloat((NextRand() >> 11) * (0.5 / (1UL << 52)));
+                return true;
+            case 1:
+                if (!a0.IsInteger) goto default;
+                low = 1;
+                up = a0.AsInteger;
+                if (up == 0)
+                {
+                    result = LuaValue.FromInteger(unchecked((long)NextRand()));
+                    return true;
+                }
+                break;
+            case 2:
+                if (!a0.IsInteger || !a1.IsInteger) goto default;
+                low = a0.AsInteger;
+                up = a1.AsInteger;
+                break;
+            default:
+                result = default;
+                return false;
+        }
+        if (low > up) { result = default; return false; }
+        result = LuaValue.FromInteger(unchecked((long)(Project(NextRand(), (ulong)up - (ulong)low) + (ulong)low)));
+        return true;
     }
 
     private LuaValue[] Random(ReadOnlySpan<LuaValue> a)

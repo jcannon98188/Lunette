@@ -15,7 +15,12 @@ internal static partial class Interpreter
     private static Special CallFast(LuaState state, Coroutine co, BuiltinKind kind, int fa, int nargs, int wanted)
     {
         var st = co.Stack;
-        if (nargs == 0) return Special.None;
+        if (nargs == 0)
+        {
+            // math.random() draws without reading an argument; every other kind needs one
+            if (kind != BuiltinKind.MathRandom || state.MathRandomSource is not { } rng0 || !rng0.TryRandomInPlace(0, default, default, out LuaValue r0)) return Special.None;
+            return DeliverOne(st, co, fa, wanted, r0);
+        }
         ref LuaValue a = ref st[fa + 1];
         switch (kind)
         {
@@ -44,16 +49,108 @@ internal static partial class Interpreter
                 return DeliverOne(st, co, fa, wanted, LuaValue.FromInteger(new LuaString(ls).Length));
             case BuiltinKind.StringByte:
             {
-                if (a.Ref is not byte[] bs || nargs > 2) return Special.None;
-                long pos = 1;
-                if (nargs == 2)
+                // byte(s [, i [, j]]) with integer positions and at most 8 results; anything else (floats, strings, huge ranges) is the builtin's
+                if (a.Ref is not byte[] bs || nargs > 3) return Special.None;
+                if (nargs == 2 && st[fa + 2].IsInteger)
+                {
+                    // the common single-character form first
+                    long p1 = st[fa + 2].AsInteger;
+                    var s1 = new LuaString(bs);
+                    if ((ulong)p1 - 1UL < (ulong)s1.Length) return DeliverOne(st, co, fa, wanted, LuaValue.FromInteger(s1.Bytes[(int)p1 - 1]));
+                }
+                long pos = 1, last;
+                if (nargs >= 2)
                 {
                     if (!st[fa + 2].IsInteger) return Special.None;
                     pos = st[fa + 2].AsInteger;
                 }
+                last = pos;
+                if (nargs == 3)
+                {
+                    if (!st[fa + 3].IsInteger) return Special.None;
+                    last = st[fa + 3].AsInteger;
+                }
                 var s = new LuaString(bs);
-                if (pos < 1 || pos > s.Length) return Special.None; // negative positions and misses: the builtin
-                return DeliverOne(st, co, fa, wanted, LuaValue.FromInteger(s.Bytes[(int)pos - 1]));
+                long len = s.Length;
+                if (pos < 0) { if (-pos > len) return Special.None; pos = len + pos + 1; }
+                else if (pos == 0) return Special.None;
+                if (last < 0) { if (-last > len) return Special.None; last = len + last + 1; }
+                else if (last > len) last = len;
+                if (pos > last) return DeliverNone(st, co, fa, wanted);
+                if (last - pos >= 8) return Special.None;
+                int cnt = (int)(last - pos) + 1;
+                if (cnt == 1) return DeliverOne(st, co, fa, wanted, LuaValue.FromInteger(s.Bytes[(int)pos - 1]));
+                if (wanted < 0 && fa + cnt >= st.Length) return Special.None;
+                ReadOnlySpan<byte> bytes = s.Bytes;
+                int copy = wanted < 0 ? cnt : Math.Min(cnt, wanted);
+                for (int j = 0; j < copy; j++) st[fa + j] = LuaValue.FromInteger(bytes[(int)pos - 1 + j]);
+                if (wanted < 0) co.ResumeTop = fa + cnt;
+                else for (int j = copy; j < wanted; j++) st[fa + j] = default;
+                return Special.Done;
+            }
+            case BuiltinKind.StringChar:
+            {
+                if (nargs > 8) return Special.None;
+                for (int j = 1; j <= nargs; j++)
+                {
+                    LuaValue cv = st[fa + j];
+                    if (!cv.IsInteger || (ulong)cv.AsInteger > 255) return Special.None;
+                }
+                LuaString r = LuaString.Allocate(nargs);
+                Span<byte> d = r.WritableBytes;
+                for (int j = 0; j < nargs; j++) d[j] = (byte)st[fa + 1 + j].AsInteger;
+                return DeliverOne(st, co, fa, wanted, LuaValue.FromString(state.Strings.Intern(r)));
+            }
+            case BuiltinKind.MathRandom:
+                if (nargs > 2 || state.MathRandomSource is not { } rng || !rng.TryRandomInPlace(nargs, a, nargs == 2 ? st[fa + 2] : default, out LuaValue rv)) return Special.None;
+                return DeliverOne(st, co, fa, wanted, rv);
+            case BuiltinKind.Utf8Codepoint:
+            {
+                // codepoint(s [, i]) of one position, strict decoding; ranges, lax mode and invalid sequences are the builtin's
+                if (a.Ref is not byte[] us || nargs > 2) return Special.None;
+                ReadOnlySpan<byte> ub = new LuaString(us).Bytes;
+                long up = 1;
+                if (nargs == 2)
+                {
+                    if (!st[fa + 2].IsInteger) return Special.None;
+                    up = st[fa + 2].AsInteger;
+                    if (up < 0) up += ub.Length + 1;
+                }
+                if (up < 1 || up > ub.Length || Lib.Utf8Lib.Decode(ub, (int)up - 1, out uint cp, true) < 0) return Special.None;
+                return DeliverOne(st, co, fa, wanted, LuaValue.FromInteger(cp));
+            }
+            case BuiltinKind.Utf8Len:
+            {
+                if (a.Ref is not byte[] ls8 || nargs != 1) return Special.None;
+                ReadOnlySpan<byte> lb = new LuaString(ls8).Bytes;
+                long cnt8 = 0;
+                for (int at = 0; at < lb.Length; cnt8++)
+                {
+                    if (lb[at] < 0x80) { at++; continue; }
+                    at = Lib.Utf8Lib.Decode(lb, at, out _, true);
+                    if (at < 0) return Special.None; // invalid: nil plus the position, from the builtin
+                }
+                return DeliverOne(st, co, fa, wanted, LuaValue.FromInteger(cnt8));
+            }
+            case BuiltinKind.MathType:
+                if (a.IsInteger) return DeliverOne(st, co, fa, wanted, state.MathTypeValue(true));
+                if (a.IsFloat) return DeliverOne(st, co, fa, wanted, state.MathTypeValue(false));
+                return DeliverOne(st, co, fa, wanted, default);
+            case BuiltinKind.MathToInteger:
+                if (a.IsInteger) return DeliverOne(st, co, fa, wanted, a);
+                if (!a.IsFloat) return Special.None;
+                return DeliverOne(st, co, fa, wanted, LuaNumber.FloatToInteger(a.AsFloat, out long ti) ? LuaValue.FromInteger(ti) : default);
+            case BuiltinKind.MathFmod:
+            {
+                if (nargs < 2 || !a.IsNumber || !st[fa + 2].IsNumber) return Special.None;
+                LuaValue fb = st[fa + 2];
+                if (a.IsInteger && fb.IsInteger)
+                {
+                    long d = fb.AsInteger;
+                    if (d == 0) return Special.None; // "bad argument #2 to 'fmod' (zero)"
+                    return DeliverOne(st, co, fa, wanted, LuaValue.FromInteger(d == -1 ? 0 : a.AsInteger % d));
+                }
+                return DeliverOne(st, co, fa, wanted, LuaValue.FromFloat(LuaNumber.FMod(a.IsInteger ? a.AsInteger : a.AsFloat, fb.IsInteger ? fb.AsInteger : fb.AsFloat)));
             }
             case BuiltinKind.Type:
                 return DeliverOne(st, co, fa, wanted, state.TypeNameValue(a));
@@ -129,6 +226,14 @@ internal static partial class Interpreter
             default:
                 return Special.None;
         }
+    }
+
+    /// <summary>Places "no results" the way CallBuiltin would: nils up to <paramref name="wanted"/>, or the top at <paramref name="fa"/> when it is negative.</summary>
+    private static Special DeliverNone(LuaValue[] st, Coroutine co, int fa, int wanted)
+    {
+        if (wanted < 0) co.ResumeTop = fa;
+        else for (int j = 0; j < wanted; j++) st[fa + j] = default;
+        return Special.Done;
     }
 
     /// <summary>Places a builtin's single result at <paramref name="fa"/> the way CallBuiltin would: padded to <paramref name="wanted"/> with nils, or setting the top when it is negative.</summary>

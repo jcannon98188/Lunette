@@ -12,7 +12,7 @@ public class MathGlobalTests
     [InlineData("print(math.type(1), math.type(1.0), math.type('1'), math.type(nil))", "integer\tfloat\tnil\tnil")]
     [InlineData("print(math.sqrt('16'), math.max('3', 2), math.abs('-4'))", "4.0\t3\t4")]
     [InlineData("print(math.tointeger('8'), math.tointeger(8.5), math.tointeger('x'))", "8\tnil\tnil")]
-    [InlineData("print(math.floor('3.5'), math.fmod('7', '3'), math.ult('1', 2))", "3\t1\ttrue")]
+    [InlineData("print(math.floor('3.5'), math.fmod('7', '3'), math.ult('1', 2))", "3\t1.0\ttrue")]
     [InlineData("print('10' + 5, '0x10' * 2, '3' // 2, 10 .. '', -'2', '2' ^ 2)", "15\t32\t1\t10\t-2\t4.0")]
     [InlineData("print(3.0 | 0, '10' + 1 == 11, math.type('10' + 1), math.type('10' + 1.0))", "3\ttrue\tinteger\tfloat")]
     [InlineData("print(select('#', 1, nil, nil), select(2, 'a', 'b', 'c'), select(-1, 'a', 'b', 'c'))", "3\tb\tc")]

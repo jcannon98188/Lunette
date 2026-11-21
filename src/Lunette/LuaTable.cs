@@ -573,6 +573,28 @@ public sealed partial class LuaTable
         if (n > _arr.Length) Resize(n, _nodes.Length);
     }
 
+    // ---- bulk array access (table.insert/remove/move) ----
+
+    /// <summary>How many consecutive array-part slots start at integer key <paramref name="key"/> and run to the end of the array part (0 when the key is not an array slot).</summary>
+    internal int ArrayRunFrom(long key) => (ulong)key - 1 < (ulong)_arr.Length ? _arr.Length - (int)(key - 1) : 0;
+
+    /// <summary>How many consecutive array-part slots end at integer key <paramref name="key"/> and run down to key 1 (0 when the key is not an array slot).</summary>
+    internal int ArrayRunTo(long key) => (ulong)key - 1 < (ulong)_arr.Length ? (int)key : 0;
+
+    /// <summary>
+    /// The array slots of keys <paramref name="key"/> .. key + <paramref name="count"/> - 1, which the caller has checked lie in the array part
+    /// (<see cref="ArrayRunFrom"/>/<see cref="ArrayRunTo"/>). Border invariant: <c>_limit</c> is only a hint with 0 &lt;= _limit &lt;= _arr.Length, and
+    /// <see cref="Length"/> and <see cref="ArrayIndex"/> are correct for every such value. Reading or writing key k through <see cref="ArrayIndex"/> does
+    /// <c>_limit = max(_limit, k)</c> (k never exceeds _arr.Length there), so touching the keys of this range one by one would leave exactly
+    /// <c>max(_limit, last key)</c>; this does the same in one step and so leaves the table in the state the element-wise loop would have.
+    /// </summary>
+    internal Span<LuaValue> ArraySpan(long key, int count)
+    {
+        long last = key + count - 1;
+        if (last > _limit) _limit = (int)last;
+        return new Span<LuaValue>(_arr, (int)(key - 1), count);
+    }
+
     // ---- length (border) ----
 
     private static bool IsPow2(int x) => (x & (x - 1)) == 0;
