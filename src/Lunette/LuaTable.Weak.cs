@@ -1,4 +1,5 @@
 using System.Runtime;
+using System.Runtime.InteropServices;
 
 namespace Lunette;
 
@@ -8,9 +9,9 @@ internal struct WeakSlot
     public bool InArray;
     public int Index;
     /// <summary>Weak key (key and value both weak, or weak key with a non-collectable value).</summary>
-    public WeakReference? Key;
+    public GCHandle Key;
     /// <summary>Weak value.</summary>
-    public WeakReference? Value;
+    public GCHandle Value;
     /// <summary>Weak key with a collectable value: the value lives only while the key does (ephemeron).</summary>
     public DependentHandle Ephemeron;
     public bool HasEphemeron;
@@ -22,17 +23,45 @@ internal struct WeakSlot
 /// <summary>The entries detached from one weak table; <see cref="Table"/> is weak so a dead table is not kept alive.</summary>
 internal sealed class WeakDetach(WeakReference<LuaTable> table, WeakSlot[] slots)
 {
+    private static long _liveHandles;
+    private int _handles = CountHandles(slots);
+
+    /// <summary>Handles allocated by detached entries and not yet freed, process-wide (a leak check for the tests; zero between windows).</summary>
+    internal static long LiveHandles => Volatile.Read(ref _liveHandles);
+
     public WeakReference<LuaTable> Table { get; } = table;
     public WeakSlot[] Slots { get; } = slots;
 
+    private static int CountHandles(WeakSlot[] slots)
+    {
+        int n = 0;
+        foreach (ref readonly WeakSlot s in slots.AsSpan())
+        {
+            if (s.Key.IsAllocated) n++;
+            if (s.Value.IsAllocated) n++;
+            if (s.HasEphemeron) n++;
+            if (s.HasKeyHandle) n++;
+        }
+        Interlocked.Add(ref _liveHandles, n);
+        return n;
+    }
+
+    /// <summary>Frees every handle of the detached entries; idempotent.</summary>
     public void DisposeHandles()
     {
+        if (_handles == 0) return;
         foreach (ref WeakSlot s in Slots.AsSpan())
         {
-            if (s.HasEphemeron) s.Ephemeron.Dispose();
-            if (s.HasKeyHandle) s.KeyHandle.Dispose();
+            if (s.Key.IsAllocated) s.Key.Free();
+            if (s.Value.IsAllocated) s.Value.Free();
+            if (s.HasEphemeron) { s.Ephemeron.Dispose(); s.HasEphemeron = false; }
+            if (s.HasKeyHandle) { s.KeyHandle.Dispose(); s.HasKeyHandle = false; }
         }
+        Interlocked.Add(ref _liveHandles, -_handles);
+        _handles = 0;
     }
+
+    internal static GCHandle Weak(object? o) => GCHandle.Alloc(o, GCHandleType.Weak);
 }
 
 /// <summary>
@@ -72,7 +101,7 @@ public sealed partial class LuaTable
             for (int i = 0; i < _arr.Length; i++)
             {
                 if (!_arr[i].IsCollectable) continue;
-                slots.Add(new WeakSlot { InArray = true, Index = i, Value = new WeakReference(_arr[i].Ref) });
+                slots.Add(new WeakSlot { InArray = true, Index = i, Value = WeakDetach.Weak(_arr[i].Ref) });
                 _arr[i] = default;
             }
         }
@@ -84,7 +113,7 @@ public sealed partial class LuaTable
                 // An erased entry keeps its key for 'next'; a long string key must not keep its text alive, so hold it weakly.
                 if (nd.Key.Ref is byte[] { Length: > LongStringLength } dead)
                 {
-                    slots.Add(new WeakSlot { Index = n, Key = new WeakReference(dead) });
+                    slots.Add(new WeakSlot { Index = n, Key = WeakDetach.Weak(dead) });
                     nd.Key = DeadKey;
                 }
                 continue;
@@ -97,8 +126,8 @@ public sealed partial class LuaTable
             {
                 if (wv)
                 {
-                    slot.Key = new WeakReference(nd.Key.Ref);
-                    slot.Value = new WeakReference(nd.Value.Ref);
+                    slot.Key = WeakDetach.Weak(nd.Key.Ref);
+                    slot.Value = WeakDetach.Weak(nd.Value.Ref);
                     nd.Value = default;
                 }
                 else if (nd.Value.IsCollectable)
@@ -110,13 +139,13 @@ public sealed partial class LuaTable
                 else
                 {
                     // A string or number value stays in the node; it is cleared afterwards if the key died.
-                    slot.Key = new WeakReference(nd.Key.Ref);
+                    slot.Key = WeakDetach.Weak(nd.Key.Ref);
                 }
                 nd.Key = DeadKey;
             }
             else
             {
-                slot.Value = new WeakReference(nd.Value.Ref);
+                slot.Value = WeakDetach.Weak(nd.Value.Ref);
                 if (nd.Key.Ref is byte[] { Length: > LongStringLength } text)
                 {
                     // A long string key lives only while its weak value does, so a dead entry frees its text in this collection.
@@ -138,7 +167,7 @@ public sealed partial class LuaTable
         {
             if (s.InArray)
             {
-                object? v = s.Value!.Target;
+                object? v = s.Value.Target;
                 if (v is not null) _arr[s.Index] = LuaValue.FromObject(v);
                 continue;
             }
@@ -153,11 +182,11 @@ public sealed partial class LuaTable
                 }
                 continue;
             }
-            if (s.Key is not null)
+            if (s.Key.IsAllocated)
             {
                 object? key = s.Key.Target;
-                object? value = s.Value?.Target;
-                bool valueAlive = s.Value is null || value is not null;
+                object? value = s.Value.IsAllocated ? s.Value.Target : null;
+                bool valueAlive = !s.Value.IsAllocated || value is not null;
                 if (key is not null && valueAlive)
                 {
                     nd.Key = LuaValue.FromObject(key);
@@ -167,7 +196,7 @@ public sealed partial class LuaTable
             }
             else
             {
-                object? value = s.Value!.Target;
+                object? value = s.Value.Target;
                 if (value is not null)
                 {
                     nd.Value = LuaValue.FromObject(value);

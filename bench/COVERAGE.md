@@ -361,3 +361,13 @@ Measured and reverted (no win, code removed):
 Gaps: closure-built iterator stays at 2.7-2.9x, `select` / forwarding / multiple returns at 2.2-2.7x. All of them are bounded by the general Lua call + return cost (2.7x on an empty call, as in `fib`),
 which is outside builtin/vararg handling; getting below 2.5x there needs work on `PushFrame`/`Return`/`newframe` reload, not on varargs. `tests/Lunette.Tests/Ticket55FastPathTests.cs` pins the new in-place paths
 against PUC-derived expectations. `gc.lua:473` (string-key weak table memory growth) fails in the differential chunk run on this machine for the base build as well; unrelated to this change.
+
+## Ticket 58: GC bookkeeping scaling
+
+- **`GcState.Close`** deduplicated its batch with `List.Contains` per registered mark (quadratic). It now uses a `HashSet` (reference equality); `__gc` order (newest marking first), resurrection and `Done` handling are unchanged.
+  Exit/Dispose with live `__gc` objects (WSL, CLI wall incl. ~90 ms startup): 1e5 objects 18.1 s -> 0.29 s, 2e5 objects 170.8 s -> 0.35 s (PUC 35 / 42 ms).
+- **Weak-table windows** hold detached entries in `GCHandle` structs (`GCHandleType.Weak`, short, same semantics as the former `WeakReference`) instead of one finalizable `WeakReference` each; handles are freed
+  in `Restore` (inside `finally`, also when the collection throws) and counted by `WeakDetach.LiveHandles`, which the tests assert returns to zero after each collection and after `Dispose`. 4 weak tables x 1e5 entries,
+  `collectgarbage()`: 95-104 ms -> 88-95 ms per collect (PUC 19 ms); the 30-43% of the prototype did not reproduce on this workload, the gain is mostly fewer finalizable objects.
+- gc-latency (5 runs, median): p99 0.31 -> 0.26, p99.9 1.37 -> 1.14, max 82.9 -> 85.3 ms; macro set within noise.
+- Baseline before the change: `GcTests` 33/33 and `gc.lua` green on the unmodified tree.
