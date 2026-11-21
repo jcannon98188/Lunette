@@ -73,6 +73,7 @@ A pure-managed C# (.NET 11) Lua 5.4 engine and minimal CLI, built to the lua-eng
 - [Perf: load() compile is quadratic in constants (lazy hash index for constants and names)](tickets/56-perf-load-compile-is-quadratic-in-constants-lazy-hash-index.md): load() quadratic constant lookup fixed; compile metered
 - [Perf: GC bookkeeping scaling (GcState.Close quadratic, weak entries via GCHandle)](tickets/58-perf-gc-bookkeeping-scaling-gcstate-close-quadratic-weak-ent.md): Quadratic Close fixed; GCHandle weak entries
 - [Perf: frozen type tags and barrier-free scalar stores (core audit 1)](tickets/61-perf-frozen-type-tags-and-barrier-free-scalar-stores-core-au.md): Frozen tags + barrier-free stores; wrap error bug fixed
+- [Perf: table.insert/remove/move bulk copies and more in-place library forms](tickets/60-perf-table-insert-remove-move-bulk-copies-and-more-in-place.md): Bulk table-lib copies, more in-place builtins
 
 ## Not yet specified
 
